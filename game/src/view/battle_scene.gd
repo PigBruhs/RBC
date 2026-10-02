@@ -1272,6 +1272,12 @@ func _ai_skill(u: Unit, plan: Dictionary) -> void:
 	_push_unit_stats(u)
 	if sid == "carpet_bomb":
 		_start_carpet_bomb(u, aim)
+	elif sid == "grenade_launcher":
+		# 枪榴弹：与玩家同一条生产线（会惊动哨兵、可被击落、落地后 GM 计时爆炸）
+		var gp := Ordnance.make_grenade(u, aim, true)
+		gp.shot.group = "grenade_ai"
+		field.register(gp)
+		_log("%s 投出【枪榴弹】：瞄准 (%.1f, %.1f)，4 个回合后爆炸" % [u.name, aim.x, aim.y])
 	elif sid == "orbital_strike":
 		_spawn_marker(u, aim)
 	else:
