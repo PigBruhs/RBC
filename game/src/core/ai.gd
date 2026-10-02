@@ -241,6 +241,23 @@ static func _plan_skill(ctx: Ctx) -> Dictionary:
 	if me.role == UnitData.Role.RANGED:
 		var ds := Skills.get_def("sentry")
 		if have.has("sentry") and not ds.is_empty() and energy >= int(ds["cost"]) and not ctx.me_has_sentry:
+			# 用户口径：如果我现在处在【敌方投掷手的攻击范围】里，
+			# 而这一回合（连走位都）打不到它 -> 开哨兵自保并反制它接下来的抛射
+			for t0 in ctx.foes:
+				if not t0.is_alive() or t0.role != UnitData.Role.THROWER:
+					continue
+				var dt := manhattan(me.cell, t0.cell)
+				if dt < t0.rng_min or dt > t0.rng_max:
+					continue                       # 它还够不着我
+				var can_me := can_hit_from(me, me.cell, t0.cell)
+				if not can_me:
+					for c in ctx.reachable.keys():
+						if can_hit_from(me, c, t0.cell):
+							can_me = true
+							break
+				if not can_me:
+					return {"action": "skill", "skill": "sentry",
+						"note": "在敌方投掷手 %s 射程内（%d 格）却够不着它 -> 开哨兵" % [t0.name, dt]}
 			for t in ctx.foes:
 				if t.is_alive() and manhattan(me.cell, t.cell) <= me.rng_max + 2:
 					return {"action": "skill", "skill": "sentry",

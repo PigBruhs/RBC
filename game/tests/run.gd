@@ -449,6 +449,48 @@ func _initialize() -> void:
 		print("    距离 %4.1f 格 → 力 %2d / 甲 %2d" % [d, pw, bk])
 		_expect(pw == int(row[1]) and bk == int(row[2]), "破片 %.1f 格伤害 = %d/%d" % [d, row[1], row[2]], fails)
 
+	# ── 弓箭手 AI：在敌方投掷手射程内却够不着它 -> 开哨兵 ──
+	print("\n── 弓箭手哨兵决策 ──")
+	var arch2 := Unit.from_data(by_name["Alette"])            # 射程 1-8，有哨兵
+	var mortar_e := {}
+	for d in UnitData.ENEMIES:
+		if String(d["name"]) == "Airburst mortar (E)":
+			mortar_e = d
+	var thrower_e := Unit.from_data(mortar_e)                # 敌方投掷手
+	thrower_e.cell = Vector2i(30, 30)
+
+	var mk_ctx := func(archer_cell: Vector2i, reach: Dictionary) -> Ai.Ctx:
+		var c := Ai.Ctx.new()
+		c.rng = RngService.new(5)
+		c.me = arch2
+		c.foes = [thrower_e]
+		c.foe_king = null
+		c.reachable = reach
+		c.me_has_sentry = false
+		arch2.cell = archer_cell
+		arch2.energy = arch2.energy_max
+		return c
+	# ① 在投掷手射程内（3-20）、走位也够不着（射程只有 8）-> 开哨兵
+	var far_cell := Vector2i(30, 45)                          # 距离 15
+	var c1: Ai.Ctx = mk_ctx.call(far_cell, {Vector2i(30, 44): true, Vector2i(30, 43): true})
+	var pl1 := Ai.plan(c1)
+	print("    距离 15（打不到）：%s" % pl1.get("note", "-"))
+	_expect(String(pl1.get("action", "")) == "skill" and String(pl1.get("skill", "")) == "sentry",
+		"在敌方投掷手射程内却够不着 -> 开哨兵", fails)
+	# ② 在投掷手射程内、但现位置就能打到它 -> 不应该开哨兵
+	var near_cell := Vector2i(30, 36)                         # 距离 6，在弓手射程 1-8 内
+	var c2: Ai.Ctx = mk_ctx.call(near_cell, {})
+	var pl2 := Ai.plan(c2)
+	print("    距离 6（打得到）：%s" % pl2.get("note", "-"))
+	_expect(String(pl2.get("action", "")) == "attack",
+		"够得着投掷手时应直接打，而不是开哨兵", fails)
+	# ③ 不在投掷手射程内（距离 25 > 20）-> 不因此开哨兵
+	var c3: Ai.Ctx = mk_ctx.call(Vector2i(30, 55), {})
+	var pl3 := Ai.plan(c3)
+	print("    距离 25（它够不着我）：%s" % pl3.get("note", "-"))
+	_expect(not (String(pl3.get("action", "")) == "skill" and String(pl3.get("skill", "")) == "sentry"),
+		"不在敌方投掷手射程内时不该因这条规则开哨兵", fails)
+
 	# ── 萨尼铁塔：枪榴弹 / 圣萨尼 ──
 	print("\n── 萨尼铁塔 ──")
 	var sani := Unit.from_data(by_name["萨尼铁塔"])
