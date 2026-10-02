@@ -1,0 +1,6 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+── AI 自动演算：关卡 arena，种子 5，跑 1 局 ──
+   摆放结束：队列 12 人
+第 1 局：敌方胜｜轮 1｜回合边界 28｜167 秒(真实 28.0)
+── 全部结束：1/1 局都打完了 ──

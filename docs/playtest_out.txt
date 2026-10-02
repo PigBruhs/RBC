@@ -1,0 +1,141 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+
+[0] 放置阶段
+    初始阶段 = 4（PLACE=4）  可放置物种类 = 2
+    木刺 ×4   土堆 ×4（来自 bc_stat.md）
+    放置木刺后：道具数 = 1，剩余 = 3
+    结束放置后：阶段 = 1，队列 = P[Alette, Gerald, Airburst mortar] E[Dummy Thrower, Dummy Melee, Dummy Ranged] next=P
+
+单位数：6
+  Gerald           近战   我方    位置(2, 3) 力41.0 甲26.0 射程0-0
+  Alette           远程   我方    位置(2, 6) 力26.0 甲12.0 射程1-8
+  Airburst mortar  投掷   我方    位置(2, 9) 力36.0 甲5.0 射程3-20
+  Dummy Melee      近战   敌方    位置(10, 3) 力100.0 甲100.0 射程0-0
+  Dummy Ranged     远程   敌方    位置(10, 6) 力100.0 甲100.0 射程0-0
+  Dummy Thrower    投掷   敌方    位置(10, 9) 力100.0 甲100.0 射程0-0
+
+[1] 队列：P[Alette, Gerald, Airburst mortar] E[Dummy Thrower, Dummy Melee, Dummy Ranged] next=P
+    预测序列（阵营）=[0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+
+[2] 行动序列：["Dummy Thrower(E)", "Gerald(P)", "Dummy Melee(E)", "Airburst mortar(P)", "Dummy Ranged(E)", "Alette(P)", "Dummy Thrower(E)", "Gerald(P)", "Dummy Melee(E)", "Airburst mortar(P)", "Dummy Ranged(E)", "Alette(P)", "Dummy Thrower(E)", "Gerald(P)", "Dummy Melee(E)", "Airburst mortar(P)", "Dummy Ranged(E)", "Alette(P)", "Dummy Thrower(E)", "Gerald(P)", "Dummy Melee(E)", "Airburst mortar(P)", "Dummy Ranged(E)", "Alette(P)", "Dummy Thrower(E)", "Gerald(P)", "Dummy Melee(E)", "Airburst mortar(P)", "Dummy Ranged(E)", "Alette(P)", "Dummy Thrower(E)", "Gerald(P)"]
+    玩家 16 次 / 敌方 16 次
+
+[3] 菜单可见 =true 阶段 =1 可达格 =44
+
+[4] 攻击菜单可见 =true
+    蓝(破甲) = 破甲/16   红(力量) = 打力量/0（打不动）
+    假人现在 100 甲，Gerald 41 力：力量按钮 =打力量/0（打不动） disabled=false
+    确认破甲后：Dummy Melee 护甲 100.0 -> 84.0
+    概率区间的红按钮 =打力量/1（20%概率）
+
+[5] 射程 3.0~20.0 格；箭头 1.0~3.0 倍身高
+      拖    0 px -> 力度   0% -> 射程  3.00 格 -> 箭头 1.00 倍身高
+      拖   30 px -> 力度   0% -> 射程  3.00 格 -> 箭头 1.00 倍身高
+      拖  100 px -> 力度  18% -> 射程  3.61 格 -> 箭头 1.07 倍身高
+      拖  200 px -> 力度  45% -> 射程  6.59 格 -> 箭头 1.42 倍身高
+      拖  300 px -> 力度  72% -> 射程 12.05 格 -> 箭头 2.07 倍身高
+      拖  400 px -> 力度 100% -> 射程 20.00 格 -> 箭头 3.00 倍身高
+      拖  700 px -> 力度 100% -> 射程 20.00 格 -> 箭头 3.00 倍身高
+
+[6] 炮击（落点 9,6；落点上的假人物抗 high=80% → 按 40% 计）
+      Dummy Melee      力 100.0->100.0  甲 84.0->72.0
+      Dummy Ranged     力 100.0->84.0  甲 20.0->8.0
+      Dummy Thrower    力 100.0->100.0  甲 100.0->100.0
+      Gerald           力 101.0->88.0  甲 26.0->14.0
+      期望力量伤害 ≈ 9 点（36力-20甲 再按物抗减半的 40% 计）
+
+[6b] 假人死亡后自动满血复活（等 1.2 秒）
+      复活后 力=100.0 甲=100.0 alive=true
+
+[7] 取消选择：selected=<null> 详情=false 行动菜单=false 攻击菜单=false
+
+[8] 队列条：存活 6 -> 图案 10，连线 9
+    顺序：["Airburst mortar", "Airburst mortar", "Dummy Thrower", "Alette", "Dummy Melee", "Gerald", "Dummy Ranged", "Airburst mortar", "Dummy Thrower", "Alette"]
+    窗口内允许重复（循环队列）：["Airburst mortar", "Airburst mortar", "Dummy Thrower", "Alette", "Dummy Melee", "Gerald", "Dummy Ranged", "Airburst mortar", "Dummy Thrower", "Alette"]
+
+[9] 队头 Airburst mortar -> Alette
+
+[10] 回合规则
+    未移动时：休息按钮 disabled =false
+    移动后：has_moved =true 休息按钮 disabled =true 可达格 =0
+    移动后强行点休息：力量 10.0 -> 10.0（应不变）
+    普攻后：active Gerald -> Dummy Melee（回合应自动结束）
+    二级菜单：休息=休息 ｜ 右下角按钮=>>
+
+[11] 高亮与菜单显隐
+    未选人时高亮格数 =0
+    选中且未移动时高亮格数 =57（可达格 57）
+    点普攻后：二级菜单可见 =false 阶段 =2 可攻击格数 =4
+    近战可攻击格数 =4（期望 4）
+    投掷可攻击格数 =419（期望 419，射程 3-20）
+    点普攻（投掷手）后：菜单可见 =false 瞄准中 =true
+
+[12] 远程一回合只打一次
+    Alette 破甲一次后：目标护甲 100.0 -> 95.0；出手瞬间 has_acted=true
+    再打一次：护甲 95.0 -> 95.0（应不变）
+
+[13] 最后一人机制
+    只剩 1 敌 vs 3 玩家 -> 队列 4 步：P[Airburst mortar, Gerald, Alette] E[Dummy Melee] next=P
+    预测序列：["Airburst mortar", "Dummy Melee", "Gerald", "Dummy Melee", "Alette", "Dummy Melee"]
+
+[14] 走路动画
+    路径格子数 =5（起点 + 4 步 = 5）
+    采样 20 次，不同中间位置 11 个，单次最大位移 0.75 格
+    走完停在 (4.50, 8.50)，期望 (4.5, 8.5)
+
+[15] 炮击落点判定（半径 1.5 格）
+    正邻/斜邻/2格外 命中，3格外与对角远处 不命中
+    斜邻格里的 Dummy Melee（甲5、无抗）：力 100.0->64.0 甲 5.0->0.0
+    甲 100 时：力 100.0->100.0（应不变，因为打不动）
+
+[16] 隐藏 Debug 菜单
+    两个 Tab：["关卡栏", "日志", "英雄栏"]
+    编辑框 = 78 个（6 单位 × 13 字段）
+    输入 37：ok=true 力量=37.0
+    输入 abc：ok=false 力量=37.0 输入框=37
+    输入 999999999：ok=true 夹到 99999.0（上限 99999）
+    输入 -5：ok=true 夹到 0
+    力量 0：alive=false 模型可见=false
+    改回 50：ok=true alive=true 模型可见=true
+    Alette 护甲上限=44.0 射击距离=12 物抗=60%
+    重置本行后 射击距离仍为 12
+
+[17] 沙盒道具
+    木刺@(6, 12) 土堆@(7, 12) 阻挡移动格数 = 2
+    目标在木刺后面时 路径=[(4, 4), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (5, 10), (5, 11), (5, 12), (5, 13), (6, 13), (6, 14)]
+    寻路穿过木刺所在格 = false（应为 false）
+    箭矢飞向 (4,8)，木刺在 (4,6)：木刺 40.0 -> 40.0，目标 100.0 -> 100.0
+    弹道上放友军 Gerald：力量 41.0 -> 37.0
+
+[18] 移动选项与二次确认
+    点「移动」后：二级菜单可见=false，可移动格=58
+    第一次点 (5,7)：待确认=move，格子仍是 (5, 5)
+    确认后：已移动到 (5, 7)
+
+[19] 队列交替自检
+    3 人 vs 1 人 -> P[Alette, Gerald, Airburst mortar] E[Dummy Melee] next=P
+    阵营序列 =[0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+
+[20] 连击状态的保持
+    1 vs 1 时：连击=false 队列=P[Gerald] E[Dummy Melee] next=P
+    敌方复活 1 人后：检测到切换=true 连击=false
+      队列 = P[Gerald] E[Dummy Ranged, Dummy Melee] next=P
+    敌方再复活 1 人（变成 1 vs 3）：
+      连击保持 = false
+      队列 = P[Gerald] E[Dummy Ranged, Dummy Thrower, Dummy Melee] next=P
+      孤军 Gerald 在队列里出现 6 次（对面 3 人 -> 应为 3）
+
+[21] 待确认指示
+    点「移动」后：可移动格 = 59（应 > 0，说明高亮存在）
+    待确认标记可见 = true 位置 = (5.5, 0.0, 7.5)
+    标记颜色脉动：(1.0, 0.4931, 0.1, 0.8644)->(1.0, 0.7196, 0.1, 0.9399)
+
+── 共 267 项检查，失败 7 项 ──
+   ❌ 应进入最后一人模式
+   ❌ 孤军应出现在偶数位（孤军→对面1→孤军→对面2…）
+   ❌ 已处于最后一人模式时不应反复重排
+   ❌ 木刺不挡箭：箭应穿过木刺命中后面的目标
+   ❌ 1 vs 2 应进入连击
+   ❌ 对面复活后连击状态必须保持
+   ❌ 孤军次数应等于对面人数

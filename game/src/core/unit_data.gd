@@ -1,0 +1,215 @@
+# ⚠️ 本文件由 tools/make_unit_data.py 从 bc_stat.md 自动生成，请勿手改。
+# 改数值请改 bc_stat.md（表格），然后运行: python tools/make_unit_data.py
+class_name UnitData
+extends RefCounted
+
+enum Role { MELEE, RANGED, THROWER }
+enum Side { PLAYER, ENEMY }
+
+# 投掷瞄准参数：箭头长度 = 身高的 1~3 倍，映射到射程 THROW_RANGE_MIN~MAX 格
+const THROW_RANGE_MIN := 3.0
+const THROW_RANGE_MAX := 20.0
+const UNIT_HEIGHT := 1.0
+const ARROW_LEN_MIN := 1.0
+const ARROW_LEN_MAX := 3.0
+const THROW_DRAG_MIN := 30.0
+const THROW_DRAG_MAX := 400.0
+
+const DUMMY_SKIP_DELAY := 0.5     # 假人回合的停顿（秒）
+const MORTAR_FLIGHT_MAX_SEC := 5.0
+const ARROW_FLIGHT_MAX_SEC := 1.0
+const DUMMY_REVIVE_SEC := 1.2
+
+# 我方角色（来自 bc_stat.md 的「我方角色」表）
+const UNITS := [
+	{
+		"name": "Gerald",
+		"side": Side.PLAYER,
+		"role": Role.MELEE,
+		"power": 82, "armor": 52, "armor_break": 16,
+		"energy_max": 5, "move": 5,
+		"rest_power": 10, "rest_armor": 6, "rest_energy": 2,
+		"pr": 800, "mr": 0,
+		"rng_min": 0, "rng_max": 0,
+		"controllable": false,
+	},
+	{
+		"name": "Alette",
+		"side": Side.PLAYER,
+		"role": Role.RANGED,
+		"power": 52, "armor": 24, "armor_break": 5,
+		"energy_max": 8, "move": 7,
+		"rest_power": 6, "rest_armor": 3, "rest_energy": 2,
+		"pr": 0, "mr": 400,
+		"rng_min": 1, "rng_max": 8,
+		"controllable": false,
+	},
+	{
+		"name": "Airburst mortar",
+		"side": Side.PLAYER,
+		"role": Role.THROWER,
+		"power": 36, "armor": 5, "armor_break": 12,
+		"energy_max": 12, "move": 3,
+		"rest_power": 9, "rest_armor": 1, "rest_energy": 2,
+		"pr": 0, "mr": 0,
+		"rng_min": 3, "rng_max": 20,
+		"controllable": false,
+	},
+	{
+		"name": "老国王",
+		"side": Side.PLAYER,
+		"role": Role.RANGED,
+		"power": 100, "armor": 50, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 15,
+		"controllable": false,
+	},
+	{
+		"name": "公主·左",
+		"side": Side.PLAYER,
+		"role": Role.RANGED,
+		"power": 25, "armor": 0, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 12,
+		"controllable": false,
+	},
+	{
+		"name": "公主·右",
+		"side": Side.PLAYER,
+		"role": Role.RANGED,
+		"power": 25, "armor": 0, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 12,
+		"controllable": false,
+	},
+]
+
+# 敌方角色（来自 bc_stat.md 的「敌方角色」表）
+const ENEMIES := [
+	{
+		"name": "Dummy Melee",
+		"side": Side.ENEMY,
+		"role": Role.MELEE,
+		"power": 200, "armor": 200, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 0, "rng_max": 0,
+		"controllable": false,
+	},
+	{
+		"name": "Dummy Ranged",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 200, "armor": 200, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 0, "rng_max": 0,
+		"controllable": false,
+	},
+	{
+		"name": "Dummy Thrower",
+		"side": Side.ENEMY,
+		"role": Role.THROWER,
+		"power": 100, "armor": 100, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 0, "rng_max": 0,
+		"controllable": false,
+	},
+	{
+		"name": "Gerald (E)",
+		"side": Side.ENEMY,
+		"role": Role.MELEE,
+		"power": 82, "armor": 52, "armor_break": 16,
+		"energy_max": 5, "move": 5,
+		"rest_power": 10, "rest_armor": 6, "rest_energy": 2,
+		"pr": 800, "mr": 0,
+		"rng_min": 0, "rng_max": 0,
+		"controllable": true,
+	},
+	{
+		"name": "Alette (E)",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 52, "armor": 24, "armor_break": 5,
+		"energy_max": 8, "move": 7,
+		"rest_power": 6, "rest_armor": 3, "rest_energy": 2,
+		"pr": 0, "mr": 400,
+		"rng_min": 1, "rng_max": 8,
+		"controllable": true,
+	},
+	{
+		"name": "Airburst mortar (E)",
+		"side": Side.ENEMY,
+		"role": Role.THROWER,
+		"power": 36, "armor": 5, "armor_break": 12,
+		"energy_max": 12, "move": 3,
+		"rest_power": 9, "rest_armor": 1, "rest_energy": 2,
+		"pr": 0, "mr": 0,
+		"rng_min": 3, "rng_max": 20,
+		"controllable": true,
+	},
+	{
+		"name": "老国王 (E)",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 100, "armor": 50, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 15,
+		"controllable": false,
+	},
+	{
+		"name": "公主·左 (E)",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 25, "armor": 0, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 12,
+		"controllable": false,
+	},
+	{
+		"name": "公主·右 (E)",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 25, "armor": 0, "armor_break": 0,
+		"energy_max": 0, "move": 0,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 12,
+		"controllable": false,
+	},
+]
+
+# 可放置物（来自 bc_stat.md 的「可放置物」表）
+# block_move = 阻挡移动；block_ranged = 阻挡远程（投掷手不受阻挡）
+const PLACEABLES := [
+	{
+		"name": "木刺",
+		"w": 1, "h": 1,
+		"power": 40, "armor": 0,
+		"pr": 0, "mr": 1000,
+		"block_move": true, "block_ranged": false,
+		"count": 4,
+	},
+	{
+		"name": "土堆",
+		"w": 1, "h": 1,
+		"power": 20, "armor": 0,
+		"pr": 400, "mr": 1000,
+		"block_move": true, "block_ranged": true,
+		"count": 6,
+	},
+]
