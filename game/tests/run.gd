@@ -598,6 +598,12 @@ func _initialize() -> void:
 			sani_e = d
 	_expect(not sani_e.is_empty() and Skills.skills_for(Unit.from_data(sani_e)).has("grenade_launcher"),
 		"敌方镜像也有【枪榴弹】", fails)
+	# 每个技能的 summary / detail_text 都必须能构造出来（缺字段会当场崩，用户报过一次）
+	for sid in Skills.DEFS.keys():
+		var summ: String = Skills.summary(String(sid))
+		var det: String = Skills.detail_text(String(sid))
+		_expect(summ.length() > 0 and det.length() > 0,
+			"技能 %s 的摘要与说明能正常生成" % String(sid), fails)
 	var gd := Skills.get_def("grenade_launcher")
 	_expect(int(gd["cost"]) == 2, "枪榴弹 2 精力", fails)
 	_expect(int(gd["delay_turns"]) == 4, "落地后 4 个回合爆炸（GM 时钟）", fails)

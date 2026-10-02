@@ -1681,6 +1681,19 @@ func _initialize() -> void:
 	_chk(not heli.tags.has("diving"), "俯冲应完整走完（投弹后返航）")
 	_chk(dummy_v.power_cur < hp_bomb, "投弹应打到目标格半径 3 格内的角色")
 
+	# ── 35. 选技能链路（枪榴弹）：说明文案 + 刷新界面不许崩（用户报过崩溃）──
+	print("\n[35] 枪榴弹选技能链路")
+	_s.active = sani
+	_s._aim_skill_id = "grenade_launcher"
+	_s._skill_info_text = Skills.detail_text("grenade_launcher")
+	_s._refresh_all()
+	var info: String = _s.ui_skill_info()
+	print("    说明文案长度 = %d ｜ 前 40 字：%s" % [info.length(), info.substr(0, mini(40, info.length()))])
+	_chk(info.length() > 0, "选中枪榴弹后应能生成技能说明（不崩）")
+	_chk(int(Skills.get_def("grenade_launcher")["cost"]) == 2, "枪榴弹仍是 2 精力")
+	_s._aim_skill_id = ""
+	_s._skill_info_text = ""
+
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
 		print("✅ v3 试玩链路全部通过")

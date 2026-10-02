@@ -200,13 +200,22 @@ static func detail_text(id: String) -> String:
 		t += "\n　　　触发：敌对角色入界 / 界内移动 ｜ 不分敌我的炮弹飞入"
 		t += "\n　　　反应：射出一支普攻箭（按碰撞判定，可能打空）"
 		return t
-	var ig := int(float(d["shell_ignore_res"]) * 100.0)
+	# 枪榴弹：与轨道空爆共用"投掷"手感，但落地后是延时爆炸的手榴弹（字段完全不同）
+	if bool(d.get("grenade", false)):
+		t += "[color=#ffd866]数值：[/color]射程 %d~%d 格 ｜ 落地后 %d 个回合爆炸" % [
+			int(d.get("range_min", 3)), int(d.get("range_max", 20)), int(d.get("delay_turns", 4))]
+		t += "\n　　　爆炸向 8 个方向各射出一枚破片（破片不分敌我，会伤到自己人）"
+		t += "\n　　　空中阶段按炮弹处理：会惊动哨兵、可能被箭击落"
+		return t
+	# 其余 kind == "marker" 的技能（轨道空爆）：字段一律带默认值，缺字段不再崩
+	var ig := int(float(d.get("shell_ignore_res", 0.5)) * 100.0)
 	t += "[color=#ffd866]数值：[/color]射程 %d~%d 格 ｜ 散布 直径 %.0f 格 ｜ 每发作用 直径 %.0f 格 ｜ 炮弹 %d 发" % [
-		int(d["range_min"]), int(d["range_max"]), float(d["marker_radius"]) * 2.0,
-		float(d["impact_radius"]) * 2.0, int(d["shells"])]
+		int(d.get("range_min", 3)), int(d.get("range_max", 20)),
+		float(d.get("marker_radius", 3.0)) * 2.0,
+		float(d.get("impact_radius", 1.5)) * 2.0, int(d.get("shells", 5))]
 	t += "\n　　　每发 破甲 %d + 力量 %d ｜ 无视 %d%% 物理抗性 ｜ 爆炸半径 %.0f 格 ｜ 每发间隔 %.1f 秒" % [
-		int(d["shell_break"]), int(d["shell_power"]), ig,
-		float(d["impact_radius"]), float(d["shell_gap_sec"])]
+		int(d.get("shell_break", 12)), int(d.get("shell_power", 12)), ig,
+		float(d.get("impact_radius", 1.5)), float(d.get("shell_gap_sec", 0.2))]
 	return t
 
 
