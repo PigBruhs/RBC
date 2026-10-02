@@ -94,8 +94,8 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 [14] 走路动画
     路径格子数 =5（起点 + 4 步 = 5）
     路径 =[(4, 4), (5, 4), (5, 5), (6, 5), (7, 5)]
-    采样 59 次，不同中间位置 56 个，单次最大位移 3.149 格，高度 0.000~0.000
-    速度：平均 2.28 格/秒，中途最大偏离 0.59（要求 2.0 格/秒且匀速）
+    采样 58 次，不同中间位置 55 个，单次最大位移 3.150 格，高度 0.000~0.000
+    速度：平均 2.29 格/秒，中途最大偏离 0.65（要求 2.0 格/秒且匀速）
     走完停在 (7.50, 5.50)，期望 (7.5, 5.5)
 
 [15] 炮击落点判定（半径 1.5 格）
@@ -135,7 +135,7 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 [21] 待确认指示
     点「移动」后：可移动格 = 59（应 > 0，说明高亮存在）
     待确认标记可见 = true 位置 = (5.5, 0.0, 7.5)
-    标记颜色脉动：(1.0, 0.4926, 0.1, 0.8642)->(1.0, 0.7205, 0.1, 0.9402)
+    标记颜色脉动：(1.0, 0.4933, 0.1, 0.8644)->(1.0, 0.7193, 0.1, 0.9398)
 
 [22] 地毯式轰炸
     技能定义：名称=地毯式轰炸 消耗=6 轰炸区=5x7 炮弹=7 发 间隔=0.2s
@@ -214,10 +214,11 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 [33] 枪榴弹与圣萨尼
     落地模型 1 个 ｜ GM 在途 1
     爆炸后场上破片 8 枚 ｜ 模型残留 0
+    爆炸闪光节点 = 有
     队友阵亡：Gerald ｜ 她的标记=false
     圣萨尼之后：队友 alive=true 位置 (23, 23) ｜ 已用标记=true
 
-── 共 390 项检查，失败 0 项 ──
+── 共 391 项检查，失败 0 项 ──
 ✅ v3 试玩链路全部通过
 ERROR: 6 RID allocations of type 'PN13RendererDummy14TextureStorage12DummyTextureE' were leaked at exit.
 ERROR: 24 RID allocations of type 'PN18TextServerAdvanced22ShapedTextDataAdvancedE' were leaked at exit.

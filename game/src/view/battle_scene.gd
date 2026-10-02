@@ -2067,6 +2067,44 @@ func _spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
 	gm.schedule_grenade(cell, caster_name, caster_side, delay)
 
 
+## 球状闪光（用户口径：只要球状闪光，不要红圈）
+## 一次性的发光球体：迅速膨胀 + 淡出，播完自己销毁。
+var _last_flash: Node3D = null
+
+
+func _flash_sphere(center: Vector3, radius: float = 1.5, life: float = 0.38) -> void:
+	var mi := MeshInstance3D.new()
+	var sp := SphereMesh.new()
+	sp.radius = 1.0
+	sp.height = 2.0
+	sp.radial_segments = 20
+	sp.rings = 12
+	mi.mesh = sp
+	mi.position = center
+	mi.scale = Vector3.ONE * (radius * 0.28)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD          # 叠加发光，不是红圈那种贴地圆盘
+	m.albedo_color = Color(1.0, 0.86, 0.45, 0.85)
+	m.emission_enabled = true
+	m.emission = Color(1.0, 0.80, 0.35)
+	m.emission_energy_multiplier = 3.0
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	add_child(mi)
+	_last_flash = mi
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(mi, "scale", Vector3.ONE * radius, life * 0.45)
+	tw.tween_property(m, "albedo_color", Color(1.0, 0.9, 0.6, 0.0), life)
+	tw.tween_property(m, "emission_energy_multiplier", 0.0, life)
+	tw.set_parallel(false)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(mi):
+			mi.queue_free())
+
+
 ## 爆炸：向 8 个方向各射出一枚破片（不分敌我，会伤到自己人）
 func _explode_grenade(p: GameMaster.Pending) -> void:
 	var cell: Vector2i = p.center
@@ -2081,6 +2119,7 @@ func _explode_grenade(p: GameMaster.Pending) -> void:
 	var n: int = int(d.get("fragments", 8))
 	var from := Vector3(float(cell.x) + 0.5, Ordnance.FRAGMENT_HEIGHT, float(cell.y) + 0.5)
 	var base := rng.next_float() * TAU
+	_flash_sphere(Vector3(from.x, 0.55, from.z), 1.5, 0.38)      # 球状闪光（不要红圈）
 	_log("  💥 手榴弹爆炸 (%d, %d)：向 %d 个方向撒出破片" % [cell.x, cell.y, n])
 	for i in n:
 		var ang := base + float(i) * TAU / float(n)

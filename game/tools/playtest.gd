@@ -1607,6 +1607,8 @@ func _initialize() -> void:
 	print("    爆炸后场上破片 %d 枚 ｜ 模型残留 %d" % [frags, _s._grenade_models.size()])
 	_chk(frags == 8, "爆炸应撒出 8 枚破片")
 	_chk(_s._grenade_models.is_empty(), "爆炸后模型应被清掉")
+	print("    爆炸闪光节点 = %s" % ("有" if _s._last_flash != null and is_instance_valid(_s._last_flash) else "无"))
+	_chk(_s._last_flash != null and is_instance_valid(_s._last_flash), "爆炸应有球状闪光（不是红圈）")
 	_s.clear_projectiles()
 	# ③ 圣萨尼：复活最后一个阵亡的队友，每条命一次
 	var mate: Unit = null
