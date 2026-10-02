@@ -35,6 +35,63 @@ const BULLET_HEIGHT := 0.5
 const BULLET_LEN := 0.2
 const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
 
+## ── 37mm 火箭（炮弹类）──────────────────────────────────────────────────────
+## 用户口径：直径 0.37、长 0.7；**飞行速度与飞行时间正相关**（初始 2 格/秒，
+## 飞满 12 格后到上限 6 格/秒）；落地范围直径 2 格；落点同时随机两个方向生成 2 枚破片。
+## 设计稿给出的函数：ds/dt = v(s) = min(6, 2 + s/3)
+##   · 闭式解 t(s) = 3·ln(1 + s/6)     （飞满 12 格 = 3.295837 秒）
+##   · 反解   s(t) = 6·(e^(t/3) − 1)
+##   · 平台段 s = 12 + 6·(t − 3.295837)
+const ROCKET_DIAMETER := 0.37
+const ROCKET_LEN := 0.7
+const ROCKET_R := ROCKET_DIAMETER * 0.5
+const ROCKET_V0 := 2.0
+const ROCKET_VMAX := 6.0
+const ROCKET_RAMP_DIST := 12.0
+const ROCKET_BLAST_R := 1.0          # 落地范围直径 2 格
+const ROCKET_FRAGMENTS := 2
+
+
+static func rocket_t_of_s(s: float) -> float:
+	var d: float = maxf(0.0, s)
+	if d <= ROCKET_RAMP_DIST:
+		return 3.0 * log(1.0 + d / 6.0)
+	return 3.0 * log(3.0) + (d - ROCKET_RAMP_DIST) / ROCKET_VMAX
+
+
+static func rocket_s_of_t(t: float) -> float:
+	var tt: float = maxf(0.0, t)
+	var t_ramp: float = 3.0 * log(3.0)
+	if tt <= t_ramp:
+		return 6.0 * (exp(tt / 3.0) - 1.0)
+	return ROCKET_RAMP_DIST + ROCKET_VMAX * (tt - t_ramp)
+
+
+static func rocket_speed_at(s: float) -> float:
+	return minf(ROCKET_VMAX, ROCKET_V0 + s / (ROCKET_RAMP_DIST / (ROCKET_VMAX - ROCKET_V0)))
+
+
+## 火箭：从 from 飞向 to；总时长 = 解析解 t(s)
+static func make_rocket(caster: Unit, from: Vector3, to: Vector2, ends_turn: bool = true) -> Projectile:
+	var start := Vector2(from.x, from.z)
+	var dist: float = maxf(0.5, start.distance_to(to))
+	var p := Projectile.make(Projectile.KIND_ROCKET, start, to, 1.0)
+	p.dur = maxf(0.05, rocket_t_of_s(dist))
+	p.speed_profile = Projectile.SPEED_ROCKET
+	_config_owner(p, caster)
+	p.y0 = from.y
+	p.y1 = 0.15
+	p.arc_scale = 0.22
+	p.arc_min = 0.3
+	p.arc_max = 2.4
+	p.recalc_apex()
+	p.hit_r = ROCKET_R
+	p.hit_tags = []                      # 不被打掉
+	p.sentry_trigger = false             # 与炮击炮弹一样不惊动哨兵
+	p.shot = _shot(Projectile.KIND_ROCKET, caster, ends_turn, ROCKET_BLAST_R, {}, "")
+	return p
+
+
 const ARROW_TILES_PER_SEC := 6.5     # 箭矢速度（用户口径：8 -> 6 -> 11 -> 6.5 格/秒）
 const GRENADE_HIT_R := 0.16          # 手榴弹空中阶段的碰撞半径
 

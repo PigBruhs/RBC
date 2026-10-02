@@ -1980,6 +1980,11 @@ func _on_proj_landed(p: Projectile) -> void:
 			pass
 		Projectile.KIND_CANNON:
 			pass                              # 加农炮弹打空就是打空，没有爆炸
+		Projectile.KIND_ROCKET:
+			_show_impact(at)                                  # 落点提示（不含红圈也行，这里只是标记）
+			_resolve_blast(sh.caster if sh != null else null, at,
+				sh.opts if sh != null else {}, Ordnance.ROCKET_BLAST_R)
+			_rocket_fragments(sh.caster if sh != null else null, at)
 		Projectile.KIND_GRENADE:
 			_spawn_grenade_model(Vector2i(int(floor(at.x)), int(floor(at.y))), p)
 		Projectile.KIND_FRAGMENT:
@@ -1999,6 +2004,19 @@ func live_projectiles() -> int:
 
 func _proj_collision(p: Projectile) -> Projectile:
 	return null if field == null else field.collision(p)
+
+## 火箭落地：从落点随机两个方向生成 2 枚破片（破片口径与手榴弹一致：不分敌我）
+func _rocket_fragments(caster: Unit, at: Vector2) -> void:
+	var from := Vector3(at.x, Ordnance.FRAGMENT_HEIGHT, at.y)
+	for i in Ordnance.ROCKET_FRAGMENTS:
+		var ang := rng.next_float() * TAU
+		var fp := Ordnance.make_fragment(caster, from, Vector2(cos(ang), sin(ang)), false)
+		fp.hit_self = true
+		fp.shot.group = "rocket_frag"
+		field.register(fp)
+	_log("  🚀 火箭落地 (%.1f, %.1f)：直径 2 格爆炸 + %d 枚破片" % [
+		at.x, at.y, Ordnance.ROCKET_FRAGMENTS])
+
 
 ## ── 枪榴弹：地上的模型 + 4 回合后爆炸出 8 枚破片 ─────────────────────────
 var _grenade_models: Dictionary = {}      # 格 -> Node3D（模型，不可交互）

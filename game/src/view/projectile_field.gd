@@ -85,6 +85,8 @@ func register(p: Projectile) -> void:
 			node = make_fragment_node(parent)
 		Projectile.KIND_BULLET:
 			node = make_bullet_node(parent)
+		Projectile.KIND_ROCKET:
+			node = make_rocket_node(parent)
 	items.append({"p": p, "node": node, "prev": p.pos()})
 
 
@@ -247,6 +249,7 @@ static func kind_cn(kind: String) -> String:
 		Projectile.KIND_CANNON: return "加农炮弹"
 		Projectile.KIND_FRAGMENT: return "破片"
 		Projectile.KIND_BULLET: return "子弹"
+		Projectile.KIND_ROCKET: return "火箭"
 	return "标记球"
 
 
@@ -308,6 +311,52 @@ static func make_shell_node(parent: Node3D) -> Node3D:
 		root.add_child(seg)
 		tail.append(seg)
 	root.set_meta("tail", tail)
+	return root
+
+
+## 火箭：直径 0.37、长 0.7 的圆柱 + 头部半球 + 尾部 4 片三角尾翼（每隔 90° 一片）
+static func make_rocket_node(parent: Node3D) -> Node3D:
+	var root := Node3D.new()
+	parent.add_child(root)
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = Color(0.42, 0.44, 0.48)
+	body_mat.metallic = 0.6
+	body_mat.roughness = 0.35
+	var body := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = Ordnance.ROCKET_R
+	cm.bottom_radius = Ordnance.ROCKET_R
+	cm.height = Ordnance.ROCKET_LEN
+	body.mesh = cm
+	body.rotation_degrees = Vector3(90, 0, 0)          # 躺平 -> 沿飞行方向
+	body.material_override = body_mat
+	root.add_child(body)
+	var nose := MeshInstance3D.new()
+	var hm := SphereMesh.new()
+	hm.radius = Ordnance.ROCKET_R
+	hm.height = Ordnance.ROCKET_R * 2.0
+	hm.is_hemisphere = true
+	nose.mesh = hm
+	nose.position = Vector3(0, 0, Ordnance.ROCKET_LEN * 0.5)
+	nose.rotation_degrees = Vector3(-90, 0, 0)
+	nose.material_override = body_mat
+	root.add_child(nose)
+	var fin_mat := StandardMaterial3D.new()
+	fin_mat.albedo_color = Color(0.30, 0.31, 0.34)
+	for i in 4:
+		var fin := MeshInstance3D.new()
+		var pm := PrismMesh.new()
+		pm.size = Vector3(Ordnance.ROCKET_R * 1.6, Ordnance.ROCKET_R * 1.6, Ordnance.ROCKET_LEN * 0.35)
+		fin.mesh = pm
+		fin.position = Vector3(0, 0, -Ordnance.ROCKET_LEN * 0.35).rotated(
+			Vector3(0, 0, 1), float(i) * TAU / 4.0)
+		var pivot := Node3D.new()
+		pivot.rotation_degrees = Vector3(0, 0, float(i) * 90.0)
+		pivot.add_child(fin)
+		fin.position = Vector3(Ordnance.ROCKET_R, 0, -Ordnance.ROCKET_LEN * 0.35)
+		fin.rotation_degrees = Vector3(90, 0, 0)
+		fin.material_override = fin_mat
+		root.add_child(pivot)
 	return root
 
 

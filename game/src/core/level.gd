@@ -156,7 +156,12 @@ static func respawn_cells(side: int, id: String = "") -> Array:
 ## 这个角色在本场景要等几个回合重生（场景元数据；缺省 10）
 static func respawn_turns(unit_name: String, id: String = "") -> int:
 	var m: Dictionary = def(id).get("respawn_turns", {})
-	return int(m.get(unit_name, GameMaster.HERO_REVIVE_TURNS))
+	if m.has(unit_name):
+		return int(m[unit_name])
+	var base := Unit.base_name(unit_name)          # 敌方镜像 "… (E)" 靠基础名命中
+	if m.has(base):
+		return int(m[base])
+	return GameMaster.HERO_REVIVE_TURNS
 
 
 static func dummy_cells(id: String = "") -> Array:

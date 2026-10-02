@@ -27,12 +27,18 @@ const KIND_CANNON := "cannon"
 const KIND_FRAGMENT := "fragment"  # 破片（箭矢类：无重力、平飞、按距离衰减伤害）
 const KIND_BULLET := "bullet"      # 子弹（萨尼铁塔：箭矢类、无重力、阶梯衰减）
 const KIND_GRENADE := "grenade"    # 枪榴弹（空中=炮弹规则，落地变模型，GM 计时爆炸）
+const KIND_ROCKET := "rocket"      # 37mm 火箭（炮弹类：落地直径 2 格 + 2 枚破片）
+
+## 速度剖面（0 = 匀速；老弹种一律 0，行为逐位不变）
+const SPEED_UNIFORM := 0
+const SPEED_ROCKET := 1            # v(s) = min(6, 2 + s/3)，闭式解见 Ordnance.rocket_*
 
 var id: int = 0
 var kind: String = KIND_SHELL
 var side: int = 0                    # 发射方阵营（只用于显示/日志）
 var owner_name: String = ""
 var owner_unit: Unit = null          # 可能中途阵亡，所以只当弱引用用
+var speed_profile: int = 0            # 速度剖面（见 SPEED_*）
 
 # ── 弹道 ──
 var from: Vector2 = Vector2.ZERO
@@ -105,7 +111,21 @@ func finished() -> bool:
 
 
 ## 水平位置
+## 变速弹种：把归一化进度 t 映射成【已飞距离】（火箭用解析反解；匀速弹种等价于 t*total）
+func flown_dist() -> float:
+	var total := from.distance_to(to)
+	if speed_profile == SPEED_ROCKET:
+		var elapsed: float = clampf(t, 0.0, 1.0) * dur
+		return clampf(Ordnance.rocket_s_of_t(elapsed), 0.0, total)
+	return clampf(t, 0.0, 1.0) * total
+
+
 func pos() -> Vector2:
+	var total := from.distance_to(to)
+	if total <= 0.0001:
+		return to
+	if speed_profile != SPEED_UNIFORM:
+		return from.lerp(to, clampf(flown_dist() / total, 0.0, 1.0))
 	return from.lerp(to, progress())
 
 

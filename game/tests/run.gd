@@ -478,6 +478,48 @@ func _initialize() -> void:
 		_expect(names.has(heli_name) and names.has(heli_name + " (E)"),
 			"%s 场景名单里应有直升机本体与镜像" % lv, fails)
 
+	# ── 火箭（37mm，变速炮弹）──
+	print("\n── 火箭 ──")
+	_expect(Projectile.KIND_ROCKET == "rocket", "火箭是独立弹种", fails)
+	_expect(absf(Ordnance.ROCKET_DIAMETER - 0.37) < 0.001 and absf(Ordnance.ROCKET_LEN - 0.7) < 0.001,
+		"火箭 直径 0.37 / 长 0.7", fails)
+	# 速度函数：v(0)=2、v(12)=6、之后封顶 6；t(12)=3·ln3=3.295837
+	var sp_vals := [[0.0, 2.0], [4.0, 10.0 / 3.0], [8.0, 14.0 / 3.0], [12.0, 6.0], [16.0, 6.0], [32.0, 6.0]]
+	for row3 in sp_vals:
+		var sv := Ordnance.rocket_speed_at(float(row3[0]))
+		_expect(absf(sv - float(row3[1])) < 0.0001, "火箭 %.0f 格处速度 %.4f" % [float(row3[0]), float(row3[1])], fails)
+	_expect(absf(Ordnance.rocket_t_of_s(12.0) - 3.0 * log(3.0)) < 0.0001, "飞满 12 格耗时 3·ln3 ≈ 3.2958 秒", fails)
+	_expect(absf(Ordnance.rocket_s_of_t(Ordnance.rocket_t_of_s(12.0)) - 12.0) < 0.001,
+		"反解与闭式解自洽（s(t(12)) = 12）", fails)
+	# 单调性：距离越远总时长越长，且平均速度介于 2~6 之间
+	var t4 := Ordnance.rocket_t_of_s(4.0)
+	var t40 := Ordnance.rocket_t_of_s(40.0)
+	_expect(t40 > t4 and t4 > 0.0, "总时长随距离单调增加", fails)
+	_expect(4.0 / t4 > 2.0 and 4.0 / t4 < 6.0, "前 4 格平均速度在 2~6 之间", fails)
+	# 工厂：半径/剖面/不惊动哨兵/落地半径 1 格
+	var heli_u := Unit.from_data(heli_d)
+	var rk := Ordnance.make_rocket(heli_u, Vector3(5.5, 2.0, 5.5), Vector2(25.5, 5.5), true)
+	_expect(absf(rk.hit_r - 0.185) < 0.001, "火箭碰撞半径 = 直径的一半", fails)
+	_expect(rk.speed_profile == Projectile.SPEED_ROCKET, "火箭走变速剖面", fails)
+	_expect(rk.hit_tags.is_empty() and not rk.sentry_trigger, "火箭不被打掉、不惊动哨兵", fails)
+	_expect(absf(rk.dur - Ordnance.rocket_t_of_s(20.0)) < 0.001, "总时长 = 解析解 t(20 格)", fails)
+	_expect(absf(float(Ordnance.ROCKET_BLAST_R) - 1.0) < 0.001, "落地范围直径 2 格（半径 1）", fails)
+	_expect(int(Ordnance.ROCKET_FRAGMENTS) == 2, "落地生成 2 枚破片", fails)
+	# 位置映射：t=0 在起点、t=1 在终点，且 t=50% 时飞过的距离 < 一半（前半段更慢）
+	var rk2 := Ordnance.make_rocket(heli_u, Vector3(5.5, 2.0, 5.5), Vector2(25.5, 5.5), true)
+	rk2.t = 0.0
+	var rd0 := rk2.from.distance_to(rk2.pos())
+	rk2.t = 1.0
+	var rd1 := rk2.from.distance_to(rk2.pos())
+	rk2.t = 0.5
+	var rdh := rk2.from.distance_to(rk2.pos())
+	print("    位置映射：t=0 -> %.2f 格 ｜ t=0.5 -> %.2f 格 ｜ t=1 -> %.2f 格" % [rd0, rdh, rd1])
+	_expect(absf(rd0) < 0.001 and absf(rd1 - 20.0) < 0.01, "火箭从起点飞到终点", fails)
+	_expect(rdh < 10.0, "前半段飞得更慢（变速生效）", fails)
+	# 场景元数据：镜像名靠 base_name 命中 25
+	_expect(Level.respawn_turns(heli_name + " (E)", "arena") == 25,
+		"敌方镜像的重生回合数也走场景元数据（base_name 兜底）", fails)
+
 	# ── 弓箭手 AI：在敌方投掷手射程内却够不着它 -> 开哨兵 ──
 	print("\n── 弓箭手哨兵决策 ──")
 	var arch2 := Unit.from_data(by_name["Alette"])            # 射程 1-8，有哨兵
