@@ -15,6 +15,18 @@ const TAG_ORBITAL := "orbital_incoming"
 
 ## 技能定义。key = 技能 id
 const DEFS := {
+	"dive_bomb": {
+		"id": "dive_bomb",
+		"name": "俯冲轰炸",
+		"owner": "俯冲轰炸直升机（不要问那么多）",
+		"cost": 2,                               # 用户没给消耗（口径待定，先用 2）
+		"kind": "instant",                       # 选定格子即进入准备状态，不需要拖拽瞄准
+		"desc": "选定 20 格以内的一格作为目标，直升机进入准备状态。"
+			+ "下一次轮到它的回合时会以 6 格/秒俯冲过去（高度 2 → 0.5 格），"
+			+ "途中受伤可能触发坠机；抵达后停 0.5 秒投下一枚威力巨大的炸弹（半径 3 格、"
+			+ "40 破甲 + 20 力量、不触发哨兵），随后原路返回。",
+		"range_max": 20.0,
+	},
 	"grenade_launcher": {
 		"id": "grenade_launcher",
 		"name": "枪榴弹",

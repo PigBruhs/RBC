@@ -49,6 +49,8 @@ var no_turn: bool = false
 var is_king: bool = false
 ## 出生/复活格（英雄阵亡后回到这里）
 var home_cell: Vector2i = Vector2i(-1, -1)
+## 悬浮高度（直升机 = 2 格，其它 = 0）：只影响表现与弹道起点
+var hover: float = 0.0
 
 # 表现层引用（由 battle_scene 注入）
 var visual: Node3D = null

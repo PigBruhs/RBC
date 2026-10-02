@@ -1626,6 +1626,61 @@ func _initialize() -> void:
 	sani.tags.clear()
 	_chk(not sani.tags.has("holy_sani_used"), "阵亡清状态后她又能用一次（每条命一次）")
 
+	# ── 34. 直升机：坠机被动 + 俯冲轰炸 ──
+	print("\n[34] 直升机")
+	var heli: Unit = null
+	for u in _s.units:
+		if Unit.base_name(u.name).begins_with("俯冲轰炸直升机"): heli = u
+	_chk(heli != null, "场上应有俯冲轰炸直升机")
+	print("    悬浮高度 = %.1f ｜ 力 %d ｜ 甲 %d ｜ 移动 %d ｜ 射程 %d-%d" % [
+		heli.hover, heli.power_cur / 1000, heli.armor_cur / 1000, heli.move, heli.rng_min, heli.rng_max])
+	_chk(absf(heli.hover - 2.0) < 0.001, "悬浮离地 2 格")
+	# 坠机：把力量压到阈值以下，打它一下 -> 触发坠机 + 2.5 格炮击 + 死亡
+	_s.clear_projectiles()
+	var victim_near: Unit = null
+	for u in _s.units:
+		if u.name == "Gerald": victim_near = u
+	victim_near.cell = Vector2i(heli.cell.x + 1, heli.cell.y)
+	victim_near.power_cur = victim_near.power_max
+	victim_near.armor_cur = victim_near.armor_max
+	heli.power_cur = 15 * 1000
+	var hp_crash: int = victim_near.power_cur
+	_s._check_heli_crash(heli)
+	print("    坠机触发：crashing=%s" % heli.tags.has("crashing"))
+	_chk(heli.tags.has("crashing"), "力量低于 21 应进入坠机")
+	await create_timer(0.7).timeout
+	print("    坠机后：直升机 alive=%s ｜ 邻居力量 %d -> %d" % [
+		heli.is_alive(), hp_crash / 1000, victim_near.power_cur / 1000])
+	_chk(not heli.is_alive(), "坠机后直升机死亡")
+	_chk(victim_near.power_cur < hp_crash, "坠机炮击应打到 2.5 格内的角色")
+	_chk(_s.gm.revive_countdown(heli) > 0, "坠机后应进入重生倒计时")
+	# 俯冲轰炸：准备状态 -> AI 可读 -> 俯冲 -> 投弹 -> 返航
+	heli.power_cur = heli.power_max
+	_s._revive_hero(heli)
+	heli.energy = heli.energy_max
+	var dtgt := Vector2i(heli.cell.x + 4, heli.cell.y)
+	_s._cast_dive(heli, dtgt)
+	print("    准备状态：ready=%s 目标=%s ｜ 标识节点=%d" % [
+		Ai.heli_is_ready(heli), Ai.heli_ready_target(heli), _s._dive_markers.size()])
+	_chk(Ai.heli_is_ready(heli) and Ai.heli_ready_target(heli) == dtgt, "应进入准备状态并记住目标格")
+	_chk(_s._dive_markers.size() == 1, "目标格应有地面标识（橙色圆盘）")
+	_chk(Ai.heli_threatens_cell(heli, dtgt + Vector2i(1, 1)), "AI 能算出它威胁到的格子")
+	_chk(Ai.ready_helis([heli]).size() == 1, "AI 能列出正在准备的敌方直升机")
+	_chk(_s._dive_begin(heli), "轮到它的回合应开始俯冲")
+	_chk(heli.tags.has("diving"), "俯冲中要打上 diving 标记")
+	var dummy_v: Unit = victim_near
+	dummy_v.cell = dtgt
+	dummy_v.power_cur = dummy_v.power_max
+	var hp_bomb: int = dummy_v.power_cur
+	for i in 400:
+		_s._dive_tick(1.0 / 60.0)
+		if not heli.tags.has("diving"):
+			break
+	print("    俯冲结束：diving=%s ｜ 目标格角色力量 %d -> %d" % [
+		heli.tags.has("diving"), hp_bomb / 1000, dummy_v.power_cur / 1000])
+	_chk(not heli.tags.has("diving"), "俯冲应完整走完（投弹后返航）")
+	_chk(dummy_v.power_cur < hp_bomb, "投弹应打到目标格半径 3 格内的角色")
+
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
 		print("✅ v3 试玩链路全部通过")

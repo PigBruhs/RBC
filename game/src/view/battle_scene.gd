@@ -217,6 +217,7 @@ var _pending_turn_end := false            # QTE 期间攒下的"该结束回合�
 var _ai_turn := false                     # 正在跑 AI 回合（不弹菜单、不锁操作）
 const KING_FIRE_TURNS := 5                # 老国王每 5 个回合边界开一炮（GM 计时）
 const SENTRY_AIM_BALL_R := 1.0           # 哨兵瞄准球半径（用户口径：1 格）
+const HELI_PREFIX := "俯冲轰炸直升机"     # 悬浮 + 火箭齐射 + 坠机/俯冲都按这个名字前缀识别
 const SANI_NAME := "萨尼铁塔"                # 三连发 + 玩家侧线性散布的角色
 const VOLLEY_COUNT := 3                      # 三连发
 const VOLLEY_GAP := 0.1                      # 每发间隔 100ms（用户口径）                # 老国王每 5 个回合边界开一炮（GM 计时）
@@ -1018,6 +1019,8 @@ func _spawn_units() -> void:
 			u.no_turn = true                     # 公主：没有自己的回合
 		u.cell = Vector2i(int(entry[2]), int(entry[3]))
 		u.home_cell = u.cell
+		if bname.begins_with(HELI_PREFIX):
+			u.hover = float(Level.heli().get("hover_h", 2.0))
 		units.append(u)
 	for u in units:
 		var v := UnitVisual.new()
@@ -1091,6 +1094,10 @@ func _next_turn() -> void:
 			u = other
 		_log("     改为 %s（%s）行动" % [u.name, "我方" if u.side == UnitData.Side.PLAYER else "敌方"])
 	_last_turn_side = u.side
+	if _dive_begin(u):
+		active = u
+		u.begin_turn()
+		return
 	_holy_sani_check(u)
 	active = u
 	u.begin_turn()
@@ -1817,6 +1824,10 @@ func _fire() -> void:
 	# 用户口径：投掷手是"玩家操作决定上下限"的角色，**一定要允许失误**。
 	# 所以这里不再做任何射程/边界检查 —— 打偏、打出界都照打，
 	# 炮弹飞出边界就在边界处消失（保留飞到边界的动画）。
+	# 俯冲轰炸直升机：普攻是【吊射 37mm 火箭】——耗 4 精力、瞄准结果翻倍、8 发分 4 次齐射
+	if Unit.base_name(thrower.name).begins_with(HELI_PREFIX):
+		_rocket_salvo(thrower, fpos)
+		return
 	var sdist: float = Vector2(float(thrower.cell.x) + 0.5, float(thrower.cell.y) + 0.5).distance_to(fpos)
 	_log("%s 投掷，落点 (%d, %d)，射程 %.1f 格，飞行 %.2f 秒" %
 		[thrower.name, landing.x, landing.y, dist, sdist / Ordnance.SHELL_TILES_PER_SEC])
@@ -2016,6 +2027,44 @@ func _rocket_fragments(caster: Unit, at: Vector2) -> void:
 		field.register(fp)
 	_log("  🚀 火箭落地 (%.1f, %.1f)：直径 2 格爆炸 + %d 枚破片" % [
 		at.x, at.y, Ordnance.ROCKET_FRAGMENTS])
+
+
+## ── 直升机的吊射 37mm 火箭：8 发、4 次齐射（左右各一发）、间隔 250ms ──────────
+## 用户口径：普攻需 4 精力；瞄准同投掷手但"结果翻倍"（先前飞 x 格现在飞 2x 格）；
+## 落点 = 以瞄准落点为圆心、半径 4 格圆内随机 8 个点；每发直击范围 = 半径 1 格圆。
+func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
+	var cfg := Level.heli()
+	var cost: int = int(cfg["basic_cost"])
+	if u.energy_points() < cost:
+		return
+	u.spend_energy(cost)
+	_push_unit_stats(u)
+	# 瞄准翻倍：以自身为原点，把拖拽得到的位移 ×2
+	var base := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
+	var dir := fpos - base
+	var doubled := base + dir * float(cfg["aim_mult"])
+	var max_d := float(u.rng_max)
+	if doubled.distance_to(base) > max_d:
+		doubled = base + dir.normalized() * max_d          # 不超过射程 40
+	var scatter := float(cfg["scatter_r"])
+	var rockets := int(cfg["rockets"])
+	var pairs := int(cfg["salvo_pairs"])
+	var gap := float(cfg["salvo_gap"])
+	var per := maxi(1, rockets / maxi(1, pairs))
+	_log("  🚁 %s 吊射火箭：瞄准 (%.1f, %.1f)（原始 (%.1f, %.1f) ×%.0f），%d 发 / %d 次齐射" % [
+		u.name, doubled.x, doubled.y, fpos.x, fpos.y, float(cfg["aim_mult"]), rockets, pairs])
+	for k in pairs:
+		for i in per:
+			var ang := rng.next_float() * TAU
+			var rr := scatter * sqrt(rng.next_float())     # 圆内均匀
+			var aim := doubled + Vector2(cos(ang) * rr, sin(ang) * rr)
+			var last := k == pairs - 1 and i == per - 1
+			var from := Vector3(float(u.cell.x) + 0.5, u.hover + 0.25, float(u.cell.y) + 0.5)
+			var p := Ordnance.make_rocket(u, from, aim, last)
+			p.shot.target = null
+			field.register(p)
+		if k < pairs - 1:
+			await get_tree().create_timer(gap).timeout
 
 
 ## ── 枪榴弹：地上的模型 + 4 回合后爆炸出 8 枚破片 ─────────────────────────
@@ -2387,6 +2436,206 @@ func _start_carpet_bomb(caster: Unit, center: Vector2) -> void:
 
 ## 角色挨打后的统一收尾：闪白、刷新指示器、判定阵亡
 
+## 用户口径：直升机力量低于阈值 -> 坠机（加速下坠 -> 2.5 格炮击 -> 死亡）
+func _check_heli_crash(u: Unit) -> bool:
+	if u == null or not u.is_alive():
+		return false
+	if not Unit.base_name(u.name).begins_with(HELI_PREFIX):
+		return false
+	if u.tags.has("crashing"):
+		return false
+	var cfg := Level.heli()
+	if u.power_cur >= int(cfg["crash_threshold"]) * 1000:
+		return false
+	_start_crash(u)
+	return true
+
+
+func _start_crash(u: Unit) -> void:
+	var cfg := Level.heli()
+	u.tags["crashing"] = true
+	u.tags.erase("diving")
+	u.tags.erase("dive_ready")
+	_dive_clear(u)
+	_log("  💥 %s 力量低于 %d —— 坠机！" % [u.name, int(cfg["crash_threshold"])])
+	var from_h: float = u.visual.position.y if u.visual != null else u.hover
+	var tw := create_tween()
+	tw.tween_property(u.visual, "position:y", 0.0, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func() -> void: _crash_impact(u))
+
+
+func _crash_impact(u: Unit) -> void:
+	var cfg := Level.heli()
+	var center := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
+	_flash_sphere(Vector3(center.x, 0.6, center.y), 2.0, 0.45)
+	var opts := Combat.opts({
+		"power": int(cfg["crash_power"]) * 1000,
+		"armor_break": int(cfg["crash_break"]) * 1000,
+		"ignore_res": float(cfg["crash_res"]),
+		"rng": rng,
+	})
+	_log("  💥 %s 坠机落地 (%.1f, %.1f)：半径 %.1f 格内所有角色吃 %d 力 + %d 破甲（无视 50%% 物抗）" % [
+		u.name, center.x, center.y, float(cfg["crash_r"]),
+		int(cfg["crash_power"]), int(cfg["crash_break"])])
+	var hits: Array = Damage.blast(u, center, float(cfg["crash_r"]), opts, units, placeables,
+		null, u.side, true)
+	for h in hits:
+		if h.unit != null:
+			_log(h.text)
+			_after_damage_to_unit(h.unit)
+	u.power_cur = 0
+	if u.visual != null:
+		u.visual.position.y = 0.0
+	_on_unit_died(u)
+
+
+## ── 俯冲轰炸（主动技能）：准备 -> 俯冲 -> 停 0.5 秒投弹 -> 原路返回 ──────────
+var _dive_markers: Dictionary = {}        # 单位名 -> 目标格地面标识（Node3D）
+var _dive: Dictionary = {}                # 正在俯冲的状态机
+
+
+func _dive_marker(cell: Vector2i, on: bool) -> void:
+	var key := "shared"
+	if on:
+		if _dive_markers.has(key) and is_instance_valid(_dive_markers[key]):
+			(_dive_markers[key] as Node3D).queue_free()
+		var root := Node3D.new()
+		root.position = Vector3(float(cell.x) + 0.5, 0.0, float(cell.y) + 0.5)
+		var disc := MeshInstance3D.new()
+		var cy := CylinderMesh.new()
+		cy.top_radius = 0.42
+		cy.bottom_radius = 0.42
+		cy.height = 0.04
+		disc.mesh = cy
+		disc.position = Vector3(0, 0.05, 0)
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(1.0, 0.62, 0.15, 0.55)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.emission_enabled = true
+		m.emission = Color(1.0, 0.55, 0.1)
+		m.emission_energy_multiplier = 1.4
+		disc.material_override = m
+		root.add_child(disc)
+		add_child(root)
+		_dive_markers[key] = root
+		_log("  🎯 已标记俯冲目标 (%d, %d)（橙色圆盘）—— 下一次轮到它会俯冲过去" % [cell.x, cell.y])
+	elif _dive_markers.has(key):
+		if is_instance_valid(_dive_markers[key]):
+			(_dive_markers[key] as Node3D).queue_free()
+		_dive_markers.erase(key)
+
+
+func _dive_clear(u: Unit) -> void:
+	if u.tags.has("dive_ready"):
+		u.tags.erase("dive_ready")
+	_dive_marker(Vector2i.ZERO, false)
+
+
+## 玩家/AI 选定目标格 -> 进入准备状态
+func _cast_dive(u: Unit, cell: Vector2i) -> void:
+	var d := Skills.get_def("dive_bomb")
+	if u.energy_points() < int(d["cost"]):
+		_log("%s 精力不足，无法使用【%s】" % [u.name, d["name"]])
+		return
+	u.spend_energy(int(d["cost"]))
+	u.tags["dive_ready"] = cell
+	_push_unit_stats(u)
+	_dive_marker(cell, true)
+	_log("  🚁 %s 进入【俯冲准备】：目标 (%d, %d)，距离 %d 格" % [
+		u.name, cell.x, cell.y, Ai.manhattan(u.cell, cell)])
+
+
+## 轮到它的回合：开始俯冲（返回 true 表示本回合由俯冲接管）
+func _dive_begin(u: Unit) -> bool:
+	if not u.tags.has("dive_ready"):
+		return false
+	var cfg := Level.heli()
+	var target: Vector2i = u.tags["dive_ready"]
+	_dive_clear(u)
+	u.tags["diving"] = true
+	_dive = {
+		"u": u, "phase": "out",
+		"from": Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5),
+		"to": Vector2(float(target.x) + 0.5, float(target.y) + 0.5),
+		"t": 0.0, "speed": float(cfg["dive_speed"]), "hold": 0.0,
+	}
+	if u.visual != null:
+		u.visual.position.y = u.hover
+	_log("  🚁 %s 开始俯冲 -> (%d, %d)" % [u.name, target.x, target.y])
+	return true
+
+
+func _dive_tick(delta: float) -> void:
+	if _dive.is_empty():
+		return
+	var u: Unit = _dive["u"]
+	if u == null or not u.is_alive() or not u.tags.has("diving"):
+		_dive = {}
+		return
+	var cfg := Level.heli()
+	var phase := String(_dive["phase"])
+	var from: Vector2 = _dive["from"]
+	var to: Vector2 = _dive["to"]
+	var speed: float = float(_dive["speed"])
+	var total := maxf(0.5, from.distance_to(to))
+	if phase == "out":
+		_dive["t"] = minf(1.0, float(_dive["t"]) + speed * delta / total)
+		var k: float = float(_dive["t"])
+		var pos := from.lerp(to, k)
+		_place_diving(u, pos, lerpf(u.hover, float(cfg["dive_h"]), k))
+		if k >= 1.0:
+			_dive["phase"] = "hold"
+			_dive["hold"] = float(cfg["drop_hold"])
+			_log("  🚁 %s 抵达目标上方，停 %.2f 秒投弹" % [u.name, float(cfg["drop_hold"])])
+	elif phase == "hold":
+		_dive["hold"] = float(_dive["hold"]) - delta
+		if float(_dive["hold"]) <= 0.0:
+			_dive["phase"] = "back"
+			_dive["t"] = 1.0
+			_drop_bomb(u, to)
+	elif phase == "back":
+		_dive["t"] = maxf(0.0, float(_dive["t"]) - speed * delta / total)
+		var k2: float = float(_dive["t"])
+		var pos2 := from.lerp(to, k2)
+		_place_diving(u, pos2, lerpf(u.hover, float(cfg["dive_h"]), k2))
+		if k2 <= 0.0:
+			u.tags.erase("diving")
+			_dive = {}
+			if u.visual != null:
+				u.visual.position.y = u.hover
+			_log("  🚁 %s 返航完成" % u.name)
+			_finish_turn()
+
+
+## 俯冲中的位置同步（格坐标 + 高度）
+func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
+	u.cell = Vector2i(int(floor(pos.x)), int(floor(pos.y)))
+	if u.visual != null:
+		u.visual.position = Vector3(pos.x, h, pos.y)
+	_check_heli_crash(u)          # 用户口径：俯冲期间会受伤、也会触发被动
+
+
+## 投弹：投掷手普攻模型直径翻倍、半径 3 格、40 破甲 + 20 力量、不触发哨兵、下落速度同轨道空爆
+func _drop_bomb(u: Unit, at: Vector2) -> void:
+	var cfg := Level.heli()
+	_flash_sphere(Vector3(at.x, 0.8, at.y), 1.2, 0.3)
+	var opts := Combat.opts({
+		"power": int(cfg["drop_power"]) * 1000,
+		"armor_break": int(cfg["drop_break"]) * 1000,
+		"ignore_res": 0.0,
+		"rng": rng,
+	})
+	_log("  💣 %s 投弹 (%.1f, %.1f)：半径 %.1f 格，%d 破甲 + %d 力量（不触发哨兵）" % [
+		u.name, at.x, at.y, float(cfg["drop_blast_r"]), int(cfg["drop_break"]), int(cfg["drop_power"])])
+	var hits: Array = Damage.blast(u, at, float(cfg["drop_blast_r"]), opts, units, placeables,
+		null, u.side, true)
+	_show_impact(at)
+	for h in hits:
+		if h.unit != null:
+			_log(h.text)
+			_after_damage_to_unit(h.unit)
+
+
 func _after_damage_to_unit(u: Unit) -> void:
 	_flash(u)
 	if u.visual != null:
@@ -2668,6 +2917,7 @@ func _damage_placeable(attacker: Unit, p: Placeable, silent: bool = false) -> vo
 # ══════════════════════════════════════════════════════════════════════════════
 
 func _process(delta: float) -> void:
+	_dive_tick(delta)
 	_tick_color_cycle(delta)
 	_tick_pending_pulse(delta)
 	_sync_menu_position()          # 菜单跟着角色走

@@ -97,6 +97,46 @@ static func score(me: Unit, t: Unit, from: Vector2i, ctx: Ctx) -> float:
 	return s
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 直升机的"准备状态"接口（用户口径：敌方 AI 必须能读到并做决断）
+#   准备状态存在 unit.tags["dive_ready"] = Vector2i（目标格），俯冲中为 tags["diving"]
+# ══════════════════════════════════════════════════════════════════════════════
+const HELI_TAG_READY := "dive_ready"
+const HELI_TAG_DIVING := "diving"
+
+
+## 这个单位是不是正在准备俯冲（返回目标格；没准备返回 (-1,-1)）
+static func heli_ready_target(u: Unit) -> Vector2i:
+	if u == null or not u.tags.has(HELI_TAG_READY):
+		return Vector2i(-1, -1)
+	return u.tags[HELI_TAG_READY]
+
+
+static func heli_is_ready(u: Unit) -> bool:
+	return heli_ready_target(u) != Vector2i(-1, -1)
+
+
+static func heli_is_diving(u: Unit) -> bool:
+	return u != null and u.tags.has(HELI_TAG_DIVING)
+
+
+## 这一格会不会被它的俯冲/投弹波及（投弹半径 3 格）
+static func heli_threatens_cell(u: Unit, cell: Vector2i, blast_r: float = 3.0) -> bool:
+	var t := heli_ready_target(u)
+	if t == Vector2i(-1, -1):
+		return false
+	return manhattan(t, cell) <= int(ceil(blast_r))
+
+
+## 场上所有"正在准备俯冲"的敌对直升机（给弓箭手等 AI 用）
+static func ready_helis(foes: Array[Unit]) -> Array[Unit]:
+	var out: Array[Unit] = []
+	for f in foes:
+		if f.is_alive() and heli_is_ready(f):
+			out.append(f)
+	return out
+
+
 ## 落点：目标格中心 + 普通散步（5 格内准、20 格直径 3）
 static func aim_at(me: Unit, cell: Vector2i, ctx: Ctx) -> Vector2:
 	var ctr := Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5)
@@ -241,6 +281,12 @@ static func _plan_skill(ctx: Ctx) -> Dictionary:
 	if me.role == UnitData.Role.RANGED:
 		var ds := Skills.get_def("sentry")
 		if have.has("sentry") and not ds.is_empty() and energy >= int(ds["cost"]) and not ctx.me_has_sentry:
+			# 用户口径：敌方直升机在准备俯冲、目标格会砸到我 -> 立刻开哨兵反制
+			for h in ready_helis(ctx.foes):
+				if heli_threatens_cell(h, me.cell):
+					return {"action": "skill", "skill": "sentry",
+						"note": "敌方 %s 准备俯冲到 (%d, %d)，会砸到我 -> 开哨兵" % [
+							h.name, heli_ready_target(h).x, heli_ready_target(h).y]}
 			# 用户口径：如果我现在处在【敌方投掷手的攻击范围】里，
 			# 而这一回合（连走位都）打不到它 -> 开哨兵自保并反制它接下来的抛射
 			for t0 in ctx.foes:

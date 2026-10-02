@@ -164,6 +164,38 @@ static func respawn_turns(unit_name: String, id: String = "") -> int:
 	return GameMaster.HERO_REVIVE_TURNS
 
 
+## 直升机的场景参数（缺省值写在代码里，关卡元数据可逐键覆盖）
+const HELI_DEFAULTS := {
+	"hover_h": 2.0,          # 稳定悬浮离地 2 格（移动中也 2 格）
+	"move_mult": 2.0,        # 移动速度为一般角色两倍（数据行里已给 20 格）
+	"basic_cost": 4,         # 普攻（吊射 37mm 火箭）精力消耗
+	"aim_mult": 2.0,         # 瞄准结果翻倍：先前飞 x 格，现在 2x
+	"salvo_pairs": 4,        # 一共四次
+	"salvo_gap": 0.25,       # 每次间隔 250ms
+	"scatter_r": 4.0,        # 落点：半径 4 格圆内随机
+	"rockets": 8,            # 一共 8 发
+	"crash_threshold": 21,   # 力量低于 21 坠机
+	"crash_r": 2.5,          # 坠机炮击半径
+	"crash_power": 20,
+	"crash_break": 40,
+	"crash_res": 0.5,        # 无视 50% 物抗
+	"dive_range": 20.0,      # 俯冲目标格最远 20 格
+	"dive_speed": 6.0,       # 俯冲 6 格/秒
+	"dive_h": 0.5,           # 俯冲终点高度
+	"drop_hold": 0.5,        # 到位后停 0.5 秒投弹
+	"drop_blast_r": 3.0,     # 投弹半径 3 格
+	"drop_power": 20,
+	"drop_break": 40,
+}
+
+
+static func heli(id: String = "") -> Dictionary:
+	var out := HELI_DEFAULTS.duplicate()
+	for k in def(id).get("heli", {}).keys():
+		out[k] = def(id).get("heli")[k]
+	return out
+
+
 static func dummy_cells(id: String = "") -> Array:
 	return def(id).get("dummies", [])
 

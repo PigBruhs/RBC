@@ -114,9 +114,7 @@ func _build_topbar() -> void:
 	hb.add_child(queue_label)
 	hb.add_child(VSeparator.new())
 
-	# 用户口径：删掉"精力 0/1/2/3 投注加伤害"，精力现在只用来付技能费
-	var el := Label.new(); el.text = "精力只用于技能"; hb.add_child(el)
-	hb.add_child(VSeparator.new())
+	# 用户口径：精力不再只是技能费（直升机普攻也耗精力），所以那行说明整行删掉
 
 	var zl := Label.new(); zl.text = "缩放:"; hb.add_child(zl)
 	zoom_slider = HSlider.new()
