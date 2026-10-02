@@ -449,6 +449,35 @@ func _initialize() -> void:
 		print("    距离 %4.1f 格 → 力 %2d / 甲 %2d" % [d, pw, bk])
 		_expect(pw == int(row[1]) and bk == int(row[2]), "破片 %.1f 格伤害 = %d/%d" % [d, row[1], row[2]], fails)
 
+	# ── 俯冲轰炸直升机（第 1 步：数据 + 场景元数据）──
+	print("\n── 直升机 ──")
+	var heli_name := "俯冲轰炸直升机（不要问那么多）"
+	var heli_d := {}
+	for d in UnitData.UNITS:
+		if String(d["name"]) == heli_name:
+			heli_d = d
+	_expect(not heli_d.is_empty(), "花名册里有直升机（名字含全角括号）", fails)
+	_expect(int(heli_d.get("power", 0)) == 41 and int(heli_d.get("armor", 0)) == 12,
+		"直升机 41 力 / 12 甲", fails)
+	_expect(int(heli_d.get("energy_max", 0)) == 6 and int(heli_d.get("move", 0)) == 20,
+		"精力 6 / 移动 20", fails)
+	_expect(int(heli_d.get("role", -1)) == UnitData.Role.THROWER, "套皮投掷手", fails)
+	_expect(int(heli_d.get("rng_min", 0)) == 6 and int(heli_d.get("rng_max", 0)) == 40,
+		"普攻射程 6-40（投掷手的两倍）", fails)
+	_expect(Unit.base_name(heli_name) == heli_name, "全角括号不会被当后缀剥掉", fails)
+	_expect(Unit.base_name(heli_name + " (E)") == heli_name, "敌方镜像用 (E) 后缀", fails)
+	# 场景元数据：竞技场 25 回合重生，测试场缺省 10
+	_expect(Level.respawn_turns(heli_name, "arena") == 25, "皇室竞技场：直升机重生要 25 个回合", fails)
+	_expect(Level.respawn_turns(heli_name, "field") == GameMaster.HERO_REVIVE_TURNS,
+		"测试场没有覆盖 -> 用缺省 10 回合", fails)
+	# 两个场景都要收录（本体 + 镜像）
+	for lv in ["field", "arena"]:
+		var names: Array = []
+		for e in Level.roster(lv):
+			names.append(String(e[0]))
+		_expect(names.has(heli_name) and names.has(heli_name + " (E)"),
+			"%s 场景名单里应有直升机本体与镜像" % lv, fails)
+
 	# ── 弓箭手 AI：在敌方投掷手射程内却够不着它 -> 开哨兵 ──
 	print("\n── 弓箭手哨兵决策 ──")
 	var arch2 := Unit.from_data(by_name["Alette"])            # 射程 1-8，有哨兵

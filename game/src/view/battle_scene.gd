@@ -2431,9 +2431,9 @@ func _on_unit_died(u: Unit) -> void:
 		_clear_unit_states(u)
 		# 英雄（三家将）：用户口径 —— 无限满血满护甲重生，每次等 10 个回合
 		if not u.is_king and not Passives.has(u, "always_sentry"):
-			gm.schedule_hero_revive(u)
-			_log("    %s 将在 %d 个回合后满血复活（位置 %s）" % [
-				u.name, GameMaster.HERO_REVIVE_TURNS, u.home_cell])
+			var rt: int = Level.respawn_turns(u.name)
+			gm.schedule_hero_revive(u, rt)
+			_log("    %s 将在 %d 个回合后满血复活（位置 %s）" % [u.name, rt, u.home_cell])
 
 
 ## 阵亡：清空这个角色的一切状态与 buff（用户口径）

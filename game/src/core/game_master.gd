@@ -463,10 +463,11 @@ const HERO_REVIVE_TURNS := 10
 var revive_at: Dictionary = {}            # Unit -> 到期的 turn_count
 
 
-func schedule_hero_revive(u: Unit) -> void:
+func schedule_hero_revive(u: Unit, turns: int = -1) -> void:
 	if u == null:
 		return
-	revive_at[u] = turn_count + HERO_REVIVE_TURNS
+	var d: int = HERO_REVIVE_TURNS if turns < 0 else turns
+	revive_at[u] = turn_count + d
 
 
 ## 到点该复活的英雄（view 在每个回合边界之后调用）

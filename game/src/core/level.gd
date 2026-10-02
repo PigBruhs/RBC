@@ -39,11 +39,11 @@ const DEFS := {
 		# 本场景有哪些角色、各自在哪（花名册只放定义，场景自己决定出场名单）
 		"roster": [
 			["Gerald", 0, 23, 23], ["Alette", 0, 24, 23], ["Airburst mortar", 0, 25, 23],
-			["萨尼铁塔", 0, 22, 23], ["老国王", 0, 2, 20],
+			["萨尼铁塔", 0, 22, 23], ["俯冲轰炸直升机（不要问那么多）", 0, 21, 23], ["老国王", 0, 2, 20],
 			["公主·左", 0, 5, 25], ["公主·右", 0, 5, 15],
 			["Dummy Melee", 1, 21, 8], ["Dummy Ranged", 1, 21, 11], ["Dummy Thrower", 1, 21, 14],
 			["Gerald (E)", 1, 23, 25], ["Alette (E)", 1, 24, 25], ["Airburst mortar (E)", 1, 25, 25],
-			["萨尼铁塔 (E)", 1, 22, 25], ["老国王 (E)", 1, 45, 20],
+			["萨尼铁塔 (E)", 1, 22, 25], ["俯冲轰炸直升机（不要问那么多） (E)", 1, 21, 25], ["老国王 (E)", 1, 45, 20],
 			["公主·左 (E)", 1, 42, 25], ["公主·右 (E)", 1, 42, 15],
 		],
 		"river_rows": [],                       # 没有河
@@ -65,12 +65,14 @@ const DEFS := {
 		# 本场景有哪些角色、各自在哪（没有假人）
 		"roster": [
 			["Gerald", 0, 9, 18], ["Alette", 0, 10, 18], ["Airburst mortar", 0, 11, 18],
-			["萨尼铁塔", 0, 8, 18], ["老国王", 0, 10, 0],
+			["萨尼铁塔", 0, 8, 18], ["俯冲轰炸直升机（不要问那么多）", 0, 12, 18], ["老国王", 0, 10, 0],
 			["公主·左", 0, 5, 3], ["公主·右", 0, 15, 3],
 			["Gerald (E)", 1, 9, 22], ["Alette (E)", 1, 10, 22], ["Airburst mortar (E)", 1, 11, 22],
-			["萨尼铁塔 (E)", 1, 8, 22], ["老国王 (E)", 1, 10, 40],
+			["萨尼铁塔 (E)", 1, 8, 22], ["俯冲轰炸直升机（不要问那么多） (E)", 1, 12, 22], ["老国王 (E)", 1, 10, 40],
 			["公主·左 (E)", 1, 5, 37], ["公主·右 (E)", 1, 15, 37],
 		],
+		# 场景特有的重生回合数（缺省 = 10）
+		"respawn_turns": {"俯冲轰炸直升机（不要问那么多）": 25},
 		"river_rows": [19, 20, 21],             # 3 格宽、跨满 21 格
 		"bridge_cols": [[4, 5], [15, 16]],      # 左起 4 格 / 右起 4 格，各宽 2
 	},
@@ -149,6 +151,12 @@ static func hero_cells(side: int, id: String = "") -> Array[Vector2i]:
 ## 英雄【重生点】：和出生点同一处（用户口径：出生点也改到河边居中，敌我双方一样）
 static func respawn_cells(side: int, id: String = "") -> Array:
 	return hero_cells(side, id)
+
+
+## 这个角色在本场景要等几个回合重生（场景元数据；缺省 10）
+static func respawn_turns(unit_name: String, id: String = "") -> int:
+	var m: Dictionary = def(id).get("respawn_turns", {})
+	return int(m.get(unit_name, GameMaster.HERO_REVIVE_TURNS))
 
 
 static func dummy_cells(id: String = "") -> Array:

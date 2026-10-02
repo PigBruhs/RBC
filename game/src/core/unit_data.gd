@@ -99,6 +99,17 @@ const UNITS := [
 		"rng_min": 1, "rng_max": 24,
 		"controllable": false,
 	},
+	{
+		"name": "俯冲轰炸直升机（不要问那么多）",
+		"side": Side.PLAYER,
+		"role": Role.THROWER,
+		"power": 41, "armor": 12, "armor_break": 0,
+		"energy_max": 6, "move": 20,
+		"rest_power": 9, "rest_armor": 1, "rest_energy": 2,
+		"pr": 0, "mr": 0,
+		"rng_min": 6, "rng_max": 40,
+		"controllable": false,
+	},
 ]
 
 # 敌方角色（来自 bc_stat.md 的「敌方角色」表）
@@ -211,6 +222,17 @@ const ENEMIES := [
 		"rest_power": 8, "rest_armor": 1, "rest_energy": 2,
 		"pr": 0, "mr": 0,
 		"rng_min": 1, "rng_max": 24,
+		"controllable": true,
+	},
+	{
+		"name": "俯冲轰炸直升机（不要问那么多） (E)",
+		"side": Side.ENEMY,
+		"role": Role.THROWER,
+		"power": 41, "armor": 12, "armor_break": 0,
+		"energy_max": 6, "move": 20,
+		"rest_power": 9, "rest_armor": 1, "rest_energy": 2,
+		"pr": 0, "mr": 0,
+		"rng_min": 6, "rng_max": 40,
 		"controllable": true,
 	},
 ]
