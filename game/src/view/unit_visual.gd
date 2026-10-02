@@ -170,6 +170,10 @@ func _build_model() -> void:
 		_build_dummy(body_mat, dark_mat, metal_mat)
 		return
 	var bname := Unit.base_name(unit.name)
+	# 俯冲轰炸直升机（不要问那么多）：用独立模型文件 HeliModel 搭的机身 + 旋翼
+	if bname.begins_with("俯冲轰炸直升机"):
+		HeliModel.build(self, _faction_color())
+		return
 	# 萨尼铁塔：远程造型 + 背上背一根医疗拐杖（用户口径）
 	if bname == "萨尼铁塔":
 		_build_ranged(body_mat, dark_mat, metal_mat)
