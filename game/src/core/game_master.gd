@@ -183,6 +183,48 @@ func cancel_pending_for(caster_name: String) -> void:
 			pending.remove_at(i)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 阵亡顺序（圣萨尼要用）：GM 记录谁先死，萨尼铁塔的回合开始时取"最后一个阵亡的队友"
+# ══════════════════════════════════════════════════════════════════════════════
+var death_order: Array[String] = []
+
+
+func note_death(u: Unit) -> void:
+	if u == null:
+		return
+	death_order.append(u.name)
+	if death_order.size() > 32:
+		death_order = death_order.slice(death_order.size() - 32)
+
+
+## 最后一个阵亡的、可操作的队友（不含公主/国王/假人/沙盒）
+func last_dead_teammate(side: int, units: Array[Unit]) -> Unit:
+	var by_name: Dictionary = {}
+	for u in units:
+		by_name[u.name] = u
+	for i in range(death_order.size() - 1, -1, -1):
+		var nm: String = death_order[i]
+		if not by_name.has(nm):
+			continue
+		var u2: Unit = by_name[nm]
+		if u2.side == side and u2.has_turn() and not u2.is_alive() and not u2.is_king:
+			return u2
+	return null
+
+
+## 手榴弹排程：delay 个回合边界后到期（时钟由 GM 负责）
+func schedule_grenade(center: Vector2i, caster_name: String, caster_side: int,
+		delay: int, skill_id: String = "grenade") -> void:
+	var p := Pending.new()
+	p.skill_id = skill_id
+	p.caster_name = caster_name
+	p.caster_side = caster_side
+	p.center = center
+	p.ticks = 0
+	p.delay = delay
+	pending.append(p)
+
+
 ## 清除某个角色的哨兵（阿莱特的下一回合开始时调用）
 func clear_sentry_for(u: Unit) -> void:
 	if u == null:

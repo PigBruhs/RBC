@@ -15,6 +15,21 @@ const TAG_ORBITAL := "orbital_incoming"
 
 ## 技能定义。key = 技能 id
 const DEFS := {
+	"grenade_launcher": {
+		"id": "grenade_launcher",
+		"name": "枪榴弹",
+		"owner": "萨尼铁塔",                     # 她本人与敌方镜像都有
+		"cost": 2,
+		"kind": "marker",                        # 与投掷手同款：拖拽瞄准 + 抛物线
+		"grenade": true,                         # 但落下去的是手榴弹（不召唤炮击）
+		"desc": "朝指定地点抛出一枚手榴弹。空中阶段按炮弹处理：会惊动哨兵、可被箭击落。"
+			+ "落地后只是模型（不可交互），4 个回合后爆炸，向 8 个方向各射出一枚破片，"
+			+ "破片不分敌我（会伤到自己人）。",
+		"range_min": 3.0,                        # 与投掷手完全一致
+		"range_max": 20.0,
+		"delay_turns": 4,                        # GM 计时：4 个回合边界后爆炸
+		"fragments": 8,                          # 一共 8 枚破片
+	},
 	"orbital_strike": {
 		"id": "orbital_strike",
 		"name": "轨道空爆打击",

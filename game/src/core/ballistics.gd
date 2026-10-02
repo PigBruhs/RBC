@@ -31,7 +31,7 @@ static func placeable_block_mode(pl: Placeable, kind: String) -> int:
 		# 木刺 block_ranged=false -> 不拦；土堆 block_ranged=true -> 一定拦
 		# （用户强调：不看箭矢是否"碰撞"到它，只看是否从它上空飞过）
 		return Block.ALWAYS if pl.block_ranged else Block.NEVER
-	# 炮弹 / 召唤球：抛物线，土堆挡不住
+	# 炮弹 / 召唤球 / 手榴弹：抛物线，土堆挡不住
 	return Block.NEVER
 
 

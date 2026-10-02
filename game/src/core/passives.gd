@@ -15,6 +15,15 @@ class_name Passives
 extends RefCounted
 
 const DEFS := {
+	## 用户口径：每条命一次，轮到她的回合时立刻复活"她回合前最后一个阵亡的可操作队友"
+	"holy_sani": {
+		"name": "圣萨尼",
+		"desc": "每条命一次：轮到萨尼铁塔的回合时，立即复活她回合开始前最后一个阵亡的可操作队友"
+			+ "（公主、老国王、沙盒元素不算）。",
+		"per": "own_turn",
+		"revive": true,
+		"uses_per_life": 1,
+	},
 	"arrow_deflect": {
 		"name": "箭矢弹反",
 		"keys": ["q", "w", "e", "a", "s", "d"],   # 每次提示从这 6 个键里随机取一个
@@ -52,6 +61,7 @@ const BY_NAME := {
 	"Alette": ["arrow_focus"],
 	"老国王": ["cannon_ai"],
 	"公主": ["always_sentry"],
+	"萨尼铁塔": ["holy_sani"],
 }
 
 ## 职业 -> 被动 id 列表（投掷手都有装填）

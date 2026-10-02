@@ -125,6 +125,41 @@ func _add_mesh(node: Node3D, mesh: Mesh, pos: Vector3, rot: Vector3, mat: Materi
 	return mi
 
 
+## 萨尼铁塔的医疗拐杖：竖杆 + 腋下横托 + 底部圆垫，斜背在身后
+func _build_crutch() -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.78, 0.79, 0.82)
+	mat.metallic = 0.5
+	mat.roughness = 0.35
+	var shaft := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.022
+	cm.bottom_radius = 0.022
+	cm.height = 0.86
+	shaft.mesh = cm
+	shaft.position = Vector3(-0.16, 0.55, -0.20)
+	shaft.rotation_degrees = Vector3(0, 0, 16)
+	shaft.material_override = mat
+	add_child(shaft)
+	var pad := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.16, 0.05, 0.09)
+	pad.mesh = bm
+	pad.position = Vector3(-0.28, 0.96, -0.20)
+	pad.rotation_degrees = Vector3(0, 0, 16)
+	pad.material_override = mat
+	add_child(pad)
+	var foot := MeshInstance3D.new()
+	var fm := CylinderMesh.new()
+	fm.top_radius = 0.045
+	fm.bottom_radius = 0.045
+	fm.height = 0.03
+	foot.mesh = fm
+	foot.position = Vector3(-0.04, 0.02, -0.20)
+	foot.material_override = mat
+	add_child(foot)
+
+
 func _build_model() -> void:
 	var base := _faction_color()
 	var body_mat := _mat(base)
@@ -135,6 +170,11 @@ func _build_model() -> void:
 		_build_dummy(body_mat, dark_mat, metal_mat)
 		return
 	var bname := Unit.base_name(unit.name)
+	# 萨尼铁塔：远程造型 + 背上背一根医疗拐杖（用户口径）
+	if bname == "萨尼铁塔":
+		_build_ranged(body_mat, dark_mat, metal_mat)
+		_build_crutch()
+		return
 	# 老国王：披甲的人 + 王冠 + 身前一门悬空加农炮
 	if bname == "老国王":
 		_build_melee(body_mat, dark_mat, metal_mat)

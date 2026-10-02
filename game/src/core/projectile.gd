@@ -26,6 +26,7 @@ const KIND_MARKER := "marker"    # 轨道标记召唤球
 const KIND_CANNON := "cannon"
 const KIND_FRAGMENT := "fragment"  # 破片（箭矢类：无重力、平飞、按距离衰减伤害）
 const KIND_BULLET := "bullet"      # 子弹（萨尼铁塔：箭矢类、无重力、阶梯衰减）
+const KIND_GRENADE := "grenade"    # 枪榴弹（空中=炮弹规则，落地变模型，GM 计时爆炸）
 
 var id: int = 0
 var kind: String = KIND_SHELL
@@ -54,6 +55,8 @@ var sentry_trigger: bool = false     # 进射界要不要惊动哨兵
 ## 弹反箭例外：它的 owner_unit 是【原射手】（用来算伤害），但物理上是从杰拉尔德身上
 ## 出手的，所以要跳过的是杰拉尔德而不是射手 —— 否则永远打不回射手身上。
 var ignore_unit: Unit = null
+## 破片要能打到自己人（含自伤）：true = 命中判定不跳过任何人
+var hit_self: bool = false
 
 # ── 状态 ──
 var alive: bool = true

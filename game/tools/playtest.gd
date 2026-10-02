@@ -1578,6 +1578,52 @@ func _initialize() -> void:
 		for b2 in bad.slice(0, 5):
 			print("    ❌ 提示类日志：%s" % b2)
 
+	# ── 33. 枪榴弹（落地成模型 + GM 计时 + 8 枚破片）与圣萨尼 ──
+	print("\n[33] 枪榴弹与圣萨尼")
+	_s.clear_projectiles()
+	var sani: Unit = null
+	for u in _s.units:
+		if u.name == "萨尼铁塔": sani = u
+	_chk(sani != null, "场上应有萨尼铁塔")
+	# ① 落地：地上出现模型 + GM 开始计时
+	var grn := Ordnance.make_grenade(sani, Vector2(6.5, 6.5), true)
+	_s._spawn_grenade_model(Vector2i(6, 6), grn)
+	print("    落地模型 %d 个 ｜ GM 在途 %d" % [_s._grenade_models.size(), _s.gm.pending.size()])
+	_chk(_s._grenade_models.has(Vector2i(6, 6)), "手榴弹落地应留下模型（不可交互）")
+	_chk(_s.gm.pending.size() == 1 and String(_s.gm.pending[0].skill_id) == "grenade",
+		"GM 应开始 4 回合倒计时")
+	# ② 4 个回合边界后爆炸 -> 8 枚破片
+	var gcell := Vector2i(6, 6)
+	for i in 4:
+		for p in _s.gm.dispatch_turn_boundary():
+			if String(p.skill_id) == "grenade":
+				_s._explode_grenade(p)
+	var frags := 0
+	for it in _s.field.items:
+		var pp: Projectile = it["p"]
+		if pp.kind == Projectile.KIND_FRAGMENT and pp.alive:
+			frags += 1
+			_chk(pp.hit_self, "手榴弹破片必须能打自己人（hit_self）") if frags == 1 else null
+	print("    爆炸后场上破片 %d 枚 ｜ 模型残留 %d" % [frags, _s._grenade_models.size()])
+	_chk(frags == 8, "爆炸应撒出 8 枚破片")
+	_chk(_s._grenade_models.is_empty(), "爆炸后模型应被清掉")
+	_s.clear_projectiles()
+	# ③ 圣萨尼：复活最后一个阵亡的队友，每条命一次
+	var mate: Unit = null
+	for u in _s.units:
+		if u.name == "Gerald": mate = u
+	mate.power_cur = 0
+	_s._on_unit_died(mate)
+	print("    队友阵亡：%s ｜ 她的标记=%s" % [mate.name, sani.tags.has("holy_sani_used")])
+	_s._holy_sani_check(sani)
+	print("    圣萨尼之后：队友 alive=%s 位置 %s ｜ 已用标记=%s" % [
+		mate.is_alive(), mate.cell, sani.tags.has("holy_sani_used")])
+	_chk(mate.is_alive() and mate.power_cur == mate.power_max, "圣萨尼应立即复活最后一个阵亡的队友")
+	_chk(sani.tags.has("holy_sani_used"), "每条命只能触发一次")
+	# 第二条命：阵亡清状态 -> 标记被清掉，可以再用
+	sani.tags.clear()
+	_chk(not sani.tags.has("holy_sani_used"), "阵亡清状态后她又能用一次（每条命一次）")
+
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
 		print("✅ v3 试玩链路全部通过")

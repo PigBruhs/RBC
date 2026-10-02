@@ -1091,6 +1091,7 @@ func _next_turn() -> void:
 			u = other
 		_log("     改为 %s（%s）行动" % [u.name, "我方" if u.side == UnitData.Side.PLAYER else "敌方"])
 	_last_turn_side = u.side
+	_holy_sani_check(u)
 	active = u
 	u.begin_turn()
 	_turn_just_finished = null            # 新回合开始，解除幂等保护
@@ -1408,6 +1409,8 @@ func _gm_step() -> void:
 				_log("  [GM] 第 %d 次回合边界：老国王的加农炮到点" % gm.turn_count)
 				_fire_cannon_ai(u, false)
 	for p in due:
+		if p.skill_id == "grenade":
+			_explode_grenade(p)
 		if p.skill_id == "orbital_strike":
 			_log("  [GM] ☄ %s 的轨道火力到点，暂停回合开始覆盖" % p.caster_name)
 			_set_gm_busy(true)
@@ -1768,7 +1771,24 @@ func _fire() -> void:
 		_start_carpet_bomb(thrower, fpos)
 		return
 
-	# ── 技能②：投出轨道标记召唤球（手感与普攻完全一致，出界/被击落则作废）──
+	# ── 技能②：枪榴弹（萨尼铁塔）：手感与投掷手一致，出界/被击落则作废 ──
+	if skill_id != "" and bool(Skills.get_def(skill_id).get("grenade", false)):
+		var dg := Skills.get_def(skill_id)
+		if thrower.energy_points() < int(dg["cost"]):
+			return
+		thrower.spend_energy(int(dg["cost"]))
+		thrower.has_acted = true
+		thrower.has_moved = true
+		_push_unit_stats(thrower)
+		var gid := "grenade_%d" % Time.get_ticks_msec()
+		var gp := Ordnance.make_grenade(thrower, fpos, true)
+		gp.shot.group = gid
+		field.register(gp)
+		_log("%s 投出【%s】：落点 (%d, %d)，%d 个回合后爆炸" % [
+			thrower.name, dg["name"], landing.x, landing.y, int(dg["delay_turns"])])
+		return
+
+	# ── 技能③：投出轨道标记召唤球（手感与普攻完全一致，出界/被击落则作废）──
 	if skill_id != "":
 		var ds := Skills.get_def(skill_id)
 		if thrower.energy_points() < int(ds["cost"]):
@@ -1833,7 +1853,7 @@ func _fire_skill_at(sh: Ordnance.Shot, fpos: Vector2) -> void:
 
 func _arrow_hit_check(p: Projectile, prev: Vector3, cur: Vector3) -> Dictionary:
 	# 跳过谁：默认是自己的箭不打自己；弹反箭跳过的是"出手位置的那个人"（杰拉尔德）
-	var skip: Unit = p.ignore_unit if p.ignore_unit != null else p.owner_unit
+	var skip: Unit = null if p.hit_self else (p.ignore_unit if p.ignore_unit != null else p.owner_unit)
 	# ① 角色（细圆柱判定；沿线采样，保证不漏）。判定半径用这一发自己的身体半径
 	#    （箭矢 0.075 / 加农炮弹 0.25）
 	var u := Targeting.arrow_body_hit_seg(prev, cur, skip, units, UNIT_BODY_R, p.hit_r)
@@ -1954,6 +1974,8 @@ func _on_proj_landed(p: Projectile) -> void:
 			pass
 		Projectile.KIND_CANNON:
 			pass                              # 加农炮弹打空就是打空，没有爆炸
+		Projectile.KIND_GRENADE:
+			_spawn_grenade_model(Vector2i(int(floor(at.x)), int(floor(at.y))), p)
 		Projectile.KIND_FRAGMENT:
 			pass                              # 破片打空就是打空
 		Projectile.KIND_BULLET:
@@ -1971,6 +1993,111 @@ func live_projectiles() -> int:
 
 func _proj_collision(p: Projectile) -> Projectile:
 	return null if field == null else field.collision(p)
+
+## ── 枪榴弹：地上的模型 + 4 回合后爆炸出 8 枚破片 ─────────────────────────
+var _grenade_models: Dictionary = {}      # 格 -> Node3D（模型，不可交互）
+
+
+## 落地后立一个手榴弹模型（椭球 + 顶部削平长方体 + 经纬线凹槽），并让 GM 开始计时
+func _spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
+	var sh: Ordnance.Shot = p.shot
+	var d: Dictionary = Skills.get_def("grenade_launcher")
+	var delay: int = int(d.get("delay_turns", 4))
+	var caster_name := p.owner_name
+	var caster_side: int = p.side
+	if _grenade_models.has(cell) and is_instance_valid(_grenade_models[cell]):
+		(_grenade_models[cell] as Node3D).queue_free()
+	var root := Node3D.new()
+	root.position = Vector3(float(cell.x) + 0.5, 0.0, float(cell.y) + 0.5)
+	add_child(root)
+	# 椭球主体
+	var body := MeshInstance3D.new()
+	var sp := SphereMesh.new()
+	sp.radius = 0.20
+	sp.height = 0.40
+	body.mesh = sp
+	body.scale = Vector3(1.0, 0.85, 1.0)
+	body.position = Vector3(0, 0.17, 0)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.30, 0.34, 0.24)
+	m.roughness = 0.6
+	body.material_override = m
+	root.add_child(body)
+	# 顶部削平 -> 长方体
+	var cap := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.13, 0.09, 0.13)
+	cap.mesh = bm
+	cap.position = Vector3(0, 0.35, 0)
+	var cm := StandardMaterial3D.new()
+	cm.albedo_color = Color(0.22, 0.25, 0.18)
+	cap.material_override = cm
+	root.add_child(cap)
+	# 经纬线凹槽：3 圈纬线 + 4 条经线（细圆环近似）
+	var gm2 := StandardMaterial3D.new()
+	gm2.albedo_color = Color(0.12, 0.14, 0.10)
+	for i in 3:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.185
+		tm.outer_radius = 0.205
+		ring.mesh = tm
+		ring.position = Vector3(0, 0.06 + float(i) * 0.11, 0)
+		ring.material_override = gm2
+		root.add_child(ring)
+	for j in 4:
+		var mer := MeshInstance3D.new()
+		var tm2 := TorusMesh.new()
+		tm2.inner_radius = 0.185
+		tm2.outer_radius = 0.205
+		mer.mesh = tm2
+		mer.rotation_degrees = Vector3(90, 0, float(j) * 45.0)
+		mer.position = Vector3(0, 0.17, 0)
+		mer.material_override = gm2
+		root.add_child(mer)
+	_grenade_models[cell] = root
+	_log("  💣 手榴弹落地 (%d, %d)：%d 个回合后爆炸（%s 投出）" % [
+		cell.x, cell.y, delay, caster_name])
+	gm.schedule_grenade(cell, caster_name, caster_side, delay)
+
+
+## 爆炸：向 8 个方向各射出一枚破片（不分敌我，会伤到自己人）
+func _explode_grenade(p: GameMaster.Pending) -> void:
+	var cell: Vector2i = p.center
+	if _grenade_models.has(cell) and is_instance_valid(_grenade_models[cell]):
+		(_grenade_models[cell] as Node3D).queue_free()
+	_grenade_models.erase(cell)
+	var caster: Unit = null
+	for u in units:
+		if u.name == p.caster_name:
+			caster = u
+	var d: Dictionary = Skills.get_def("grenade_launcher")
+	var n: int = int(d.get("fragments", 8))
+	var from := Vector3(float(cell.x) + 0.5, Ordnance.FRAGMENT_HEIGHT, float(cell.y) + 0.5)
+	var base := rng.next_float() * TAU
+	_log("  💥 手榴弹爆炸 (%d, %d)：向 %d 个方向撒出破片" % [cell.x, cell.y, n])
+	for i in n:
+		var ang := base + float(i) * TAU / float(n)
+		var dir := Vector2(cos(ang), sin(ang))
+		var fp := Ordnance.make_fragment(caster, from, dir, false)
+		fp.hit_self = true               # 用户口径：破片有友伤与自伤
+		fp.shot.group = "grenade_frag"
+		field.register(fp)
+
+
+## ── 圣萨尼：她的回合开始时，复活"她回合前最后一个阵亡的可操作队友"，每条命一次 ──
+func _holy_sani_check(u: Unit) -> void:
+	if u == null or not Passives.has(u, "holy_sani"):
+		return
+	if u.tags.has("holy_sani_used"):
+		return
+	var mate := gm.last_dead_teammate(u.side, units)
+	if mate == null:
+		return
+	u.tags["holy_sani_used"] = true
+	_log("  ✨ %s 触发【圣萨尼】：立即复活队友 %s" % [u.name, mate.name])
+	_revive_hero(mate)
+
 
 ## 破片：箭矢类平飞弹（无重力、离地 0.5），伤害随飞行距离衰减
 func _spawn_fragment(caster: Unit, from: Vector3, dir: Vector2) -> Projectile:
@@ -2255,6 +2382,7 @@ func _on_unit_died(u: Unit) -> void:
 		_log("  ☠ %s 阵亡" % u.name)
 		u.visual.visible = false
 		# 用户口径：**阵亡清除一切 buff 与状态**（哨兵警戒不保留、蓄势清零、挂起的技能作废）
+		gm.note_death(u)          # 阵亡顺序（圣萨尼要用）
 		_clear_unit_states(u)
 		# 英雄（三家将）：用户口径 —— 无限满血满护甲重生，每次等 10 个回合
 		if not u.is_king and not Passives.has(u, "always_sentry"):

@@ -36,6 +36,8 @@ const BULLET_LEN := 0.2
 const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
 
 const ARROW_TILES_PER_SEC := 6.5     # 箭矢速度（用户口径：8 -> 6 -> 11 -> 6.5 格/秒）
+const GRENADE_HIT_R := 0.16          # 手榴弹空中阶段的碰撞半径
+
 const CANNON_TILES_PER_SEC := 12.0   # 加农炮弹速度（用户口径）
 const CANNON_RANGE := 15.0           # 加农炮最大射程（格）
 const CANNON_R := 0.25               # 加农炮弹半径（直径 0.5 格）
@@ -121,11 +123,31 @@ const SENTRY_POWER_MULT := 1.0
 const SENTRY_FIRE_INTERVAL_REF := 0.25
 
 
+## 枪榴弹：空中阶段按【炮弹】处理（惊动哨兵、可被箭击落），落地后由 GM 计时爆炸
+static func make_grenade(caster: Unit, to: Vector2, ends_turn: bool) -> Projectile:
+	var from := _cell_center(caster)
+	var p := Projectile.make(Projectile.KIND_GRENADE, from, to,
+		maxf(0.25, from.distance_to(to) / SHELL_TILES_PER_SEC))
+	_config_owner(p, caster)
+	p.hit_r = GRENADE_HIT_R
+	p.hit_tags = ["arrow"]                # 可以被箭击落
+	p.sentry_trigger = true               # 会惊动哨兵
+	p.arc_scale = 0.55
+	p.arc_min = 1.0
+	p.arc_max = 4.0
+	p.recalc_apex()
+	p.shot = _shot(Projectile.KIND_GRENADE, caster, ends_turn, 0.0, {}, "")
+	return p
+
+
 ## 子弹：从 from 沿 dir 平飞（无重力），32 格后消失
 static func make_bullet(caster: Unit, from: Vector3, to: Vector2,
 		ends_turn: bool = true) -> Projectile:
 	var start := Vector2(from.x, from.z)
-	var p := Projectile.make(Projectile.KIND_BULLET, start, to, 1.0)
+	# 瞄准点只决定【方向】：弹道一直飞到 32 格才消失（用户口径）
+	var dir := (to - start)
+	dir = dir.normalized() if dir.length() > 0.001 else Vector2.RIGHT
+	var p := Projectile.make(Projectile.KIND_BULLET, start, start + dir * BULLET_MAX_DIST, 1.0)
 	p.set_speed(BULLET_TILES_PER_SEC)
 	_config_owner(p, caster)
 	p.y0 = BULLET_HEIGHT

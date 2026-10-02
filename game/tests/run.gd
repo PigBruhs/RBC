@@ -449,6 +449,78 @@ func _initialize() -> void:
 		print("    距离 %4.1f 格 → 力 %2d / 甲 %2d" % [d, pw, bk])
 		_expect(pw == int(row[1]) and bk == int(row[2]), "破片 %.1f 格伤害 = %d/%d" % [d, row[1], row[2]], fails)
 
+	# ── 萨尼铁塔：枪榴弹 / 圣萨尼 ──
+	print("\n── 萨尼铁塔 ──")
+	var sani := Unit.from_data(by_name["萨尼铁塔"])
+	_expect(int(by_name["萨尼铁塔"]["power"]) == 26 and int(by_name["萨尼铁塔"]["armor"]) == 5,
+		"萨尼铁塔 26 力 / 5 甲", fails)
+	_expect(int(by_name["萨尼铁塔"]["move"]) == 6 and int(by_name["萨尼铁塔"]["energy_max"]) == 4,
+		"移动 6 / 精力 4", fails)
+	_expect(int(by_name["萨尼铁塔"]["armor_break"]) == 8, "破甲 8", fails)
+	_expect(Skills.skills_for(sani).has("grenade_launcher"), "她有【枪榴弹】", fails)
+	_expect(not Skills.skills_for(Unit.from_data(by_name["Alette"])).has("grenade_launcher"),
+		"枪榴弹只有萨尼铁塔有", fails)
+	var sani_e := {}
+	for d in UnitData.ENEMIES:
+		if String(d["name"]) == "萨尼铁塔 (E)":
+			sani_e = d
+	_expect(not sani_e.is_empty() and Skills.skills_for(Unit.from_data(sani_e)).has("grenade_launcher"),
+		"敌方镜像也有【枪榴弹】", fails)
+	var gd := Skills.get_def("grenade_launcher")
+	_expect(int(gd["cost"]) == 2, "枪榴弹 2 精力", fails)
+	_expect(int(gd["delay_turns"]) == 4, "落地后 4 个回合爆炸（GM 时钟）", fails)
+	_expect(int(gd["fragments"]) == 8, "爆炸出 8 枚破片", fails)
+	_expect(absf(float(gd["range_max"]) - 20.0) < 0.01 and absf(float(gd["range_min"]) - 3.0) < 0.01,
+		"射程与投掷手一致（3-20）", fails)
+	_expect(Passives.has(sani, "holy_sani"), "她有【圣萨尼】", fails)
+	var hs := Passives.def("holy_sani")
+	_expect(bool(hs.get("revive", false)) and int(hs.get("uses_per_life", 0)) == 1,
+		"圣萨尼：每条命一次、用于复活", fails)
+	# 子弹阶梯（同时作用于破甲与力量）
+	for row2 in [[0.0, 1.0], [12.0, 1.0], [12.1, 0.6], [16.0, 0.6], [16.1, 0.2], [24.0, 0.2], [24.1, 0.0]]:
+		_expect(absf(Damage.bullet_mult(float(row2[0])) - float(row2[1])) < 0.001,
+			"子弹 %.1f 格倍率 = %.0f%%" % [float(row2[0]), float(row2[1]) * 100.0], fails)
+	var bp := Ordnance.make_bullet(sani, Vector3(5.5, 0.5, 5.5), Vector2(6.5, 5.5), true)
+	_expect(absf(bp.dur * Ordnance.BULLET_TILES_PER_SEC - Ordnance.BULLET_MAX_DIST) < 0.05,
+		"子弹 12 格/秒，32 格消失", fails)
+	_expect(absf(bp.y0 - 0.5) < 0.001 and bp.apex <= 0.001, "子弹无重力、离地 0.5 格", fails)
+	_expect(bp.hit_tags.is_empty() and not bp.sentry_trigger, "子弹是箭矢类：不会被击落、不惊动哨兵", fails)
+	# 线性散布：12 格 -> 1 格
+	_expect(absf(Spread.linear_radius(12.0) - 1.0) < 0.001, "玩家侧散布 12 格 = 1 格半径", fails)
+	_expect(absf(Spread.linear_radius(6.0) - 0.5) < 0.001, "线性：6 格 = 0.5 格", fails)
+	# 手榴弹：空中按炮弹（能被击落、惊动哨兵）
+	var gr := Ordnance.make_grenade(sani, Vector2(9.5, 9.5), true)
+	_expect(gr.hit_tags.has("arrow") and gr.sentry_trigger, "枪榴弹空中=炮弹：会被击落、惊动哨兵", fails)
+	_expect(gr.kind == Projectile.KIND_GRENADE, "枪榴弹是独立类型", fails)
+	# 破片自伤：hit_self 关掉"跳过自己"
+	var fr2 := Ordnance.make_fragment(sani, Vector3(3.5, 0.5, 3.5), Vector2(1, 0))
+	_expect(not fr2.hit_self, "默认破片不打自己", fails)
+	fr2.hit_self = true
+	_expect(fr2.hit_self, "手榴弹破片可以打自己（用户口径）", fails)
+	# GM：阵亡顺序 + 圣萨尼取人 + 手榴弹排程
+	var gmh := GameMaster.new()
+	var mate := Unit.from_data(by_name["Alette"])
+	var other := Unit.from_data(by_name["Airburst mortar"])
+	var king2 := Unit.from_data(by_name["老国王"])
+	king2.is_king = true
+	king2.no_turn = true
+	other.power_cur = 0
+	gmh.note_death(other)
+	mate.power_cur = 0
+	gmh.note_death(mate)
+	var pool: Array[Unit] = [mate, other, king2]
+	_expect(gmh.last_dead_teammate(UnitData.Side.PLAYER, pool) == mate,
+		"圣萨尼取【最后一个阵亡】的队友", fails)
+	gmh.note_death(king2)
+	_expect(gmh.last_dead_teammate(UnitData.Side.PLAYER, pool) == mate,
+		"老国王不算可复活队友（要跳过它取上一个）", fails)
+	gmh.schedule_grenade(Vector2i(4, 4), "萨尼铁塔", UnitData.Side.PLAYER, 4)
+	var due_g: Array = []
+	for i in 4:
+		due_g = gmh.dispatch_turn_boundary()
+	_expect(due_g.size() == 1 and String(due_g[0].skill_id) == "grenade",
+		"手榴弹 4 个回合边界后到期（GM 计时）", fails)
+
 	# ── 关卡：测试场 + 皇室竞技场 ──
 	print("\n── 关卡 ──")
 	_expect(Level.ids().size() == 2 and Level.ids().has("field") and Level.ids().has("arena"),
