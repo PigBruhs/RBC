@@ -1635,6 +1635,12 @@ func _initialize() -> void:
 	print("    悬浮高度 = %.1f ｜ 力 %d ｜ 甲 %d ｜ 移动 %d ｜ 射程 %d-%d" % [
 		heli.hover, heli.power_cur / 1000, heli.armor_cur / 1000, heli.move, heli.rng_min, heli.rng_max])
 	_chk(absf(heli.hover - 2.0) < 0.001, "悬浮离地 2 格")
+	# 用户报过：直升机会不断往下掉（待机浮动 Tween 每帧把 y 拉回 0）——这里跑一段时间看它稳不稳
+	var y0: float = heli.visual.position.y
+	await create_timer(1.4).timeout
+	var y1: float = heli.visual.position.y
+	print("    悬浮高度：起始 %.3f -> 1.4 秒后 %.3f" % [y0, y1])
+	_chk(absf(y0 - 2.0) < 0.01 and absf(y1 - 2.0) < 0.01, "悬浮高度必须稳定在 2 格（不受重力影响）")
 	# 坠机：把力量压到阈值以下，打它一下 -> 触发坠机 + 2.5 格炮击 + 死亡
 	_s.clear_projectiles()
 	var victim_near: Unit = null

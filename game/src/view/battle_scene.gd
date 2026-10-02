@@ -2760,7 +2760,7 @@ func _revive_hero(u: Unit) -> void:
 		target = u.home_cell
 	u.cell = target
 	if u.visual != null:
-		u.visual.position = Vector3(float(target.x) + 0.5, 0.0, float(target.y) + 0.5)
+		u.visual.position = Vector3(float(target.x) + 0.5, u.hover, float(target.y) + 0.5)
 		u.visual.update_orb()
 	_log("    %s 复活：状态已清空（阵亡时清掉的哨兵警戒等不会带回来）" % u.name)
 	_log("  ♻ %s 复活（力%s 甲%s 精力%s）→ 回到 %s" % [

@@ -56,8 +56,11 @@ var _cycling: bool = false               # 脚下环是否正在彩色流动（�
 func setup(u: Unit) -> void:
 	unit = u
 	u.visual = self
-	position = Vector3(float(u.cell.x) + 0.5, 0.0, float(u.cell.y) + 0.5)
-	_base_y = position.y
+	# 悬浮单位（直升机）基准高度就是悬浮高度：**不受重力影响**，
+	# 只有俯冲/坠机才会改它的 y（改高度的代码走 HeliFx / battle_scene）
+	var h: float = maxf(0.0, u.hover)
+	position = Vector3(float(u.cell.x) + 0.5, h, float(u.cell.y) + 0.5)
+	_base_y = h
 	_build_model()
 	_build_orb()
 	_build_label()
@@ -70,6 +73,10 @@ func setup(u: Unit) -> void:
 ## 用"播完再起一段"的方式循环，不用 set_loops()（Godot 4.7 会报 Infinite loop detected）
 func _start_idle() -> void:
 	_stop_idle()
+	# 悬浮单位不播待机浮动：否则 Tween 每帧把 y 拉回 0，直升机就会"不断往下掉"
+	if unit != null and unit.hover > 0.0:
+		position.y = unit.hover
+		return
 	_idle_tween = _make_idle_tween()
 
 
