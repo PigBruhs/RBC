@@ -2926,6 +2926,17 @@ func _damage_placeable(attacker: Unit, p: Placeable, silent: bool = false) -> vo
 
 func _process(delta: float) -> void:
 	_dive_tick(delta)
+	_tick_heli_fx(delta)
+
+
+## 直升机的每帧表现（悬浮高度 / 旋翼自转 / 俯冲姿态）—— 队友交付的 HeliFx
+## 只对直升机调用，其它单位零开销（HeliFx.tick 内部第一行就返回）
+func _tick_heli_fx(delta: float) -> void:
+	for u in units:
+		if u == null or u.visual == null:
+			continue
+		if Unit.base_name(u.name).begins_with(HELI_PREFIX):
+			HeliFx.tick(u.visual, u, delta)
 	_tick_color_cycle(delta)
 	_tick_pending_pulse(delta)
 	_sync_menu_position()          # 菜单跟着角色走
