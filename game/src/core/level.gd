@@ -36,6 +36,16 @@ const DEFS := {
 			"player": [Vector2i(23, 23), Vector2i(24, 23), Vector2i(25, 23)],
 			"enemy": [Vector2i(23, 25), Vector2i(24, 25), Vector2i(25, 25)],
 		},
+		# 本场景有哪些角色、各自在哪（花名册只放定义，场景自己决定出场名单）
+		"roster": [
+			["Gerald", 0, 23, 23], ["Alette", 0, 24, 23], ["Airburst mortar", 0, 25, 23],
+			["萨尼铁塔", 0, 22, 23], ["老国王", 0, 2, 20],
+			["公主·左", 0, 5, 25], ["公主·右", 0, 5, 15],
+			["Dummy Melee", 1, 21, 8], ["Dummy Ranged", 1, 21, 11], ["Dummy Thrower", 1, 21, 14],
+			["Gerald (E)", 1, 23, 25], ["Alette (E)", 1, 24, 25], ["Airburst mortar (E)", 1, 25, 25],
+			["萨尼铁塔 (E)", 1, 22, 25], ["老国王 (E)", 1, 45, 20],
+			["公主·左 (E)", 1, 42, 25], ["公主·右 (E)", 1, 42, 15],
+		],
 		"river_rows": [],                       # 没有河
 		"bridge_cols": [],
 	},
@@ -52,10 +62,26 @@ const DEFS := {
 			"player": [Vector2i(9, 18), Vector2i(10, 18), Vector2i(11, 18)],
 			"enemy": [Vector2i(9, 22), Vector2i(10, 22), Vector2i(11, 22)],
 		},
+		# 本场景有哪些角色、各自在哪（没有假人）
+		"roster": [
+			["Gerald", 0, 9, 18], ["Alette", 0, 10, 18], ["Airburst mortar", 0, 11, 18],
+			["萨尼铁塔", 0, 8, 18], ["老国王", 0, 10, 0],
+			["公主·左", 0, 5, 3], ["公主·右", 0, 15, 3],
+			["Gerald (E)", 1, 9, 22], ["Alette (E)", 1, 10, 22], ["Airburst mortar (E)", 1, 11, 22],
+			["萨尼铁塔 (E)", 1, 8, 22], ["老国王 (E)", 1, 10, 40],
+			["公主·左 (E)", 1, 5, 37], ["公主·右 (E)", 1, 15, 37],
+		],
 		"river_rows": [19, 20, 21],             # 3 格宽、跨满 21 格
 		"bridge_cols": [[4, 5], [15, 16]],      # 左起 4 格 / 右起 4 格，各宽 2
 	},
 }
+
+
+## 本场景的出场名单：[角色名, 阵营(0我方/1敌方), x, y]
+## 花名册（UnitData.UNITS/ENEMIES）只放"定义"，场景决定"谁出场、站哪"——
+## 所以不是每个场景都得有所有角色。
+static func roster(id: String = "") -> Array:
+	return def(id).get("roster", [])
 
 
 static func ids() -> Array[String]:

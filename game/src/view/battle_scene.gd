@@ -993,40 +993,27 @@ func _resolve_shell_impact(p: GameMaster.Pending, pos: Vector2, d: Dictionary) -
 			_after_damage_to_placeable(h.placeable)
 
 func _spawn_units() -> void:
-	var data: Array = []
-	data.append_array(UnitData.UNITS)
-	data.append_array(UnitData.ENEMIES)
-	# 出生点全部来自【当前关卡】：国王在宽边中央、公主在国王前 3 格左右各 5 格、
-	# 三个英雄在两公主之间的固定三格（复活也回这里），假人站关卡给的位置。
-	var dummies: Array = Level.dummy_cells()
-	var dum_i := 0
-	var hero_i := {UnitData.Side.PLAYER: 0, UnitData.Side.ENEMY: 0}
-	var pad_i := {UnitData.Side.PLAYER: 0, UnitData.Side.ENEMY: 0}
-	for d in data:
-		var u := Unit.from_data(d)
+	# 用户口径：**场景解耦** —— 花名册（UnitData.UNITS/ENEMIES）只存"定义"，
+	# 由【当前关卡的 roster】决定本场景有哪些角色、各站哪一格。
+	var defs: Dictionary = {}
+	for d in UnitData.UNITS:
+		defs[String(d["name"])] = d
+	for d in UnitData.ENEMIES:
+		defs[String(d["name"])] = d
+	var roster: Array = Level.roster()
+	for entry in roster:
+		var nm := String(entry[0])
+		if not defs.has(nm):
+			_log("[关卡] 名单里的 %s 不在花名册里，跳过" % nm)
+			continue
+		var u := Unit.from_data(defs[nm])
 		var bname := Unit.base_name(u.name)
-		var side := u.side
 		if bname == "老国王":
 			u.is_king = true
-			u.no_turn = true                     # 用户口径：老国王不进队列，改由 GM 每 5 回合开一炮
-			u.cell = Level.king_cell(side)
+			u.no_turn = true                     # 老国王不进队列，由 GM 每 5 回合开一炮
 		elif Passives.has(u, "always_sentry"):
 			u.no_turn = true                     # 公主：没有自己的回合
-			var pads: Array = Level.pad_cells(side)
-			var k: int = mini(int(pad_i[side]), pads.size() - 1)
-			u.cell = pads[k]
-			pad_i[side] = int(pad_i[side]) + 1
-		elif u.name.begins_with("Dummy"):
-			# 假人只出现在给了假人点位的关卡（用户口径：竞技场没有假人）
-			if dummies.is_empty():
-				continue
-			u.cell = dummies[dum_i % dummies.size()]
-			dum_i += 1
-		else:
-			var hs: Array = Level.hero_cells(side)
-			var k2: int = mini(int(hero_i[side]), hs.size() - 1)
-			u.cell = hs[k2]
-			hero_i[side] = int(hero_i[side]) + 1
+		u.cell = Vector2i(int(entry[2]), int(entry[3]))
 		u.home_cell = u.cell
 		units.append(u)
 	for u in units:

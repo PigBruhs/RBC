@@ -88,6 +88,17 @@ const UNITS := [
 		"rng_min": 1, "rng_max": 12,
 		"controllable": false,
 	},
+	{
+		"name": "萨尼铁塔",
+		"side": Side.PLAYER,
+		"role": Role.RANGED,
+		"power": 26, "armor": 5, "armor_break": 8,
+		"energy_max": 4, "move": 6,
+		"rest_power": 8, "rest_armor": 1, "rest_energy": 2,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 24,
+		"controllable": false,
+	},
 ]
 
 # 敌方角色（来自 bc_stat.md 的「敌方角色」表）
@@ -190,6 +201,17 @@ const ENEMIES := [
 		"pr": 0, "mr": 0,
 		"rng_min": 1, "rng_max": 12,
 		"controllable": false,
+	},
+	{
+		"name": "萨尼铁塔 (E)",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 26, "armor": 5, "armor_break": 8,
+		"energy_max": 4, "move": 6,
+		"rest_power": 8, "rest_armor": 1, "rest_energy": 2,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 24,
+		"controllable": true,
 	},
 ]
 
