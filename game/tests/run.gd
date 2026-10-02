@@ -520,6 +520,25 @@ func _initialize() -> void:
 	_expect(Level.respawn_turns(heli_name + " (E)", "arena") == 25,
 		"敌方镜像的重生回合数也走场景元数据（base_name 兜底）", fails)
 
+	# ── AI 会用新技能（防回归：这两条曾被一次并发写入冲掉）──
+	print("\n── AI 技能选择 ──")
+	var sani2 := Unit.from_data(by_name["萨尼铁塔"])
+	sani2.cell = Vector2i(10, 10)
+	sani2.energy = sani2.energy_max
+	var f1 := Unit.from_data(by_name["Gerald (E)"]) if false else Unit.from_data(by_name["Gerald"])
+	f1.cell = Vector2i(14, 10)
+	var f2 := Unit.from_data(by_name["Alette"])
+	f2.cell = Vector2i(15, 10)
+	var gctx2 := Ai.Ctx.new()
+	gctx2.rng = RngService.new(11)
+	gctx2.me = sani2
+	gctx2.foes = [f1, f2]
+	gctx2.foe_king = null
+	var gplan := Ai.plan(gctx2)
+	print("    萨尼铁塔 AI：%s" % gplan.get("note", "-"))
+	_expect(String(gplan.get("action", "")) == "skill" and String(gplan.get("skill", "")) == "grenade_launcher",
+		"AI 会用枪榴弹（≥2 人挤在一起时）", fails)
+
 	# ── 弓箭手 AI：在敌方投掷手射程内却够不着它 -> 开哨兵 ──
 	print("\n── 弓箭手哨兵决策 ──")
 	var arch2 := Unit.from_data(by_name["Alette"])            # 射程 1-8，有哨兵

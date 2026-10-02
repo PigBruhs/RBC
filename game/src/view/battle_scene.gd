@@ -1273,6 +1273,14 @@ func _ai_skill(u: Unit, plan: Dictionary) -> void:
 	if sid == "sentry":
 		_cast_sentry(u)                     # 自己会扣精力 + 结束回合
 		return
+	if sid == "dive_bomb":
+		var dcell: Vector2i = plan.get("cell", Vector2i(-1, -1))
+		if dcell == Vector2i(-1, -1):
+			_finish_turn()
+			return
+		_cast_dive(u, dcell)                # 进入准备状态，下一次轮到它时俯冲
+		_finish_turn()
+		return
 	u.spend_energy(int(d["cost"]))
 	u.has_acted = true
 	u.has_moved = true

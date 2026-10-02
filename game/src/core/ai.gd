@@ -197,6 +197,12 @@ static func plan(ctx: Ctx) -> Dictionary:
 				if s2 > best_s:
 					best_s = s2
 					best = {"placeable": pl, "from": from, "score": s2}
+	# 群体技能优先：如果有一团（≥2 人）敌人挤在范围技能里，先用技能（AoE 总收益更高）
+	if not best.is_empty():
+		var sk := _plan_skill(ctx)
+		var sid0 := String(sk.get("skill", ""))
+		if sid0 == "grenade_launcher" or sid0 == "carpet_bomb":
+			return sk
 	if not best.is_empty():
 		var mv = best["from"]
 		var move_to = mv if mv != me.cell else null
@@ -254,6 +260,52 @@ static func _plan_skill(ctx: Ctx) -> Dictionary:
 			return {"action": "skill", "skill": "orbital_strike",
 				"aim": aim_at(me, ctx.foe_king.cell, ctx),
 				"note": "轨道空爆：埋在老国王 %s 头上（%d 格）" % [ctx.foe_king.name, kd]}
+	# 俯冲轰炸（直升机）：优先砸敌方国王，其次砸人最密的一格
+	#（准备状态是公开信息：对面弓箭手 AI 读到之后会开哨兵反制）
+	var dd := Skills.get_def("dive_bomb")
+	if have.has("dive_bomb") and not dd.is_empty() and energy >= int(dd["cost"]):
+		var dr: float = float(dd.get("range_max", 20.0))
+		var tgt_cell := Vector2i(-1, -1)
+		if ctx.foe_king != null and ctx.foe_king.is_alive() \
+				and float(manhattan(me.cell, ctx.foe_king.cell)) <= dr:
+			tgt_cell = ctx.foe_king.cell
+		else:
+			var best_n := 0
+			for t in ctx.foes:
+				if not t.is_alive() or float(manhattan(me.cell, t.cell)) > dr:
+					continue
+				var nn := 0
+				for o in ctx.foes:
+					if o.is_alive() and manhattan(o.cell, t.cell) <= 2:
+						nn += 1
+				if nn > best_n:
+					best_n = nn
+					tgt_cell = t.cell
+		if tgt_cell != Vector2i(-1, -1):
+			return {"action": "skill", "skill": "dive_bomb", "cell": tgt_cell,
+				"note": "俯冲轰炸：选定 (%d, %d)" % [tgt_cell.x, tgt_cell.y]}
+	# 枪榴弹（萨尼铁塔）：朝"最挤的一团敌人"丢；没有集聚就丢敌方国王
+	var dg := Skills.get_def("grenade_launcher")
+	if have.has("grenade_launcher") and not dg.is_empty() and energy >= int(dg["cost"]):
+		var best_c: Unit = null
+		var best_m := 0
+		for t2 in ctx.foes:
+			if not t2.is_alive():
+				continue
+			var dcell := manhattan(me.cell, t2.cell)
+			if dcell < int(dg["range_min"]) or dcell > int(dg["range_max"]):
+				continue
+			var n2 := 0
+			for o2 in ctx.foes:
+				if o2.is_alive() and manhattan(o2.cell, t2.cell) <= 2:
+					n2 += 1
+			if n2 > best_m:
+				best_m = n2
+				best_c = t2
+		if best_c != null and (best_m >= 2 or best_c.is_king):
+			return {"action": "skill", "skill": "grenade_launcher",
+				"aim": aim_at(me, best_c.cell, ctx),
+				"note": "枪榴弹：朝 %s 那边丢（附近 %d 人）" % [best_c.name, best_m]}
 	# 投掷手：地毯式轰炸（≥2 个敌人挤在一起，且落点不在敌方哨兵射界里）
 	if me.role == UnitData.Role.THROWER:
 		var d := Skills.get_def("carpet_bomb")
