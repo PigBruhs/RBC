@@ -5,12 +5,13 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
     初始阶段 = 4（PLACE=4）  可放置物种类 = 2
     木刺 ×4   土堆 ×6（来自 bc_stat.md）
     放置木刺后：道具数 = 1，剩余 = 3
-    结束放置后：阶段 = 1，队列 = P[Alette, Gerald, Airburst mortar] E[Airburst mortar (E), Gerald (E), Alette (E)] next=P
+    结束放置后：阶段 = 1，队列 = P[Gerald, Airburst mortar, 萨尼铁塔, Alette] E[萨尼铁塔 (E), Gerald (E), Alette (E), Airburst mortar (E)] next=P
 
-单位数：15
+单位数：17
   Gerald           近战   我方    位置(23, 23) 力82.0 甲52.0 射程0-0
   Alette           远程   我方    位置(24, 23) 力52.0 甲24.0 射程1-8
   Airburst mortar  投掷   我方    位置(25, 23) 力36.0 甲5.0 射程3-20
+  萨尼铁塔             远程   我方    位置(22, 23) 力26.0 甲5.0 射程1-24
   老国王              远程   我方    位置(2, 44) 力100.0 甲50.0 射程1-15
   公主·左             远程   我方    位置(2, 44) 力25.0 甲0.0 射程1-12
   公主·右             远程   我方    位置(2, 44) 力25.0 甲0.0 射程1-12
@@ -20,17 +21,18 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
   Gerald (E)       近战   敌方    位置(23, 25) 力82.0 甲52.0 射程0-0
   Alette (E)       远程   敌方    位置(24, 25) 力52.0 甲24.0 射程1-8
   Airburst mortar (E) 投掷   敌方    位置(25, 25) 力36.0 甲5.0 射程3-20
+  萨尼铁塔 (E)         远程   敌方    位置(22, 25) 力26.0 甲5.0 射程1-24
   老国王 (E)          远程   敌方    位置(45, 44) 力100.0 甲50.0 射程1-15
   公主·左 (E)         远程   敌方    位置(45, 44) 力25.0 甲0.0 射程1-12
   公主·右 (E)         远程   敌方    位置(45, 44) 力25.0 甲0.0 射程1-12
 
-[1] 队列：P[Alette, Gerald, Airburst mortar] E[Airburst mortar (E), Gerald (E), Alette (E)] next=P
+[1] 队列：P[Gerald, Airburst mortar, 萨尼铁塔, Alette] E[萨尼铁塔 (E), Gerald (E), Alette (E), Airburst mortar (E)] next=P
     预测序列（阵营）=[0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
 
-[2] 行动序列：["Airburst mortar (E)(E)", "Gerald(P)", "Gerald (E)(E)", "Airburst mortar(P)", "Alette (E)(E)", "Alette(P)", "Airburst mortar (E)(E)", "Gerald(P)", "Gerald (E)(E)", "Airburst mortar(P)", "Alette (E)(E)", "Alette(P)", "Airburst mortar (E)(E)", "Gerald(P)", "Gerald (E)(E)", "Airburst mortar(P)"]
+[2] 行动序列：["萨尼铁塔 (E)(E)", "Airburst mortar(P)", "Gerald (E)(E)", "萨尼铁塔(P)", "Alette (E)(E)", "Alette(P)", "Airburst mortar (E)(E)", "Gerald(P)", "萨尼铁塔 (E)(E)", "Airburst mortar(P)", "Gerald (E)(E)", "萨尼铁塔(P)", "Alette (E)(E)", "Alette(P)", "Airburst mortar (E)(E)", "Gerald(P)"]
     玩家 8 次 / 敌方 8 次
 
-[3] 菜单可见 =true 阶段 =1 可达格 =48
+[3] 菜单可见 =true 阶段 =1 可达格 =41
 
 [4] 攻击菜单可见 =true
     蓝(破甲) = 破甲/16   红(力量) = 打力量/0（打不动）
@@ -60,16 +62,16 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 [7] 取消选择：selected=<null> 详情=false 行动菜单=false 攻击菜单=false
 
 [8] 队列条：存活 15 -> 图案 10，连线 9
-    顺序：["Alette (E)", "Alette", "Airburst mortar (E)", "Gerald", "Gerald (E)", "Airburst mortar", "Alette (E)", "Alette", "Airburst mortar (E)", "Gerald"]
-    窗口内允许重复（循环队列）：["Alette (E)", "Alette", "Airburst mortar (E)", "Gerald", "Gerald (E)", "Airburst mortar", "Alette (E)", "Alette", "Airburst mortar (E)", "Gerald"]
+    顺序：["萨尼铁塔 (E)", "Airburst mortar", "Gerald (E)", "萨尼铁塔", "Alette (E)", "Alette", "Airburst mortar (E)", "Gerald", "萨尼铁塔 (E)", "Airburst mortar"]
+    窗口内允许重复（循环队列）：["萨尼铁塔 (E)", "Airburst mortar", "Gerald (E)", "萨尼铁塔", "Alette (E)", "Alette", "Airburst mortar (E)", "Gerald", "萨尼铁塔 (E)", "Airburst mortar"]
 
-[9] 队头 Airburst mortar -> Alette
+[9] 队头 Airburst mortar -> Gerald (E)
 
 [10] 回合规则
     未移动时：休息按钮 disabled =false
     移动后：has_moved =true 休息按钮 disabled =true 可达格 =0
     移动后强行点休息：力量 10.0 -> 10.0（应不变）
-    普攻后：active Gerald -> Airburst mortar (E)（回合应自动结束）
+    普攻后：active Gerald -> 萨尼铁塔（回合应自动结束）
     二级菜单：休息=休息 ｜ 右下角按钮=>>
 
 [11] 高亮与菜单显隐
@@ -85,15 +87,15 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
     再打一次：护甲 195.0 -> 195.0（应不变）
 
 [13] 最后一人机制
-    只剩 1 敌 vs 3 玩家 -> 进入连击=true 队列 P[Gerald, Alette, Airburst mortar] E[Gerald (E)] next=E 连击=Gerald (E)
+    只剩 1 敌 vs 3 玩家 -> 进入连击=true 队列 P[Gerald, Alette, Airburst mortar, 萨尼铁塔] E[Gerald (E)] next=E 连击=Gerald (E)
     预测序列：["Gerald (E)", "Gerald", "Gerald (E)", "Alette", "Gerald (E)", "Airburst mortar"]
-    实际推进序列：["Gerald (E)", "Gerald", "Gerald (E)", "Alette", "Gerald (E)", "Airburst mortar", "Gerald (E)", "Gerald"]
+    实际推进序列：["Gerald (E)", "Gerald", "Gerald (E)", "Alette", "Gerald (E)", "Airburst mortar", "Gerald (E)", "萨尼铁塔"]
 
 [14] 走路动画
     路径格子数 =5（起点 + 4 步 = 5）
     路径 =[(4, 4), (5, 4), (5, 5), (6, 5), (7, 5)]
     采样 58 次，不同中间位置 55 个，单次最大位移 3.149 格，高度 0.000~0.000
-    速度：平均 2.29 格/秒，中途最大偏离 0.55（要求 2.0 格/秒且匀速）
+    速度：平均 2.27 格/秒，中途最大偏离 0.56（要求 2.0 格/秒且匀速）
     走完停在 (7.50, 5.50)，期望 (7.5, 5.5)
 
 [15] 炮击落点判定（半径 1.5 格）
@@ -118,7 +120,7 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
     确认后：已移动到 (5, 7)
 
 [19] 队列交替自检
-    6 人 vs 7 人 -> P[Gerald, Alette, Airburst mortar] E[Gerald (E)] next=E 连击=Gerald (E)
+    5 人 vs 7 人 -> P[Airburst mortar, Alette, Gerald, 萨尼铁塔] E[Gerald (E)] next=E 连击=Gerald (E)
     阵营序列 =[1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
 
 [20] 连击状态的保持
@@ -127,20 +129,20 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
       队列 = P[Gerald] E[Alette (E), Gerald (E)] next=P 连击=Gerald
     敌方再复活 1 人（变成 1 vs 3）：
       连击保持 = true
-      队列 = P[Gerald] E[Alette (E), Airburst mortar (E), Gerald (E)] next=P 连击=Gerald
+      队列 = P[Gerald] E[Alette (E), Gerald (E), Airburst mortar (E)] next=P 连击=Gerald
       一个循环（6 步）里孤军 Gerald 出现 3 次（对面 3 人 -> 应为 3）
 
 [21] 待确认指示
     点「移动」后：可移动格 = 59（应 > 0，说明高亮存在）
     待确认标记可见 = true 位置 = (5.5, 0.0, 7.5)
-    标记颜色脉动：(1.0, 0.4933, 0.1, 0.8644)->(1.0, 0.7193, 0.1, 0.9398)
+    标记颜色脉动：(1.0, 0.4934, 0.1, 0.8645)->(1.0, 0.7193, 0.1, 0.9398)
 
 [22] 地毯式轰炸
     技能定义：名称=地毯式轰炸 消耗=6 轰炸区=5x7 炮弹=7 发 间隔=0.2s
-    落点 7 个：["(10.88,11.87)", "(12.18,14.22)", "(13.32,13.59)", "(13.73,15.68)", "(14.71,15.58)", "(16.02,15.62)", "(16.94,13.17)"]
+    落点 7 个：["(11.32,13.59)", "(11.73,15.68)", "(12.71,15.58)", "(14.02,15.62)", "(14.94,13.17)", "(16.20,15.90)", "(16.85,11.90)"]
     全部在 5x7 矩形内 = true ｜ 命中的长条 = [0, 1, 2, 3, 4, 5, 6] ｜ 最近两点间距 = 0.988
-    由近及远排序 = true（第一个 10.88，最后一个 16.94）
-    [实际落点] Airburst mortar 呼叫【地毯式轰炸】：7 个落点 (11.3,16.0) → (11.7,12.0) → (13.1,13.7) → (14.5,15.5) → (14.6,13.1) → (15.8,13.9) → (17.3,15.6)
+    由近及远排序 = true（第一个 11.32，最后一个 16.85）
+    [实际落点] Airburst mortar 呼叫【地毯式轰炸】：7 个落点 (11.1,13.8) → (12.5,15.6) → (12.6,13.2) → (13.8,14.0) → (15.3,15.7) → (16.0,15.0) → (17.0,15.0)
     放完：精力 12000 -> 6000（应 -6）｜ 区内 3/3 个目标挨打 ｜ 红圈节点 1 个 ｜ gm_busy=false
 
 [23] 空爆延迟
@@ -155,7 +157,7 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
     召唤球：sentry_trigger=true hit_tags=["arrow"] 半径=0.15
     打向界外 (40,5)：存活=false 移除原因=out_of_bounds 红圈 1 -> 1
     连续受击 3 次后颜色 (0.34, 0.58, 0.95, 1.0)（基准 (0.34, 0.58, 0.95, 1.0)）
-    可控敌方：Airburst mortar (E) 阵营=1 手动=true 技能=["carpet_bomb"]
+    可控敌方：萨尼铁塔 (E) 阵营=1 手动=true 技能=[]
 
 [25b] 半空打爆炮弹
     炮弹 alive=false 原因='shot_down' 位置=(0.00, 0.00) ｜ 杰拉尔德力量 82000 -> 82000
@@ -176,7 +178,7 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
     按错后：暂停=false 杰拉尔德力量 82000 -> 62000
     同一回合第二支箭：QTE=false 力量 62000 -> 42000
     三次全对：杰拉尔德力量 42000（应不变）｜场上弹道物 1
-    反弹箭：发射者=Alette 起点=(5.5, 6.1) 落点=(5.631889, 12.80682) 距离=6.7 格
+    反弹箭：发射者=Alette 起点=(5.5, 6.1) 落点=(5.171199, 12.489) 距离=6.4 格
     反弹箭落地后：射手力量 100000 -> 24000
 
 [29] 英雄重生
@@ -192,22 +194,22 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
 [30] AI 决策
     打分：国王 175.4 ｜ 一个非国王目标 31.5
     贴脸计划：打 Gerald (E)（评分 64.4，现位置）（走位 <null>）
-    投掷手（落点全在哨兵射界里）：打 Gerald (E)（评分 24.0，现位置）
+    投掷手（落点全在哨兵射界里）：不在场
     满血够不着（距离 66）：向 公主·右 (E) 靠拢
     残血够不着：回血/回精力：休息
 
 [32] 日志体检
-    日志共 124 行，命中提示类文案 0 行
-    ｜Gerald 锁定沙盒：木刺
-    ｜  木刺 被箭矢击中：82 点（剩余 0）
-    ｜  🧱 木刺 被摧毁
-    ｜  🧱 木刺 被摧毁
-    ｜—— 退出最后一人连击，回到常规循环 ——
-    ｜轮到 Alette（远程）行动
+    日志共 147 行，命中提示类文案 0 行
     ｜Alette 锁定沙盒：木刺
     ｜  木刺 被箭矢击中：24 点（剩余 16）
     ｜轮到 Alette (E)（远程）行动（敌方阵营 · 玩家操控）
-    ｜轮到 Airburst mortar（投掷）行动
+    ｜   第 40 次回合边界：老国王的加农炮到点
+    ｜  💣 老国王 的加农炮瞄准最近的 Airburst mortar (E)（0.0 格，射程 0）：出膛
+    ｜轮到 萨尼铁塔（远程）行动
+    ｜老国王 攻击 → Airburst mortar：力量 45
+    ｜  ☠ Airburst mortar 阵亡
+    ｜    Airburst mortar 阵亡：所有状态已清除（哨兵=无）
+    ｜    Airburst mortar 将在 10 个回合后满血复活（位置 (25, 23)）
 
 ── 共 381 项检查，失败 0 项 ──
 ✅ v3 试玩链路全部通过

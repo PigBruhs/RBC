@@ -126,6 +126,23 @@ static func air_burst(attacker: Unit, ctr: Vector3, opts: Dictionary, units: Arr
 # ══════════════════════════════════════════════════════════════════════════════
 # 单体结算
 # ══════════════════════════════════════════════════════════════════════════════
+## ── 子弹伤害阶梯（用户口径，同时作用于破甲与力量伤害）──────────────────────
+##   0-12 格 100% ｜ 12-16 格 60% ｜ 16-24 格 20% ｜ >24 格 0（仍可命中）
+const BULLET_FULL_DIST := 12.0
+const BULLET_MID_DIST := 16.0
+const BULLET_LOW_DIST := 24.0
+
+static func bullet_mult(dist: float) -> float:
+	var d: float = maxf(0.0, dist)
+	if d <= BULLET_FULL_DIST:
+		return 1.0
+	if d <= BULLET_MID_DIST:
+		return 0.6
+	if d <= BULLET_LOW_DIST:
+		return 0.2
+	return 0.0
+
+
 ## ── 破片伤害曲线（用户口径，单位：格 / 点数）────────────────────────────────
 ##   0 格：25 力 + 25 甲 ｜ 3 格：12 力 + 12 甲 ｜ 16 格：0（仍可命中）｜ 20 格：模型消失
 const FRAG_NEAR_DIST := 3.0

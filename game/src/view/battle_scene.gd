@@ -216,7 +216,10 @@ var arrow_qte: ArrowQTE = null
 var _pending_turn_end := false            # QTE 期间攒下的"该结束回合了"
 var _ai_turn := false                     # 正在跑 AI 回合（不弹菜单、不锁操作）
 const KING_FIRE_TURNS := 5                # 老国王每 5 个回合边界开一炮（GM 计时）
-const SENTRY_AIM_BALL_R := 1.0           # 哨兵瞄准球半径（用户口径：1 格）                # 老国王每 5 个回合边界开一炮（GM 计时）
+const SENTRY_AIM_BALL_R := 1.0           # 哨兵瞄准球半径（用户口径：1 格）
+const SANI_NAME := "萨尼铁塔"                # 三连发 + 玩家侧线性散布的角色
+const VOLLEY_COUNT := 3                      # 三连发
+const VOLLEY_GAP := 0.1                      # 每发间隔 100ms（用户口径）                # 老国王每 5 个回合边界开一炮（GM 计时）
 var game_over := false                    # 分出胜负了（自动演算用）
 var _last_win := false
 var _last_turn_side := -1                 # 上一个结束的回合属于哪一方（防"同方连走两回合")
@@ -1953,6 +1956,8 @@ func _on_proj_landed(p: Projectile) -> void:
 			pass                              # 加农炮弹打空就是打空，没有爆炸
 		Projectile.KIND_FRAGMENT:
 			pass                              # 破片打空就是打空
+		Projectile.KIND_BULLET:
+			pass                              # 子弹打空就是打空
 
 
 # ── 给自检/试玩用的薄封装（真实实现都在 field 里）──
@@ -1988,6 +1993,16 @@ func _resolve_arrow_hit(sh: Ordnance.Shot, what: Dictionary) -> void:
 			if is_basic:
 				Passives.clear_focus(attacker)      # 这一发算命中了：蓄势清零
 			_start_arrow_qte(victim, sh, bonus)
+			return
+		# 子弹：阶梯衰减（0-12 格 100% / 12-16 格 60% / 16-24 格 20% / >24 格 0）
+		if sh.kind == Projectile.KIND_BULLET:
+			var bd: float = sh.last_hit_dist
+			var bmult: float = Damage.bullet_mult(bd)
+			var bpw: int = int(floor(float(attacker.power_cur) * bmult))
+			var bbr: int = int(floor(float(attacker.armor_break) * bmult))
+			_apply_attack(attacker, victim, true, silent, 0, 1.0, bpw, bbr)
+			_log("  ✦ 子弹命中 %s：飞行 %.1f 格 ×%.0f%% → 力 %d / 甲 %d" % [
+				victim.name, bd, bmult * 100.0, bpw / 1000, bbr / 1000])
 			return
 		# 破片：伤害按"离生成点走了多远"衰减（0 格 25/25 ｜ 3 格 12/12 ｜ 16 格 0）
 		if sh.kind == Projectile.KIND_FRAGMENT:
@@ -2355,6 +2370,29 @@ func _show_impact(center: Vector2, y: float = 0.05) -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 # 目标选择（近战 / 远程）
 # ══════════════════════════════════════════════════════════════════════════════
+## 萨尼铁塔：三连发。间隔 100ms 依次出膛，**每发各自判定命中**，
+## 落点吃"玩家侧线性散布"（r = 距离/12，12 格 ≈ 1 格）——所以选中目标也不一定打中。
+func _volley_bullets(u: Unit, t: Unit, break_armor: bool) -> void:
+	u.has_acted = true
+	u.has_moved = true
+	_push_unit_stats(u)
+	var from := Vector3(float(u.cell.x) + 0.5, 0.75, float(u.cell.y) + 0.5)
+	var dist := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5).distance_to(
+		Vector2(float(t.cell.x) + 0.5, float(t.cell.y) + 0.5))
+	for i in VOLLEY_COUNT:
+		var aim := Spread.linear_scatter(
+			Vector2(float(t.cell.x) + 0.5, float(t.cell.y) + 0.5), dist, rng)
+		var last := i == VOLLEY_COUNT - 1
+		var p := Ordnance.make_bullet(u, from, aim, last)
+		p.shot.target = t
+		p.shot.break_armor = break_armor
+		field.register(p)
+		_log("  • %s 第 %d/%d 发子弹：目标 %s（%.1f 格，散布半径 %.2f）→ 瞄准 (%.2f, %.2f）" % [
+			u.name, i + 1, VOLLEY_COUNT, t.name, dist, Spread.linear_radius(dist), aim.x, aim.y])
+		if not last:
+			await get_tree().create_timer(VOLLEY_GAP).timeout
+
+
 ## 结算一次普通攻击。近战立即生效；远程先飞一支箭，命中后才结算。
 ## 硬性守卫：本回合已经出手过就不再响应（防止 UI 或外部脚本重复调用导致"一回合打两次"）。
 
@@ -2367,6 +2405,9 @@ func _attack_target_unit(t: Unit, break_armor: bool) -> void:
 	active.has_moved = true
 	_push_unit_stats(active)          # 同步精力条与属性栏
 
+	if Unit.base_name(active.name) == SANI_NAME:
+		_volley_bullets(active, t, break_armor)          # 三连发（各自散布、各自判定）
+		return
 	if active.role == UnitData.Role.RANGED:
 		var from := Vector3(float(active.cell.x) + 0.5, 0.75, float(active.cell.y) + 0.5)
 		var to := Vector3(float(t.cell.x) + 0.5, 0.55, float(t.cell.y) + 0.5)

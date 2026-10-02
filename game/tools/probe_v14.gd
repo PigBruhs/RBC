@@ -52,7 +52,8 @@ func _process(d: float) -> bool:
 						if u.visual != null:
 							u.visual.position = Vector3(float(far.x) + 0.5, 0.0, float(far.y) + 0.5)
 				print("\n[1] 场上：我方 %d 人，敌方 %d 人" % [p, e])
-				_chk(p == 6 and e == 9, "场上应是我方 6 + 敌方 9")
+				# 人数改由关卡 roster 决定（场景解耦）：测试场 7 + 10
+				_chk(p == 7 and e == 10, "场上应是我方 7 + 敌方 10（按关卡 roster）")
 				_s._finish_placement()
 				_s._cam_focus = Vector3(6.0, 0.0, 7.0)
 				_s._zoom = 22.0

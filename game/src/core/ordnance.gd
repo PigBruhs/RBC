@@ -26,6 +26,15 @@ const FRAGMENT_MAX_DIST := 20.0
 const FRAGMENT_HEIGHT := 0.5
 const FRAGMENT_R := 0.09             # 碰撞体积和箭矢差不多（箭矢 0.075）
 
+## ── 子弹（萨尼铁塔，箭矢类）────────────────────────────────────────────────
+## 用户口径：12 格/秒、无重力、全程离地 0.5 格、32 格模型消失；
+## 伤害阶梯衰减 0-12 格 100% / 12-16 格 60% / 16-24 格 20% / >24 格无伤害（仍可命中）。
+const BULLET_TILES_PER_SEC := 12.0
+const BULLET_MAX_DIST := 32.0
+const BULLET_HEIGHT := 0.5
+const BULLET_LEN := 0.2
+const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
+
 const ARROW_TILES_PER_SEC := 6.5     # 箭矢速度（用户口径：8 -> 6 -> 11 -> 6.5 格/秒）
 const CANNON_TILES_PER_SEC := 12.0   # 加农炮弹速度（用户口径）
 const CANNON_RANGE := 15.0           # 加农炮最大射程（格）
@@ -110,6 +119,26 @@ const SENTRY_POWER_MULT := 1.0
 
 ## 每两支箭之间的最小间隔（和 GameMaster.SENTRY_FIRE_INTERVAL 对应，日志/测试用）
 const SENTRY_FIRE_INTERVAL_REF := 0.25
+
+
+## 子弹：从 from 沿 dir 平飞（无重力），32 格后消失
+static func make_bullet(caster: Unit, from: Vector3, to: Vector2,
+		ends_turn: bool = true) -> Projectile:
+	var start := Vector2(from.x, from.z)
+	var p := Projectile.make(Projectile.KIND_BULLET, start, to, 1.0)
+	p.set_speed(BULLET_TILES_PER_SEC)
+	_config_owner(p, caster)
+	p.y0 = BULLET_HEIGHT
+	p.y1 = BULLET_HEIGHT
+	p.arc_scale = 0.0                 # 不受重力
+	p.arc_min = 0.0
+	p.arc_max = 0.0
+	p.recalc_apex()
+	p.hit_r = BULLET_R
+	p.hit_tags = []                   # 箭矢类：不会被击落
+	p.sentry_trigger = false
+	p.shot = _shot(Projectile.KIND_BULLET, caster, ends_turn, 0.0, {}, "")
+	return p
 
 
 ## 破片：从 from 沿 dir 平飞（无重力），20 格后自然结束

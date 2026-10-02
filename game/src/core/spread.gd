@@ -57,6 +57,23 @@ static func offset(dist: float, speed: float, rng: RngService) -> Vector2:
 	return Vector2(cos(ang) * rr, sin(ang) * rr)
 
 
+## ── 玩家侧线性散布（萨尼铁塔专用，用户口径）────────────────────────────────
+## 与距离呈线性正相关，12 格时半径约 1 格 -> r = dist / 12
+static func linear_radius(dist: float) -> float:
+	return maxf(0.0, dist) / 12.0
+
+
+static func linear_scatter(dest: Vector2, dist: float, rng: RngService) -> Vector2:
+	if rng == null:
+		return dest
+	var r := linear_radius(dist)
+	if r <= 0.0:
+		return dest
+	var ang := rng.next_float() * TAU
+	var rr := r * sqrt(rng.next_float())
+	return dest + Vector2(cos(ang) * rr, sin(ang) * rr)
+
+
 ## 半径 r 的球体内均匀随机一点（用于哨兵瞄准：以目标当前位置为球心、半径 1 格的球）
 static func ball_offset(r: float, rng: RngService) -> Vector3:
 	if r <= 0.0 or rng == null:

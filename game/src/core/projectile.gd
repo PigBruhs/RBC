@@ -25,6 +25,7 @@ const KIND_MARKER := "marker"    # 轨道标记召唤球
 ## 加农炮弹：箭矢类（直线快弹、不会被击落、不惊动哨兵），但只吃 50% 力量
 const KIND_CANNON := "cannon"
 const KIND_FRAGMENT := "fragment"  # 破片（箭矢类：无重力、平飞、按距离衰减伤害）
+const KIND_BULLET := "bullet"      # 子弹（萨尼铁塔：箭矢类、无重力、阶梯衰减）
 
 var id: int = 0
 var kind: String = KIND_SHELL

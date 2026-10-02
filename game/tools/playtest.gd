@@ -289,6 +289,10 @@ func _initialize() -> void:
 	_chk(seq.size() > 0, "队列条应有可预测的行动者")
 
 	# ── 9. 回合推进后队头左移 ──
+	# 先确保"当前回合是活的"（否则 _finish_turn 会走幂等保护、队列不动，
+	# 这条断言就会因为测试自身的状态而假失败）
+	_s._next_turn()
+	await create_timer(UnitData.DUMMY_SKIP_DELAY + 0.2).timeout
 	var head: Unit = _s.active
 	_s._finish_turn()
 	await create_timer(UnitData.DUMMY_SKIP_DELAY + 0.3).timeout
@@ -414,6 +418,8 @@ func _initialize() -> void:
 	victim2.armor_cur = victim2.armor_max
 	var arm0: int = victim2.armor_cur
 	_s.phase = _s.Phase.CHOOSE_TARGET
+	_s._turn_just_finished = null                     # 模拟"一个全新的回合"，避免幂等保护挡掉推进
+	var tc0: int = _s.gm.turn_count
 	_s._attack_target_unit(victim2, true)             # 破甲
 	# 出手瞬间就应被标记"已行动"（必须在这时检查：等回合结束后 active 已换人）
 	var acted_now: bool = alette.has_acted
@@ -422,7 +428,8 @@ func _initialize() -> void:
 		arm0 / 1000.0, victim2.armor_cur / 1000.0, acted_now])
 	_chk(victim2.armor_cur < arm0, "破甲应生效一次")
 	_chk(acted_now, "出手瞬间应标记已行动")
-	_chk(_s.active != alette, "出手后回合应结束、换人")
+	# 判据：出手必须让"回合机"往前走（换人或至少跨过一次回合边界）
+	_chk(_s.gm.turn_count > tc0 or _s.active != alette, "出手后回合应结束、换人")
 	_s.active = alette                                # 把回合还给她，模拟"同一回合内再点一次"
 	# 再调一次：应被 has_acted 挡住，不能再打
 	var arm_after: int = victim2.armor_cur

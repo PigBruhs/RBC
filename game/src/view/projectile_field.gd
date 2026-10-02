@@ -83,6 +83,8 @@ func register(p: Projectile) -> void:
 			node = make_cannon_node(parent)
 		Projectile.KIND_FRAGMENT:
 			node = make_fragment_node(parent)
+		Projectile.KIND_BULLET:
+			node = make_bullet_node(parent)
 	items.append({"p": p, "node": node, "prev": p.pos()})
 
 
@@ -244,6 +246,7 @@ static func kind_cn(kind: String) -> String:
 		Projectile.KIND_ARROW: return "箭矢"
 		Projectile.KIND_CANNON: return "加农炮弹"
 		Projectile.KIND_FRAGMENT: return "破片"
+		Projectile.KIND_BULLET: return "子弹"
 	return "标记球"
 
 
@@ -305,6 +308,40 @@ static func make_shell_node(parent: Node3D) -> Node3D:
 		root.add_child(seg)
 		tail.append(seg)
 	root.set_meta("tail", tail)
+	return root
+
+
+## 子弹：0.2 格长 × 0.05 格直径的发亮黄色圆柱 + 一圈光晕（不要尾迹）
+static func make_bullet_node(parent: Node3D) -> Node3D:
+	var root := Node3D.new()
+	parent.add_child(root)
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = Ordnance.BULLET_R
+	cm.bottom_radius = Ordnance.BULLET_R
+	cm.height = Ordnance.BULLET_LEN
+	mi.mesh = cm
+	mi.rotation_degrees = Vector3(90, 0, 0)       # 躺平：沿飞行方向
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(1.0, 0.92, 0.35)
+	m.emission_enabled = true
+	m.emission = Color(1.0, 0.86, 0.2)
+	m.emission_energy_multiplier = 2.4
+	mi.material_override = m
+	root.add_child(mi)
+	var halo := MeshInstance3D.new()
+	var hs := SphereMesh.new()
+	hs.radius = 0.075
+	hs.height = 0.15
+	halo.mesh = hs
+	var hm := StandardMaterial3D.new()
+	hm.albedo_color = Color(1.0, 0.9, 0.4, 0.22)
+	hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hm.emission_enabled = true
+	hm.emission = Color(1.0, 0.85, 0.3)
+	hm.emission_energy_multiplier = 1.2
+	halo.material_override = hm
+	root.add_child(halo)
 	return root
 
 
