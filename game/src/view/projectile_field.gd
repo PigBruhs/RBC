@@ -87,6 +87,8 @@ func register(p: Projectile) -> void:
 			node = make_bullet_node(parent)
 		Projectile.KIND_ROCKET:
 			node = make_rocket_node(parent)
+		Projectile.KIND_GRENADE:
+			node = build_grenade_model(parent)
 	items.append({"p": p, "node": node, "prev": p.pos()})
 
 
@@ -314,8 +316,56 @@ static func make_shell_node(parent: Node3D) -> Node3D:
 	return root
 
 
-## 火箭：直径 0.37、长 0.7 的圆柱 + 头部半球 + 尾部 4 片三角尾翼（每隔 90° 一片）
-static func make_rocket_node(parent: Node3D) -> Node3D:
+## 手榴弹模型（飞行与落地共用同一套：椭球 + 顶部削平长方体 + 经纬线凹槽）
+static func build_grenade_model(parent: Node3D) -> Node3D:
+	var root := Node3D.new()
+	parent.add_child(root)
+	var body := MeshInstance3D.new()
+	var sp := SphereMesh.new()
+	sp.radius = 0.20
+	sp.height = 0.40
+	body.mesh = sp
+	body.scale = Vector3(1.0, 0.85, 1.0)
+	body.position = Vector3(0, 0.17, 0)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.30, 0.34, 0.24)
+	m.roughness = 0.6
+	body.material_override = m
+	root.add_child(body)
+	var cap := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.13, 0.09, 0.13)
+	cap.mesh = bm
+	cap.position = Vector3(0, 0.35, 0)
+	var cm := StandardMaterial3D.new()
+	cm.albedo_color = Color(0.22, 0.25, 0.18)
+	cap.material_override = cm
+	root.add_child(cap)
+	var gm2 := StandardMaterial3D.new()
+	gm2.albedo_color = Color(0.12, 0.14, 0.10)
+	for i in 3:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.185
+		tm.outer_radius = 0.205
+		ring.mesh = tm
+		ring.position = Vector3(0, 0.06 + float(i) * 0.11, 0)
+		ring.material_override = gm2
+		root.add_child(ring)
+	for j in 4:
+		var mer := MeshInstance3D.new()
+		var tm2 := TorusMesh.new()
+		tm2.inner_radius = 0.185
+		tm2.outer_radius = 0.205
+		mer.mesh = tm2
+		mer.rotation_degrees = Vector3(90, 0, float(j) * 45.0)
+		mer.position = Vector3(0, 0.17, 0)
+		mer.material_override = gm2
+		root.add_child(mer)
+	return root
+
+
+func make_rocket_node(parent: Node3D) -> Node3D:
 	var root := Node3D.new()
 	parent.add_child(root)
 	var body_mat := StandardMaterial3D.new()

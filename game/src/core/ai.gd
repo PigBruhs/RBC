@@ -37,7 +37,7 @@ const W_PLACEABLE := 0.30      # 清障碍：比打人低一档
 const SENTRY_RISK := 0.45      # 远程/投掷站在敌方哨兵射界里的惩罚
 const KILL_BONUS := 1.6        # 这一下能打死 -> 额外加权
 const DIST_PENALTY := 0.55     # 近战：每远一格的扣分
-const EDGE_PENALTY := 0.9      # 远程/投掷：离"射程边缘"每差一格的扣分（追求在最大射程输出）
+const EDGE_PENALTY := 2.4      # 远程/投掷：离"射程边缘"每差一格的扣分（用户口径：要尽量贴到最大射程）
 const AIM_SPREAD := true       # AI 的弹道吃散步（用户口径：先用普通散步那版）
 
 

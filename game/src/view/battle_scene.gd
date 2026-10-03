@@ -1256,6 +1256,9 @@ func _ai_attack(u: Unit, plan: Dictionary) -> void:
 	u.has_acted = true
 	u.has_moved = true
 	_push_unit_stats(u)
+	if Unit.base_name(u.name).begins_with(HELI_PREFIX):
+		_rocket_salvo(u, aim)               # 直升机的"普攻"= 吊射火箭齐射（耗精力、发射完即结束回合）
+		return
 	if u.role == UnitData.Role.RANGED:
 		var f2 := Vector3(float(u.cell.x) + 0.5, 0.75, float(u.cell.y) + 0.5)
 		_spawn_arrow(u, f2, Vector3(aim.x, 0.55, aim.y), t, ba, true)
@@ -1792,7 +1795,20 @@ func _fire() -> void:
 		_start_carpet_bomb(thrower, fpos)
 		return
 
-	# ── 技能②：枪榴弹（萨尼铁塔）：手感与投掷手一致，出界/被击落则作废 ──
+	# ── 技能②：俯冲轰炸（直升机）：拖拽选点 -> 地面红色指示点 -> 进入准备状态 ──
+	if skill_id != "" and bool(Skills.get_def(skill_id).get("dive", false)):
+		_aim_skill_id = ""
+		_skill_info_text = ""
+		var dd := Skills.get_def(skill_id)
+		var base := Vector2(float(thrower.cell.x) + 0.5, float(thrower.cell.y) + 0.5)
+		var fmax: float = float(dd.get("range_max", 20.0))
+		if base.distance_to(fpos) > fmax:
+			fpos = base + (fpos - base).normalized() * fmax
+		_cast_dive(thrower, Vector2i(int(floor(fpos.x)), int(floor(fpos.y))))
+		_finish_turn()
+		return
+
+	# ── 技能③：枪榴弹（萨尼铁塔）：手感与投掷手一致，出界/被击落则作废 ──
 	if skill_id != "" and bool(Skills.get_def(skill_id).get("grenade", false)):
 		var dg := Skills.get_def(skill_id)
 		if thrower.energy_points() < int(dg["cost"]):
@@ -2061,18 +2077,28 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var per := maxi(1, rockets / maxi(1, pairs))
 	_log("  🚁 %s 吊射火箭：瞄准 (%.1f, %.1f)（原始 (%.1f, %.1f) ×%.0f），%d 发 / %d 次齐射" % [
 		u.name, doubled.x, doubled.y, fpos.x, fpos.y, float(cfg["aim_mult"]), rockets, pairs])
+	# 每发火箭从"机侧"出膛：左手边一发、右手边一发（用户口径）
+	var side := (doubled - base).normalized()
+	if side.length() < 0.001:
+		side = Vector2.RIGHT
+	var perp := Vector2(-side.y, side.x)
 	for k in pairs:
 		for i in per:
 			var ang := rng.next_float() * TAU
 			var rr := scatter * sqrt(rng.next_float())     # 圆内均匀
 			var aim := doubled + Vector2(cos(ang) * rr, sin(ang) * rr)
-			var last := k == pairs - 1 and i == per - 1
-			var from := Vector3(float(u.cell.x) + 0.5, u.hover + 0.25, float(u.cell.y) + 0.5)
-			var p := Ordnance.make_rocket(u, from, aim, last)
+			var lateral := -0.32 if i % 2 == 0 else 0.32    # 左 / 右
+			var from := Vector3(float(u.cell.x) + 0.5 + perp.x * lateral,
+				u.hover + 0.25, float(u.cell.y) + 0.5 + perp.y * lateral)
+			var p := Ordnance.make_rocket(u, from, aim, false)   # 不等落地
 			p.shot.target = null
 			field.register(p)
+		_log("  🚁 %s 齐射 %d/%d：左右各一发（瞄准 (%.1f, %.1f)，散布半径 %.0f）" % [
+			u.name, k + 1, pairs, doubled.x, doubled.y, scatter])
 		if k < pairs - 1:
 			await get_tree().create_timer(gap).timeout
+	# 用户口径：发射完即进入下一回合，无需等待落地
+	_finish_turn()
 
 
 ## ── 枪榴弹：地上的模型 + 4 回合后爆炸出 8 枚破片 ─────────────────────────
@@ -2088,54 +2114,8 @@ func _spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
 	var caster_side: int = p.side
 	if _grenade_models.has(cell) and is_instance_valid(_grenade_models[cell]):
 		(_grenade_models[cell] as Node3D).queue_free()
-	var root := Node3D.new()
+	var root: Node3D = ProjectileField.build_grenade_model(self)
 	root.position = Vector3(float(cell.x) + 0.5, 0.0, float(cell.y) + 0.5)
-	add_child(root)
-	# 椭球主体
-	var body := MeshInstance3D.new()
-	var sp := SphereMesh.new()
-	sp.radius = 0.20
-	sp.height = 0.40
-	body.mesh = sp
-	body.scale = Vector3(1.0, 0.85, 1.0)
-	body.position = Vector3(0, 0.17, 0)
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.30, 0.34, 0.24)
-	m.roughness = 0.6
-	body.material_override = m
-	root.add_child(body)
-	# 顶部削平 -> 长方体
-	var cap := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.13, 0.09, 0.13)
-	cap.mesh = bm
-	cap.position = Vector3(0, 0.35, 0)
-	var cm := StandardMaterial3D.new()
-	cm.albedo_color = Color(0.22, 0.25, 0.18)
-	cap.material_override = cm
-	root.add_child(cap)
-	# 经纬线凹槽：3 圈纬线 + 4 条经线（细圆环近似）
-	var gm2 := StandardMaterial3D.new()
-	gm2.albedo_color = Color(0.12, 0.14, 0.10)
-	for i in 3:
-		var ring := MeshInstance3D.new()
-		var tm := TorusMesh.new()
-		tm.inner_radius = 0.185
-		tm.outer_radius = 0.205
-		ring.mesh = tm
-		ring.position = Vector3(0, 0.06 + float(i) * 0.11, 0)
-		ring.material_override = gm2
-		root.add_child(ring)
-	for j in 4:
-		var mer := MeshInstance3D.new()
-		var tm2 := TorusMesh.new()
-		tm2.inner_radius = 0.185
-		tm2.outer_radius = 0.205
-		mer.mesh = tm2
-		mer.rotation_degrees = Vector3(90, 0, float(j) * 45.0)
-		mer.position = Vector3(0, 0.17, 0)
-		mer.material_override = gm2
-		root.add_child(mer)
 	_grenade_models[cell] = root
 	_log("  💣 手榴弹落地 (%d, %d)：%d 个回合后爆炸（%s 投出）" % [
 		cell.x, cell.y, delay, caster_name])
@@ -2509,21 +2489,31 @@ func _dive_marker(cell: Vector2i, on: bool) -> void:
 			(_dive_markers[key] as Node3D).queue_free()
 		var root := Node3D.new()
 		root.position = Vector3(float(cell.x) + 0.5, 0.0, float(cell.y) + 0.5)
+		var red := StandardMaterial3D.new()
+		red.albedo_color = Color(1.0, 0.22, 0.18, 0.62)
+		red.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		red.emission_enabled = true
+		red.emission = Color(1.0, 0.16, 0.12)
+		red.emission_energy_multiplier = 2.0
 		var disc := MeshInstance3D.new()
 		var cy := CylinderMesh.new()
-		cy.top_radius = 0.42
-		cy.bottom_radius = 0.42
+		cy.top_radius = 0.45
+		cy.bottom_radius = 0.45
 		cy.height = 0.04
 		disc.mesh = cy
 		disc.position = Vector3(0, 0.05, 0)
-		var m := StandardMaterial3D.new()
-		m.albedo_color = Color(1.0, 0.62, 0.15, 0.55)
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.emission_enabled = true
-		m.emission = Color(1.0, 0.55, 0.1)
-		m.emission_energy_multiplier = 1.4
-		disc.material_override = m
+		disc.material_override = red
 		root.add_child(disc)
+		# 细红光柱（用户口径：投弹指示点用红色，不要紫色激光柱）
+		var beam := MeshInstance3D.new()
+		var bcy := CylinderMesh.new()
+		bcy.top_radius = 0.045
+		bcy.bottom_radius = 0.045
+		bcy.height = 3.0
+		beam.mesh = bcy
+		beam.position = Vector3(0, 1.5, 0)
+		beam.material_override = red
+		root.add_child(beam)
 		add_child(root)
 		_dive_markers[key] = root
 		_log("  🎯 已标记俯冲目标 (%d, %d)（橙色圆盘）—— 下一次轮到它会俯冲过去" % [cell.x, cell.y])
@@ -2646,6 +2636,9 @@ func _drop_bomb(u: Unit, at: Vector2) -> void:
 
 func _after_damage_to_unit(u: Unit) -> void:
 	_flash(u)
+	# 用户口径：直升机力量掉到阈值以下就坠机 —— 必须挂在"受伤"这条主路径上才真的会触发
+	if _check_heli_crash(u):
+		return
 	if u.visual != null:
 		u.visual.update_orb()
 	if not u.is_alive():
@@ -2855,6 +2848,9 @@ func _attack_target_unit(t: Unit, break_armor: bool) -> void:
 
 	if Unit.base_name(active.name) == SANI_NAME:
 		_volley_bullets(active, t, break_armor)          # 三连发（各自散布、各自判定）
+		return
+	if Unit.base_name(active.name).begins_with(HELI_PREFIX):
+		_rocket_salvo(active, Vector2(float(t.cell.x) + 0.5, float(t.cell.y) + 0.5))
 		return
 	if active.role == UnitData.Role.RANGED:
 		var from := Vector3(float(active.cell.x) + 0.5, 0.75, float(active.cell.y) + 0.5)

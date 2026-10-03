@@ -1700,6 +1700,65 @@ func _initialize() -> void:
 	_s._aim_skill_id = ""
 	_s._skill_info_text = ""
 
+	# ── 36. 直升机普攻（真实 _fire 路径）+ 坠机（真实受伤路径）──
+	print("\n[36] 直升机普攻与坠机（真实路径）")
+	_s.clear_projectiles()
+	var he2: Unit = null
+	for u in _s.units:
+		if Unit.base_name(u.name).begins_with("俯冲轰炸直升机"): he2 = u
+	he2.cell = Vector2i(6, 6)
+	he2.visual.position = Vector3(6.5, he2.hover, 6.5)
+	he2.energy = he2.energy_max
+	he2.has_acted = false
+	he2.has_moved = false
+	_s.active = he2
+	_s.phase = _s.Phase.AIMING
+	_s._aim_active = true
+	_s._aim_valid = true
+	_s._aim_origin = Vector2.ZERO
+	_s._aim_now = Vector2(200, 0)
+	_s._aim_float_pos = Vector2(20.5, 6.5)
+	_s._planned_cell = Vector2i(20, 6)
+	_s._aim_skill_id = ""
+	var e0: int = he2.energy_points()
+	_s._fire()
+	var rockets := 0
+	for it in _s.field.items:
+		var pp: Projectile = it["p"]
+		if pp.kind == Projectile.KIND_ROCKET: rockets += 1
+	print("    一次普攻：场上火箭 %d 发 ｜ 精力 %d -> %d ｜ 回合已结束=%s" % [
+		rockets, e0, he2.energy_points(), _s.active != he2])
+	_chk(rockets == 2, "第一次齐射应左右各一发（共 4 次、8 发，250ms 一发）")
+	_chk(he2.energy_points() == e0 - 4, "普攻必须消耗 4 点精力")
+	# 齐射是异步的：等它把 4 次打完
+	await create_timer(1.2).timeout
+	var rockets2 := 0
+	for it2 in _s.field.items:
+		var pp2: Projectile = it2["p"]
+		if pp2.kind == Projectile.KIND_ROCKET: rockets2 += 1
+	print("    齐射完成：场上火箭（含在飞）%d 发" % rockets2)
+	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，1.2 秒内 8 发基本都在飞）")
+	_chk(_s.active != he2, "发射完即进入下一回合（无需等待落地）")
+	# 坠机：走"受伤"这条真实路径
+	_s.clear_projectiles()
+	he2.power_cur = 15 * 1000
+	he2.tags.erase("crashing")
+	var nb: Unit = null
+	for u in _s.units:
+		if u.name == "Gerald": nb = u
+	nb.cell = Vector2i(he2.cell.x + 1, he2.cell.y)
+	nb.power_cur = nb.power_max
+	var nb0: int = nb.power_cur
+	_s._after_damage_to_unit(he2)
+	print("    受伤路径：crashing=%s" % he2.tags.has("crashing"))
+	_chk(he2.tags.has("crashing"), "力量低于 21 后【受伤】必须触发坠机（真实路径）")
+	await create_timer(0.7).timeout
+	print("    坠机结果：alive=%s ｜ 邻居力量 %d -> %d ｜ 重生倒计时 %d" % [
+		he2.is_alive(), nb0 / 1000, nb.power_cur / 1000, _s.gm.revive_countdown(he2)])
+	_chk(not he2.is_alive(), "坠机后应死亡")
+	_chk(nb.power_cur < nb0, "坠机炮击应打到 2.5 格内的角色")
+	_chk(_s.gm.revive_countdown(he2) > 0, "坠机死亡后应有重生倒计时")
+
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
 		print("✅ v3 试玩链路全部通过")
