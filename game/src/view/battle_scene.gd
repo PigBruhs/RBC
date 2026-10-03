@@ -736,6 +736,16 @@ func _choose_skill(id: String) -> void:
 		_skill_info_text = ""
 		_cast_sentry(active)
 		return
+	# 用户口径：俯冲轰炸是【直接点 0~20 格内的一个格子】，不是拖拽瞄准，也不用标记球
+	if bool(d.get("dive", false)):
+		_aim_skill_id = ""
+		_dive_targeting = true
+		phase = Phase.CHOOSE_TARGET
+		_skill_info_text = Skills.detail_text(id)
+		_clear_hints()
+		_refresh_all()
+		_log("  🚁 选择俯冲目标：点 0~%d 格内的一格（红色光柱会标出目标）" % int(d.get("range_max", 20.0)))
+		return
 	_aim_skill_id = id
 	_begin_aim("skill")
 	# 用户要求：瞄准时下方属性栏写技能名、描述与数值
@@ -1094,6 +1104,7 @@ func _next_turn() -> void:
 			u = other
 		_log("     改为 %s（%s）行动" % [u.name, "我方" if u.side == UnitData.Side.PLAYER else "敌方"])
 	_last_turn_side = u.side
+	_turn_watch_t = 0.0
 	if _dive_begin(u):
 		active = u
 		u.begin_turn()
@@ -1519,6 +1530,7 @@ func _on_result_continue() -> void:
 	get_tree().reload_current_scene()
 
 func _show_action_menu() -> void:
+	_dive_targeting = false
 	if _ai_turn:
 		return                              # AI 回合不弹菜单
 	phase = Phase.MENU
@@ -2480,6 +2492,17 @@ func _crash_impact(u: Unit) -> void:
 ## ── 俯冲轰炸（主动技能）：准备 -> 俯冲 -> 停 0.5 秒投弹 -> 原路返回 ──────────
 var _dive_markers: Dictionary = {}        # 单位名 -> 目标格地面标识（Node3D）
 var _dive: Dictionary = {}                # 正在俯冲的状态机
+var _dive_targeting: bool = false         # 正在点格子选俯冲目标
+var _turn_watch_t: float = 0.0            # AI 回合看门狗
+
+
+## 把格子钳进地图内（用户口径：任何单位都不该跑到场外）
+func _in_bounds(c: Vector2i) -> bool:
+	return c.x >= 0 and c.y >= 0 and c.x < GW and c.y < GH
+
+
+func _clamp_cell(c: Vector2i) -> Vector2i:
+	return Vector2i(clampi(c.x, 0, GW - 1), clampi(c.y, 0, GH - 1))
 
 
 func _dive_marker(cell: Vector2i, on: bool) -> void:
@@ -2607,9 +2630,10 @@ func _dive_tick(delta: float) -> void:
 
 ## 俯冲中的位置同步（格坐标 + 高度）
 func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
-	u.cell = Vector2i(int(floor(pos.x)), int(floor(pos.y)))
+	u.cell = _clamp_cell(Vector2i(int(floor(pos.x)), int(floor(pos.y))))
 	if u.visual != null:
-		u.visual.position = Vector3(pos.x, h, pos.y)
+		u.visual.position = Vector3(clampf(pos.x, 0.5, float(GW) - 0.5), h,
+			clampf(pos.y, 0.5, float(GH) - 0.5))
 	_check_heli_crash(u)          # 用户口径：俯冲期间会受伤、也会触发被动
 
 
@@ -2927,12 +2951,6 @@ func _process(delta: float) -> void:
 
 ## 直升机的每帧表现（悬浮高度 / 旋翼自转 / 俯冲姿态）—— 队友交付的 HeliFx
 ## 只对直升机调用，其它单位零开销（HeliFx.tick 内部第一行就返回）
-func _tick_heli_fx(delta: float) -> void:
-	for u in units:
-		if u == null or u.visual == null:
-			continue
-		if Unit.base_name(u.name).begins_with(HELI_PREFIX):
-			HeliFx.tick(u.visual, u, delta)
 	_tick_color_cycle(delta)
 	_tick_pending_pulse(delta)
 	_sync_menu_position()          # 菜单跟着角色走
@@ -3036,6 +3054,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 		if phase == Phase.CHOOSE_TARGET:
+			# 俯冲轰炸：点格子即选定（0~20 格内），红色光柱标记
+			if _dive_targeting:
+				var dd0 := Skills.get_def("dive_bomb")
+				var base0 := Vector2(float(active.cell.x) + 0.5, float(active.cell.y) + 0.5)
+				var ctr0 := Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5)
+				var dd_max := float(dd0.get("range_max", 20.0))
+				if not _in_bounds(cell):
+					_log("  ✗ 目标格在地图外，重新点一个")
+					return
+				if base0.distance_to(ctr0) > dd_max:
+					_log("  ✗ 超出射程（%.1f > %.0f 格），重新点一个" % [base0.distance_to(ctr0), dd_max])
+					return
+				_dive_targeting = false
+				_cast_dive(active, cell)
+				_finish_turn()
+				return
 			# 用户口径：远程和近战【选单位都要确认】—— 第一次点只出黄勾，第二次才弹攻击菜单
 			# 沙盒元素（木刺/土堆）也可以被锁定，流程一样：第一次出勾，第二次打
 			var pl_t: Placeable = _placeable_at(cell) if t == null else null
@@ -3158,6 +3192,7 @@ func _clear_selection() -> void:
 	_refresh_all()
 
 func _do_move(u: Unit, cell: Vector2i) -> void:
+	cell = _clamp_cell(cell)          # 任何移动都不许出界
 	# 走路动画：沿路径逐格"抬腿 + 小跳"，同时朝向转到行进方向（不是瞬移）
 	var path: Array[Vector2i] = _path_to(u, cell)
 	gm.on_move_begin(u)                     # 哨兵：这次移动的"已触发"闩清零
@@ -3890,3 +3925,52 @@ func ui_open_attack_menu(t: Unit) -> void:
 func ui_open_skill_menu(ids: Array[String]) -> void:
 	if ui != null:
 		ui.show_skill_menu(ids, active)
+
+
+func _tick_heli_fx(delta: float) -> void:
+	for u in units:
+		if u == null or u.visual == null:
+			continue
+		if not Unit.base_name(u.name).begins_with(HELI_PREFIX):
+			continue
+		HeliFx.tick(u.visual, u, delta)
+		_heli_shadow(u)
+	# AI 回合看门狗：万一某条异步路径没结束回合，也不许把游戏卡死
+	if active != null and _is_ai_unit(active) and not get_tree().paused:
+		_turn_watch_t += delta
+		if _turn_watch_t > 9.0:
+			_log("  ⚠ AI 回合超时（%.0f 秒未结束），强制结束以免软锁：%s" % [_turn_watch_t, active.name])
+			_turn_watch_t = 0.0
+			_dive = {}
+			active.tags.erase("diving")
+			_finish_turn()
+	else:
+		_turn_watch_t = 0.0
+
+
+## 直升机脚下的圆形阴影（跟随移动，越高越淡越大）
+var _heli_shadows: Dictionary = {}
+
+
+func _heli_shadow(u: Unit) -> void:
+	var node: Node3D = _heli_shadows.get(u, null)
+	if node == null or not is_instance_valid(node):
+		node = Node3D.new()
+		var disc := MeshInstance3D.new()
+		var cy := CylinderMesh.new()
+		cy.top_radius = 0.42
+		cy.bottom_radius = 0.42
+		cy.height = 0.02
+		disc.mesh = cy
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.0, 0.0, 0.0, 0.34)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		disc.material_override = m
+		node.add_child(disc)
+		add_child(node)
+		_heli_shadows[u] = node
+	var h: float = maxf(0.0, u.visual.position.y)
+	node.position = Vector3(u.visual.position.x, 0.02, u.visual.position.z)
+	var k: float = clampf(h / 2.0, 0.0, 1.5)
+	node.scale = Vector3(1.0 + 0.25 * k, 1.0, 1.0 + 0.25 * k)

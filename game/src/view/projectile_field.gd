@@ -387,8 +387,8 @@ func make_rocket_node(parent: Node3D) -> Node3D:
 	hm.height = Ordnance.ROCKET_R * 2.0
 	hm.is_hemisphere = true
 	nose.mesh = hm
-	nose.position = Vector3(0, 0, Ordnance.ROCKET_LEN * 0.5)
-	nose.rotation_degrees = Vector3(-90, 0, 0)
+	nose.position = Vector3(0, 0, -Ordnance.ROCKET_LEN * 0.5)   # 头部朝 -Z（= 速度方向）
+	nose.rotation_degrees = Vector3(90, 0, 0)
 	nose.material_override = body_mat
 	root.add_child(nose)
 	var fin_mat := StandardMaterial3D.new()
@@ -398,15 +398,37 @@ func make_rocket_node(parent: Node3D) -> Node3D:
 		var pm := PrismMesh.new()
 		pm.size = Vector3(Ordnance.ROCKET_R * 1.6, Ordnance.ROCKET_R * 1.6, Ordnance.ROCKET_LEN * 0.35)
 		fin.mesh = pm
-		fin.position = Vector3(0, 0, -Ordnance.ROCKET_LEN * 0.35).rotated(
-			Vector3(0, 0, 1), float(i) * TAU / 4.0)
+		fin.position = Vector3(0, 0, Ordnance.ROCKET_LEN * 0.35)   # 尾翼在后（+Z）
 		var pivot := Node3D.new()
 		pivot.rotation_degrees = Vector3(0, 0, float(i) * 90.0)
 		pivot.add_child(fin)
-		fin.position = Vector3(Ordnance.ROCKET_R, 0, -Ordnance.ROCKET_LEN * 0.35)
+		fin.position = Vector3(Ordnance.ROCKET_R, 0, Ordnance.ROCKET_LEN * 0.35)
 		fin.rotation_degrees = Vector3(90, 0, 0)
 		fin.material_override = fin_mat
 		root.add_child(pivot)
+	# 尾部烟雾 + 发光尾迹（用户口径：要有明显的尾迹提示）
+	var tail: Array = []
+	for i in 5:
+		var seg := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		var r: float = 0.075 * (1.0 - float(i) * 0.13)
+		sm.radius = maxf(0.02, r)
+		sm.height = sm.radius * 2.0
+		seg.mesh = sm
+		var tm2 := StandardMaterial3D.new()
+		tm2.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		tm2.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		tm2.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		var a: float = 0.85 - float(i) * 0.15
+		tm2.albedo_color = Color(1.0, 0.72, 0.32, a)
+		tm2.emission_enabled = true
+		tm2.emission = Color(1.0, 0.55, 0.2)
+		tm2.emission_energy_multiplier = 1.6
+		seg.material_override = tm2
+		seg.visible = false
+		root.add_child(seg)
+		tail.append(seg)
+	root.set_meta("tail", tail)
 	return root
 
 

@@ -1759,6 +1759,45 @@ func _initialize() -> void:
 	_chk(nb.power_cur < nb0, "坠机炮击应打到 2.5 格内的角色")
 	_chk(_s.gm.revive_countdown(he2) > 0, "坠机死亡后应有重生倒计时")
 
+	# ── 37. 手榴弹走真实 GM 路径爆炸 + 出界防护 ──
+	print("\n[37] 手榴弹 GM 路径与出界防护")
+	_s.clear_projectiles()
+	for k in _s._grenade_models.keys():
+		pass
+	var sani3: Unit = null
+	for u in _s.units:
+		if u.name == "萨尼铁塔": sani3 = u
+	var g3 := Ordnance.make_grenade(sani3, Vector2(7.5, 7.5), true)
+	_s._spawn_grenade_model(Vector2i(7, 7), g3)
+	print("    落地后 GM 在途 = %d（skill=%s delay=%d）" % [
+		_s.gm.pending.size(),
+		String(_s.gm.pending[0].skill_id) if _s.gm.pending.size() > 0 else "-",
+		int(_s.gm.pending[0].delay) if _s.gm.pending.size() > 0 else -1])
+	_chk(_s.gm.pending.size() == 1, "手榴弹落地必须由 GM 登记")
+	for i in 4:
+		await _s._gm_step()                       # 真实路径：回合边界 -> GM 到期 -> 爆炸
+	var frag := 0
+	for it in _s.field.items:
+		var pp3: Projectile = it["p"]
+		if pp3.kind == Projectile.KIND_FRAGMENT and pp3.alive: frag += 1
+	print("    4 个回合边界后：破片 %d 枚 ｜ 残留模型 %d ｜ GM 在途 %d" % [
+		frag, _s._grenade_models.size(), _s.gm.pending.size()])
+	_chk(frag == 8, "手榴弹 4 回合后应爆炸并撒出 8 枚破片（真实 GM 路径）")
+	_chk(_s._grenade_models.is_empty(), "爆炸后地上模型应清掉")
+	# 出界防护：钳制 + 移动不会跑出地图
+	var he3: Unit = null
+	for u in _s.units:
+		if Unit.base_name(u.name).begins_with("俯冲轰炸直升机"): he3 = u
+	print("    钳制：(-5, 999) -> %s ｜ (9999, -3) -> %s" % [
+		_s._clamp_cell(Vector2i(-5, 999)), _s._clamp_cell(Vector2i(9999, -3))])
+	var c1: Vector2i = _s._clamp_cell(Vector2i(-5, 999))
+	_chk(_s._in_bounds(c1) and _s._in_bounds(_s._clamp_cell(Vector2i(9999, -3))),
+		"任何格子都会被钳进地图内（永不出界）")
+	_s._do_move(he3, Vector2i(-8, -8))
+	await create_timer(0.4).timeout
+	print("    强制向场外移动后：位置 %s ｜ 在界内=%s" % [he3.cell, _s._in_bounds(he3.cell)])
+	_chk(_s._in_bounds(he3.cell), "单位不可能被移动到地图外")
+
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
 		print("✅ v3 试玩链路全部通过")
