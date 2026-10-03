@@ -101,18 +101,16 @@ static func sphere_hits_body(ctr: Vector3, radius: float, cell: Vector2i,
 	return hd * hd + dy * dy <= radius * radius
 
 
-## 箭矢在这一小段路径上打到了哪个角色（细圆柱 vs 脚下小圆）。
+## 弹道物在这一小段路径上打到了哪个角色（细圆柱 vs 脚下小圆）。
 ## 用线段采样：细判定配大步长会漏检，所以沿路径取若干点。
 ## body_r = 这一发自己的"身体"半径（箭矢 0.075、加农炮弹 0.25）
 ##
-## 高度轴（用户口径第 83 轮）分两档：
-##   · strict = false（箭矢类沿用老口径）：地面单位不看高度轴；但**悬空单位必须瞄对高度** ——
-##     从悬停 2 格的直升机下面飞过去不算命中（所以瞄准时要瞄它的身体中心）。
-##   · strict = true（炮弹类"撞到人就空爆"）：对**所有**单位都要真的碰到身体，
-##     否则炮弹从别人头顶飞过也会被判成"被拦下"，看起来就是半空乱炸。
+## 高度轴（用户口径第 83/84 轮）：**一切按物理碰撞判定** ——
+## 角色身体是竖直圆柱 [hover, hover + BODY_H]（悬空单位整体抬高），
+## 弹道物必须真的碰到它才算命中：从地面角色头顶飞过、从悬停单位下面穿过都不算；
+## 但**只要碰到任何角色（不分敌我）就照常造伤**。
 static func arrow_body_hit_seg(from: Vector3, to: Vector3, attacker: Unit,
-		units: Array[Unit], unit_body_r: float, body_r: float = ARROW_BODY_R,
-		strict: bool = false) -> Unit:
+		units: Array[Unit], unit_body_r: float, body_r: float = ARROW_BODY_R) -> Unit:
 	var rr := body_r + unit_body_r
 	var steps := maxi(2, int(from.distance_to(to) / 0.05) + 1)
 	for s in steps + 1:
@@ -124,12 +122,27 @@ static func arrow_body_hit_seg(from: Vector3, to: Vector3, attacker: Unit,
 			var dz := p.z - (float(o.cell.y) + 0.5)
 			if dx * dx + dz * dz > rr * rr:
 				continue
-			if strict or o.hover > 0.0001:
-				var span := body_span(o)
-				if p.y < span.x - body_r or p.y > span.y + body_r:
-					continue
+			var span := body_span(o)
+			if p.y < span.x - body_r or p.y > span.y + body_r:
+				continue
 			return o
 	return null
+
+
+## 圆盘（含内部）覆盖的【格子】：格心到圆心的距离 <= rmax。
+## 用户口径（第 84 轮）：直升机俯冲轰炸是"点 0~N 格内的一格" —— 这一格集合就是粉色高亮。
+static func disc_cells(ctr: Vector2, rmax: float, gw: int, gh: int,
+		x0: int = 0, y0: int = 0) -> Dictionary:
+	var res := {}
+	var cx0: int = maxi(x0, int(floor(ctr.x - rmax)) - 1)
+	var cx1: int = mini(x0 + gw - 1, int(ceil(ctr.x + rmax)) + 1)
+	var cy0: int = maxi(y0, int(floor(ctr.y - rmax)) - 1)
+	var cy1: int = mini(y0 + gh - 1, int(ceil(ctr.y + rmax)) + 1)
+	for y in range(cy0, cy1 + 1):
+		for x in range(cx0, cx1 + 1):
+			if ctr.distance_to(Vector2(float(x) + 0.5, float(y) + 0.5)) <= rmax + 0.0001:
+				res[Vector2i(x, y)] = true
+	return res
 
 
 ## 欧氏环带（射界）覆盖的【格子】：格心到圆心的距离落在 [rmin, rmax] 内。

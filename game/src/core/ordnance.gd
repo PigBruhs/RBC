@@ -93,9 +93,10 @@ static func make_rocket(caster: Unit, from: Vector3, to: Vector2, ends_turn: boo
 	p.arc_max = 2.4
 	p.recalc_apex()
 	p.hit_r = ROCKET_R
-	p.hit_tags = []                      # 不被打掉（箭头不能拦火箭）
-	# 用户口径（第 83 轮）：火箭属于【炮弹类】—— 飞进哨兵射界同样会惊动哨兵
-	p.sentry_trigger = true
+	# 炮弹类统一模板（用户口径第 84 轮）：可以被箭击落 + 惊动哨兵
+	var tpl := Ballistics.shell_like_defaults(Projectile.KIND_ROCKET)
+	p.hit_tags.assign(tpl["hit_tags"])
+	p.sentry_trigger = bool(tpl["sentry_trigger"])
 	p.shot = _shot(Projectile.KIND_ROCKET, caster, ends_turn, ROCKET_BLAST_R, {}, "")
 	return p
 
@@ -146,8 +147,9 @@ static func make_shell(caster: Unit, to: Vector2, ends_turn: bool, rng,
 	p.pre = pre
 	p.t = -pre / p.dur
 	p.hit_r = SHELL_HIT_R
-	p.hit_tags = ["arrow"]
-	p.sentry_trigger = true
+	var tpl_s := Ballistics.shell_like_defaults(Projectile.KIND_SHELL)
+	p.hit_tags.assign(tpl_s["hit_tags"])          # 可以被箭击落
+	p.sentry_trigger = bool(tpl_s["sentry_trigger"])
 	p.arc_scale = 0.45
 	p.arc_min = 0.8
 	p.arc_max = 3.6
@@ -169,6 +171,7 @@ static func make_marker(caster: Unit, to: Vector2) -> Projectile:
 		maxf(0.2, from.distance_to(to) / (SHELL_TILES_PER_SEC * MARKER_SPEED_MULT)))
 	_config_owner(p, caster)
 	p.hit_r = MARKER_HIT_R
+	# 召唤球：可被击落、惊动哨兵，但它**不是炮弹类**（被击落/撞人都只是整发作废，不炸）
 	p.hit_tags = ["arrow"]
 	p.sentry_trigger = true
 	p.y0 = 0.90
@@ -195,8 +198,9 @@ static func make_grenade(caster: Unit, to: Vector2, ends_turn: bool) -> Projecti
 		maxf(0.25, from.distance_to(to) / SHELL_TILES_PER_SEC))
 	_config_owner(p, caster)
 	p.hit_r = GRENADE_HIT_R
-	p.hit_tags = ["arrow"]                # 可以被箭击落
-	p.sentry_trigger = true               # 会惊动哨兵
+	var tpl_g := Ballistics.shell_like_defaults(Projectile.KIND_GRENADE)
+	p.hit_tags.assign(tpl_g["hit_tags"])           # 可以被箭击落
+	p.sentry_trigger = bool(tpl_g["sentry_trigger"])   # 会惊动哨兵
 	p.arc_scale = 0.55
 	p.arc_min = 1.0
 	p.arc_max = 4.0

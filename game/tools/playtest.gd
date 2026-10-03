@@ -124,7 +124,8 @@ func _basic_sig(u: Unit, victim: Unit, entry: String) -> String:
 		int(_s.field.items.size() > 0 or hit_ok > 0), ",".join(PackedStringArray(kinds)),
 		_s.field.items.size(), u.energy_points(), int(u.has_acted), hit_ok]
 	# 齐射/连发是异步的：等它把剩下的打完再交给下一次探测（免得污染下一条入口的计数）
-	await create_timer(1.3).timeout
+	# 注意：火箭每两波间隔 1 秒、共 4 波 -> 至少要等 3.1 秒
+	await create_timer(3.7).timeout
 	_s.clear_projectiles()
 	return sig
 
@@ -813,24 +814,56 @@ func _initialize() -> void:
 		_chk(pierced, "木刺不挡箭：箭应穿过木刺命中后面的目标")
 		_chk(spike.power_cur == spike_before, "木刺不挡箭：木刺本身不应被箭击中")
 
-		# 友伤：友军站在弹道上
+		# 友伤（第 84 轮口径：一切按物理碰撞判定）
+		#   ① 挡在弹道上的友军：箭从他头顶飞过 -> 不算命中（不再"隔空误伤"）
+		#   ② 直接朝友军射：箭真的碰到他 -> 照常造伤
+		# 先把别人挪到角落：箭现在是物理判定，弹道上站着谁就会打到谁
+		for u2 in _s.units:
+			if u2 != alette and u2 != gerald and u2 != victim3:
+				u2.cell = Vector2i(45, 45)
+				if u2.visual != null:
+					u2.visual.position = Vector3(45.5, u2.hover, 45.5)
 		alette.begin_turn()
 		_s.active = alette
 		spike.power_cur = spike.power_max
 		spike.cell = Vector2i(30, 30)            # 挪走木刺
-		gerald.cell = Vector2i(4, 6)             # 友军挡中间
+		gerald.cell = Vector2i(4, 6)             # 友军站在弹道中间
 		gerald.power_cur = gerald.power_max
 		gerald.armor_cur = Rules.points_to_milli(5)   # 压低护甲，否则 26力 vs 26甲 = 打不动
 		victim3.cell = Vector2i(4, 8)
 		victim3.power_cur = victim3.power_max
 		var gerald_before: int = gerald.power_cur
+		var log_from: int = _s._debug_log.size()
 		_s._attack_target_unit(victim3, false)
 		await create_timer(4.5).timeout
-		print("    弹道上放友军 Gerald：力量 %s -> %s" % [
-			gerald_before / 1000.0, gerald.power_cur / 1000.0])
-		_chk(gerald.power_cur < gerald_before, "箭矢应打中友军（友伤）")
+		print("    弹道上放友军 Gerald：力量 %s -> %s ｜ 目标 %s -> %s" % [
+			gerald_before / 1000.0, gerald.power_cur / 1000.0,
+			victim3.power_max / 1000.0, victim3.power_cur / 1000.0])
+		# 假人会定时满血复活，所以以【本次新增的日志】为准（和上面木刺那条同一个套路）
+		var new_lines: Array = _s._debug_log.slice(log_from)
+		var hit_friend := false
+		var hit_target := false
+		for lg2 in new_lines:
+			if String(lg2).contains("攻击 → %s" % gerald.name):
+				hit_friend = true
+			if String(lg2).contains("攻击 → %s" % victim3.name):
+				hit_target = true
+		_chk(not hit_friend, "箭从友军头顶飞过不算命中（按物理碰撞判定）")
+		_chk(gerald.power_cur == gerald_before, "被飞过的友军不掉血")
+		_chk(hit_target, "箭从友军头顶飞过后仍然打到被瞄准的目标")
+		# ② 直接瞄准友军射一箭：碰到了就必须正常造伤
+		alette.begin_turn()
+		_s.active = alette
+		gerald.armor_cur = Rules.points_to_milli(5)
+		gerald.power_cur = gerald.power_max
+		victim3.cell = Vector2i(40, 40)
+		var gerald_before2: int = gerald.power_cur
+		_s._attack_target_unit(gerald, false)
+		await create_timer(4.5).timeout
+		print("    直接朝友军 Gerald 射：力量 %s -> %s" % [
+			gerald_before2 / 1000.0, gerald.power_cur / 1000.0])
+		_chk(gerald.power_cur < gerald_before2, "箭矢碰到任何角色都要正常造伤（友军也一样）")
 		gerald.armor_cur = gerald.armor_max
-		_chk(victim3.power_cur == victim3.power_max, "友军挡下后目标不受伤害")
 
 	# ── 18. 移动选项 + 二次确认 ──
 	print("\n[18] 移动选项与二次确认")
@@ -2001,11 +2034,13 @@ func _initialize() -> void:
 	# AI 出手：打不出也必须自己收尾（不然 AI 回合卡死，以前靠 9 秒看门狗兜）
 	_s._turn_just_finished = null
 	_s.active = heli_b
+	var tc_b0: int = _s.gm.turn_count
 	_s._ai_attack(heli_b, {"target": foe_b, "aim": Vector2(14.5, 10.5)})
-	print("    AI 入口：火箭 %d 发 ｜ 回合已收尾=%s" % [
-		_count_kind(Projectile.KIND_ROCKET), _s.active != heli_b])
+	await create_timer(0.4).timeout          # 回合收尾是异步的（_finish_turn -> _gm_step -> _next_turn）
+	print("    AI 入口：火箭 %d 发 ｜ 推进了回合边界=%s" % [
+		_count_kind(Projectile.KIND_ROCKET), _s.gm.turn_count > tc_b0])
 	_chk(_count_kind(Projectile.KIND_ROCKET) == 0, "AI 精力不足时也不许出弹")
-	_chk(_s.active != heli_b, "AI 打不出来时必须自己结束回合（绝不允许软锁）")
+	_chk(_s.gm.turn_count > tc_b0, "AI 打不出来时必须自己结束回合（绝不允许软锁）")
 	# AI 决策层：付不起的普攻根本不该被选中
 	heli_b.energy = 0
 	heli_b.has_acted = false
@@ -2319,6 +2354,101 @@ func _initialize() -> void:
 	await create_timer(2.0).timeout
 	print("    箭飞完：直升机力量 %d -> %d" % [hp_t0 / 1000, he_t.power_cur / 1000])
 	_chk(he_t.power_cur < hp_t0, "远程普攻必须能真的打到悬停的直升机（高度轴正确）")
+	_s.clear_projectiles()
+
+	# ── 43. 俯冲轰炸：粉色可选格 + 两次点击确认（第 84 轮）──
+	print("\n[43] 俯冲轰炸选格：粉色高亮 + 两次确认")
+	var he_p: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0)
+	he_p.power_cur = he_p.power_max
+	he_p.energy = he_p.energy_max
+	he_p.has_acted = false
+	he_p.has_moved = false
+	he_p.cell = Vector2i(10, 10)
+	he_p.visual.position = Vector3(10.5, he_p.hover, 10.5)
+	he_p.tags.erase("dive_ready")
+	_s._dive_clear(he_p)
+	_s.gm.ai_enabled = false
+	_s._turn_just_finished = he_p       # 让 _finish_turn() 的幂等保护生效：别让回合机马上把准备状态消费掉
+	_s._clear_pending()
+	_s.active = he_p
+	_s._choose_skill("dive_bomb")
+	var want_cells: Dictionary = Targeting.disc_cells(Vector2(10.5, 10.5), 20.0, _s.PW, _s.PH, _s.PX, _s.PY)
+	print("    进入选格：粉色格 %d（期望 %d）｜ 目标格在集合里=%s ｜ 已选格=%s" % [
+		_s.cell_targets.size(), want_cells.size(), _s.cell_targets.has(Vector2i(14, 10)),
+		_s._pending_kind])
+	_chk(_s._cell_targeting, "俯冲轰炸进入【点格子】阶段（不拖拽）")
+	_chk(_s.cell_targets.size() == want_cells.size() and _s.cell_targets.size() > 100,
+		"可选格 = 20 格圆盘内的所有格子（粉色高亮）")
+	_chk(_s.cell_targets.has(Vector2i(14, 10)) and not _s.cell_targets.has(Vector2i(10, 35)),
+		"射程内是可选格、射程外不是")
+	# 第一次点：只出黄勾，不放技能
+	var cast1: bool = _s._click_cell_target(Vector2i(14, 10))
+	print("    第一次点 (14,10)：施放=%s ｜ 待确认=%s ｜ 目标格=%s" % [
+		cast1, _s._pending_kind, _s._pending_cell])
+	_chk(not cast1 and _s._pending_kind == "cell" and _s._pending_cell == Vector2i(14, 10),
+		"第一次点只出黄勾（两次点击确认）")
+	_chk(not he_p.tags.has("dive_ready"), "第一次点不许真的放技能")
+	# 点另一格：黄勾跟着移动（仍然不放）
+	_s._click_cell_target(Vector2i(15, 10))
+	_chk(_s._pending_cell == Vector2i(15, 10) and not he_p.tags.has("dive_ready"),
+		"改点别的格子只是移动黄勾")
+	# 第二次点同一格：确认施放
+	var cast2: bool = _s._click_cell_target(Vector2i(15, 10))
+	print("    第二次点 (15,10)：施放=%s ｜ 目标=%s ｜ 粉色格残留=%d" % [
+		cast2, he_p.tags.get("dive_ready", "-"), _s.cell_targets.size()])
+	_chk(cast2 and he_p.tags.has("dive_ready") and he_p.tags["dive_ready"] == Vector2i(15, 10),
+		"第二次点同一格才真的进入俯冲准备")
+	_chk(_s.cell_targets.is_empty() and not _s._cell_targeting, "放完技能后粉色高亮要收干净")
+	# 超程的格子：不画勾、不施放
+	_s._dive_clear(he_p)
+	he_p.tags.erase("dive_ready")
+	he_p.energy = he_p.energy_max
+	he_p.has_acted = false
+	_s.active = he_p
+	_s._choose_skill("dive_bomb")
+	var far_cell := Vector2i(10, 40)         # 距 (10.5,10.5) 约 29.5 格 > 20
+	var cast3: bool = _s._click_cell_target(far_cell)
+	print("    点超程格 %s：施放=%s ｜ 待确认=%s" % [far_cell, cast3, _s._pending_kind])
+	_chk(not cast3 and _s._pending_kind == "" and not he_p.tags.has("dive_ready"),
+		"超出 20 格的格子点了不作数（提示重新点）")
+	_s._clear_pending()
+	_s.cell_targets = {}
+	_s._cell_targeting = false
+	_s._show_action_menu()
+
+	# ── 44. 火箭也能被箭击落（炮弹类统一模板，第 84 轮）──
+	print("\n[44] 火箭被箭击落")
+	_s.clear_projectiles()
+	var he_s: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	var bud_s: Unit = _unit_by("Gerald", 0)
+	for w3 in [he_s, bud_s]:
+		w3.power_cur = w3.power_max
+		w3.armor_cur = w3.armor_max
+		w3.tags.erase("crashing")
+		if w3.visual != null:
+			w3.visual.visible = true
+	he_s.cell = Vector2i(4, 5)
+	he_s.visual.position = Vector3(4.5, he_s.hover, 5.5)
+	# 弹道物互相判定是"水平面重叠"：两条弹道必须在同一行，否则永远不会撞上
+	var rk_s := Ordnance.make_rocket(he_s, Vector3(4.5, 2.0, 5.5), Vector2(16.0, 5.5), false)
+	_s.field.register(rk_s)
+	var ar_s: Projectile = _s._spawn_arrow(bud_s, Vector3(16.0, 0.75, 5.5), Vector3(4.0, 0.55, 5.5),
+		null, false, false)
+	_chk(rk_s.hit_tags.has(Projectile.KIND_ARROW) and Ballistics.can_shoot_down(Projectile.KIND_ARROW, rk_s),
+		"火箭声明自己怕箭（炮弹类统一模板）")
+	_s._debug_log.clear()                    # 日志是环形缓冲：先清空，再看这一段里有没有"空爆"
+	for i4 in 400:
+		_s.field.step(1.0 / 60.0)
+		if not rk_s.alive:
+			break
+	var burst := false
+	for lg4 in _s._debug_log:
+		if String(lg4).contains("空爆"):
+			burst = true
+	print("    火箭 alive=%s 原因='%s' 位置 %s ｜ 箭 alive=%s ｜ 空爆日志=%s" % [
+		rk_s.alive, rk_s.removed_reason, rk_s.removed_at, ar_s.alive, burst])
+	_chk(not rk_s.alive and rk_s.removed_reason == "shot_down", "火箭会被箭击落")
+	_chk(burst, "火箭被击落后走统一的空爆结算（有日志）")
 	_s.clear_projectiles()
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])

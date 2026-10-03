@@ -270,20 +270,23 @@ func _initialize() -> void:
 	_expect(Targeting.body_span(hv) == Vector2(2.0, 3.0), "悬停 2 格：身体区间 [2, 3]", fails)
 	_expect(absf(Targeting.aim_height(hv) - 2.5) < 0.001, "打直升机要瞄 2.5 高（身体中心）", fails)
 	_expect(absf(Targeting.aim_height(grd) - 0.5) < 0.001, "打地面角色瞄 0.5 高", fails)
-	# 箭矢类（strict = false）：瞄 0.55 的地面弹道打不到悬停 2 格的直升机（要从它下面穿过）
+	# 一切按物理碰撞判定（第 84 轮）：弹道物必须真的碰到身体
 	var seg_lo := Targeting.arrow_body_hit_seg(Vector3(5.5, 0.55, 2.5), Vector3(5.5, 0.55, 8.5),
-		grd, [hv] as Array[Unit], 0.30, 0.075, false)
-	_expect(seg_lo == null, "贴着地面飞的箭打不到悬停 2 格的直升机", fails)
+		grd, [hv] as Array[Unit], 0.30, 0.075)
+	_expect(seg_lo == null, "贴着地面飞的箭打不到悬停 2 格的直升机（从它下面穿过）", fails)
 	var seg_hi := Targeting.arrow_body_hit_seg(Vector3(5.5, 2.5, 2.5), Vector3(5.5, 2.5, 8.5),
-		grd, [hv] as Array[Unit], 0.30, 0.075, false)
+		grd, [hv] as Array[Unit], 0.30, 0.075)
 	_expect(seg_hi == hv, "瞄到 2.5 高就能打中直升机（远程瞄准必须考虑高度轴）", fails)
-	# 炮弹类（strict = true）：对地面单位也要真的碰到身体，否则会"从头顶飞过还炸"
 	var seg_over := Targeting.arrow_body_hit_seg(Vector3(9.5, 3.0, 2.5), Vector3(9.5, 3.0, 8.5),
-		hv, [grd] as Array[Unit], 0.30, 0.16, true)
-	_expect(seg_over == null, "炮弹从地面角色头顶 3 格飞过 -> 不算撞上", fails)
+		hv, [grd] as Array[Unit], 0.30, 0.16)
+	_expect(seg_over == null, "从地面角色头顶 3 格飞过 -> 不算撞上（不分弹种，一律物理判定）", fails)
 	var seg_touch := Targeting.arrow_body_hit_seg(Vector3(9.5, 0.8, 2.5), Vector3(9.5, 0.8, 8.5),
-		hv, [grd] as Array[Unit], 0.30, 0.16, true)
-	_expect(seg_touch == grd, "炮弹真的碰到身体 -> 撞上（会被拦下空爆）", fails)
+		hv, [grd] as Array[Unit], 0.30, 0.16)
+	_expect(seg_touch == grd, "真的碰到身体 -> 撞上（会被拦下空爆）", fails)
+	# 碰到友军同样算碰到（友伤按物理判定，不额外豁免）
+	var seg_friend := Targeting.arrow_body_hit_seg(Vector3(9.5, 0.5, 2.5), Vector3(9.5, 0.5, 8.5),
+		hv, [grd] as Array[Unit], 0.30, 0.075)
+	_expect(seg_friend == grd, "弹道物碰到友军也照常命中（友伤）", fails)
 	# 贴地空爆 vs 悬停的直升机：炸在地面够不到 2 格高的身体
 	_expect(not Targeting.sphere_hits_body(Vector3(5.5, 0.6, 5.5), 0.5, Vector2i(5, 5), 0.30, 1.0, 2.0),
 		"贴地空爆打不到悬停 2 格的直升机", fails)
@@ -310,6 +313,16 @@ func _initialize() -> void:
 	_expect(Ballistics.is_shell_class(Projectile.KIND_ROCKET) and Ballistics.triggers_sentry(
 		Ordnance.make_rocket(hv, Vector3(5.5, 2.0, 5.5), Vector2(9.5, 5.5), true)),
 		"火箭是炮弹类：会惊动哨兵（用户口径第 83 轮）", fails)
+	# 炮弹类统一模板（第 84 轮）：可被箭击落 + 被拦下走同一套收尾
+	var rk_i := Ordnance.make_rocket(hv, Vector3(5.5, 2.0, 5.5), Vector2(9.5, 5.5), true)
+	_expect(rk_i.hit_tags.has(Projectile.KIND_ARROW), "火箭可以被箭击落（炮弹类统一模板）", fails)
+	_expect(Ballistics.can_shoot_down(Projectile.KIND_ARROW, rk_i), "箭矢真的能拦下火箭", fails)
+	_expect(Ballistics.intercept_result(Projectile.KIND_ROCKET) == "burst"
+		and Ballistics.intercept_result(Projectile.KIND_SHELL) == "burst"
+		and Ballistics.intercept_result(Projectile.KIND_GRENADE) == "drop",
+		"被拦下：炮弹/火箭就地空爆，枪榴弹就地落地计时", fails)
+	_expect(Ballistics.intercept_result(Projectile.KIND_MARKER) == "",
+		"召唤球被击落只是作废（不炸）", fails)
 	# 哨兵箭只吃 25% 力量（用户口径第 83 轮）
 	var snt := Ordnance.make_arrow(grd, Vector3(5.5, 0.75, 5.5), Vector3(9.5, 0.55, 5.5), null,
 		false, false, true)
@@ -590,8 +603,9 @@ func _initialize() -> void:
 	var rk := Ordnance.make_rocket(heli_u, Vector3(5.5, 2.0, 5.5), Vector2(25.5, 5.5), true)
 	_expect(absf(rk.hit_r - 0.0925) < 0.001, "火箭碰撞半径 = 直径的一半（0.0925）", fails)
 	_expect(rk.speed_profile == Projectile.SPEED_ROCKET, "火箭走变速剖面", fails)
-	# 用户口径（第 83 轮）：火箭属于炮弹类 —— 不被打掉，但**会惊动哨兵**
-	_expect(rk.hit_tags.is_empty() and rk.sentry_trigger, "火箭不被打掉、但会惊动哨兵", fails)
+	# 用户口径（第 83/84 轮）：火箭属于炮弹类 —— **可以被箭击落**，而且会惊动哨兵
+	_expect(rk.hit_tags.has(Projectile.KIND_ARROW) and rk.sentry_trigger,
+		"火箭可以被箭击落、会惊动哨兵（炮弹类统一模板）", fails)
 	_expect(absf(rk.dur - Ordnance.rocket_t_of_s(20.0)) < 0.001, "总时长 = 解析解 t(20 格)", fails)
 	_expect(absf(float(Ordnance.ROCKET_BLAST_R) - 1.0) < 0.001, "落地范围直径 2 格（半径 1）", fails)
 	_expect(int(Ordnance.ROCKET_FRAGMENTS) == 2, "落地生成 2 枚破片", fails)

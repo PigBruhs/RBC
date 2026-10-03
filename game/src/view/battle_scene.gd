@@ -755,15 +755,19 @@ func _choose_skill(id: String) -> void:
 			_skill_info_text = ""
 			_perform_skill(active, id, _cc(active.cell), active.cell)
 		Skills.AIM_CELL:
-			# 用户口径：俯冲轰炸是【直接点 0~20 格内的一个格子】，不是拖拽瞄准，也不用标记球
+			# 用户口径：俯冲轰炸是【直接点 0~20 格内的一个格子】，不是拖拽瞄准，也不用标记球；
+			# 第 84 轮：可选格用【粉色高亮】画出来，而且要两次点击确认（第一次出黄勾）
 			_aim_skill_id = id
 			_cell_targeting = true
 			phase = Phase.CHOOSE_TARGET
 			_skill_info_text = Skills.detail_text(id)
+			cell_targets = Targeting.disc_cells(_cc(active.cell),
+				float(d.get("range_max", 20.0)), PW, PH, PX, PY)
 			_clear_hints()
+			_draw_hints()
 			_refresh_all()
-			_log("  🎯 选择【%s】目标：点 0~%d 格内的一格（红色光柱会标出目标）" % [
-				d["name"], int(d.get("range_max", 20.0))])
+			_log("  🎯 选择【%s】目标：%d 格内共 %d 个可选格（粉色高亮）" % [
+				d["name"], int(d.get("range_max", 20.0)), cell_targets.size()])
 		_:
 			_aim_skill_id = id
 			_begin_aim()
@@ -810,9 +814,7 @@ func _perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 	if d.is_empty() or u == null or not u.is_alive():
 		return false
 	if u.energy_points() < int(d["cost"]):
-		_log("  ⚠ %s 精力不足（剩 %d，需 %d），用不出【%s】" % [
-			u.name, u.energy_points(), int(d["cost"]), d["name"]])
-		return false
+		return false                             # 拒绝类文案不写日志（用户口径：只留在状态栏/菜单）
 	match Skills.cast_of(sid):
 		Skills.CAST_SENTRY:
 			_cast_sentry(u)                      # 自己扣精力 + 结束回合
@@ -1585,7 +1587,7 @@ func _on_result_continue() -> void:
 
 ## 点格子类目标（俯冲轰炸这类 aim=cell 的技能，以及以后"点地格"的普攻）：
 ## 越界/超程会提示重新点；合法就交给统一入口。单独成函数便于自检直接调用。
-func _confirm_cell_target(cell: Vector2i) -> bool:
+func _cell_target_ok(cell: Vector2i) -> bool:
 	if active == null:
 		return false
 	var dcell_sk := Skills.get_def(_aim_skill_id)
@@ -1599,12 +1601,36 @@ func _confirm_cell_target(cell: Vector2i) -> bool:
 	if base0.distance_to(ctr0) > dd_max:
 		_log("  ✗ 超出射程（%.1f > %.0f 格），重新点一个" % [base0.distance_to(ctr0), dd_max])
 		return false
+	return true
+
+
+## 点格子类目标的一次点击（用户口径第 84 轮：粉色可选格 + **两次点击确认**）。
+## 返回 true = 这次点击真的把技能放出去了。第一次点只出黄勾，第二次点同一格才确认。
+func _click_cell_target(cell: Vector2i) -> bool:
+	if not _cell_targeting:
+		return false
+	if not _same_pending("cell", cell):
+		if not _cell_target_ok(cell):          # 越界/超程：不画勾，提示重新点
+			return false
+		_set_pending("cell", cell)             # 第一次点：出黄勾，等第二次确认
+		_refresh_all()
+		return false
+	_clear_pending()
+	return _confirm_cell_target(cell)
+
+
+func _confirm_cell_target(cell: Vector2i) -> bool:
+	if active == null:
+		return false
+	if not _cell_target_ok(cell):
+		return false
 	_cell_targeting = false
+	cell_targets = {}
 	var sid0 := _aim_skill_id
 	_aim_skill_id = ""
 	# sid 为空 = 点格子类普攻；否则是该技能
-	var ok0: bool = _perform_skill(active, sid0, ctr0, cell) if sid0 != "" \
-		else _perform_basic(active, ctr0, null, null, false, true)
+	var ok0: bool = _perform_skill(active, sid0, _cc(cell), cell) if sid0 != "" \
+		else _perform_basic(active, _cc(cell), null, null, false, true)
 	if not ok0:
 		_show_action_menu()
 	return ok0
@@ -1612,6 +1638,7 @@ func _confirm_cell_target(cell: Vector2i) -> bool:
 
 func _show_action_menu() -> void:
 	_cell_targeting = false
+	cell_targets = {}
 	if _ai_turn:
 		return                              # AI 回合不弹菜单
 	phase = Phase.MENU
@@ -1680,9 +1707,12 @@ func _menu_attack() -> void:
 			phase = Phase.CHOOSE_TARGET
 			reachable = {}
 			attackable = {}
+			cell_targets = Targeting.disc_cells(_cc(active.cell),
+				float(active.rng_max), PW, PH, PX, PY)
 			_clear_hints()
-			_log("  🎯 选择【%s】落点：点 %d 格内的一格" % [
-				AttackProfile.describe(active), active.rng_max])
+			_draw_hints()
+			_log("  🎯 选择【%s】落点：%d 格内共 %d 个可选格（粉色高亮）" % [
+				AttackProfile.describe(active), active.rng_max, cell_targets.size()])
 			_refresh_all()
 		_:
 			phase = Phase.CHOOSE_TARGET
@@ -1942,9 +1972,8 @@ func _arrow_hit_check(p: Projectile, prev: Vector3, cur: Vector3) -> Dictionary:
 	var skip: Unit = null if p.hit_self else (p.ignore_unit if p.ignore_unit != null else p.owner_unit)
 	# ① 角色（细圆柱判定；沿线采样，保证不漏）。判定半径用这一发自己的身体半径
 	#    （箭矢 0.075 / 加农炮弹 0.25）
-	#    炮弹类（第 83 轮）：必须真的碰到身体，否则就从头顶飞过去了
-	var strict: bool = Ballistics.body_impact(p.kind) == "burst"
-	var u := Targeting.arrow_body_hit_seg(prev, cur, skip, units, UNIT_BODY_R, p.hit_r, strict)
+	#    一切按物理碰撞判定（第 84 轮）：必须真的碰到身体 —— 碰到谁就伤谁（不分敌我）
+	var u := Targeting.arrow_body_hit_seg(prev, cur, skip, units, UNIT_BODY_R, p.hit_r)
 	if u != null:
 		if p.shot != null:
 			p.shot.last_hit_dist = p.from.distance_to(p.pos())   # 破片伤害要用"飞了多远"
@@ -1978,11 +2007,11 @@ func _on_projectile_event(event: String, p: Projectile, extra = null) -> void:
 			var victim: Projectile = extra
 			_log("  💥 %s的%s 被%s击落" % [p.owner_name, ProjectileField.kind_cn(p.kind),
 				ProjectileField.kind_cn(victim.kind)])
-			# 用户口径：炮弹在半空被打掉 -> 就地空爆，而且**要真的有伤害**。
-			# 召唤球不走这条路（被击落只是整发作废，不炸）。
+			# 用户口径：炮弹类在半空被打掉 -> 走统一的"被拦下"收尾（炮弹/火箭就地空爆，
+			# 枪榴弹就地落地开始计时）；召唤球不走这条路（被击落只是整发作废，不炸）。
 			for pr in [p, victim]:
-				if pr != null and pr.kind == Projectile.KIND_SHELL and not pr.alive:
-					_air_burst(pr)
+				if pr != null and not pr.alive and Ballistics.is_shell_class(pr.kind):
+					_shell_intercepted(pr, "在半空被打爆")
 			# 弓箭手被动「蓄势」：哨兵箭每摧毁一枚投掷物 +1 层
 			for pr2 in [p, victim]:
 				if pr2 != null and pr2.kind == Projectile.KIND_ARROW \
@@ -1996,20 +2025,12 @@ func _on_projectile_event(event: String, p: Projectile, extra = null) -> void:
 		ProjectileField.EV_HIT_TARGET:
 			_resolve_arrow_hit(sh, extra)
 		ProjectileField.EV_HIT_BODY:
-			# 用户口径（第 83 轮）：炮弹类（炮弹 / 火箭 / 枪榴弹）飞行途中撞到角色
-			# -> 按【被拦下的空爆】处理。枪榴弹例外：它本来就"落地才炸"，所以就地落地开始计时。
+			# 用户口径（第 83/84 轮）：炮弹类飞行途中撞到角色 -> 走统一的"被拦下"收尾
 			var hit_u: Unit = extra.get("unit", null) if extra is Dictionary else null
-			if p.kind == Projectile.KIND_GRENADE:
-				var gc := Vector2i(int(floor(p.pos().x)), int(floor(p.pos().y)))
-				_log("  🛑 %s的枪榴弹在空中撞到 %s，就地落地（%d, %d）" % [
-					p.owner_name, hit_u.name if hit_u != null else "障碍", gc.x, gc.y])
-				_spawn_grenade_model(gc, p)
-			else:
-				_log("  🛑 %s的%s在半空撞到 %s，被拦下就地空爆" % [
-					p.owner_name, ProjectileField.kind_cn(p.kind),
-					hit_u.name if hit_u != null else "障碍"])
-				_flash_sphere(p.pos3(), 0.6, 0.25)
-				_air_burst(p, "被身体拦下")
+			_log("  🛑 %s的%s在半空撞到 %s，被拦下" % [
+				p.owner_name, ProjectileField.kind_cn(p.kind),
+				hit_u.name if hit_u != null else "障碍"])
+			_shell_intercepted(p, "被身体拦下")
 		ProjectileField.EV_LANDED:
 			_on_proj_landed(p)
 		ProjectileField.EV_REMOVED:
@@ -2028,6 +2049,22 @@ func _after_projectile_gone(sh: Ordnance.Shot) -> void:
 		return
 	if sh != null and sh.ends_turn:
 		_finish_turn()
+
+
+## 炮弹类【被拦下】的统一收尾（用户口径第 83/84 轮）：被箭击落、飞行中撞到角色都走这里。
+##   · 炮弹 / 火箭 -> 就地空爆（一格球三维判定，真的造成伤害）
+##   · 枪榴弹       -> 就地落地（立模型 + GM 4 回合计时）—— 它本来就"落地才炸"
+func _shell_intercepted(p: Projectile, why: String) -> void:
+	if p == null:
+		return
+	if Ballistics.intercept_result(p.kind) == "drop":
+		var gc := Vector2i(int(floor(p.pos().x)), int(floor(p.pos().y)))
+		_log("  🛑 %s的%s%s，就地落地（%d, %d）开始计时" % [
+			p.owner_name, ProjectileField.kind_cn(p.kind), why, gc.x, gc.y])
+		_spawn_grenade_model(gc, p)
+		return
+	_flash_sphere(p.pos3(), 0.6, 0.25)
+	_air_burst(p, why)
 
 
 ## 半空被打爆的炮弹：落点就是它当时的位置。
@@ -2584,6 +2621,8 @@ func _crash_impact(u: Unit) -> void:
 var _dive_markers: Dictionary = {}        # 单位名 -> 目标格地面标识（Node3D）
 var _dive: Dictionary = {}                # 正在俯冲的状态机
 var _cell_targeting: bool = false         # 正在"点格子"选技能目标（俯冲轰炸这类 aim=cell 的技能）
+## 点格子类技能的【可选格】：进入选格阶段时算好，粉色高亮画出来（用户口径第 84 轮）
+var cell_targets: Dictionary = {}
 var _turn_watch_t: float = 0.0            # AI 回合看门狗
 
 
@@ -2647,8 +2686,7 @@ func _dive_clear(u: Unit) -> void:
 func _cast_dive(u: Unit, cell: Vector2i) -> void:
 	var d := Skills.get_def("dive_bomb")
 	if u.energy_points() < int(d["cost"]):
-		_log("%s 精力不足，无法使用【%s】" % [u.name, d["name"]])
-		return
+		return                                   # 拒绝类文案不进日志（用户口径）
 	u.spend_energy(int(d["cost"]))
 	u.tags["dive_ready"] = cell
 	_push_unit_stats(u)
@@ -2982,9 +3020,9 @@ func _perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Place
 		return false
 	var prof := AttackProfile.for_unit(u)
 	var cost := int(prof["cost"])
-	# 精力不足：**什么都不做**（不置已行动、不结束回合），由调用方决定怎么收尾
+	# 精力不足：**什么都不做**（不置已行动、不结束回合），由调用方决定怎么收尾。
+	# 拒绝类文案不写日志（用户口径：日志只记既定事实，提示只留在状态栏/菜单）。
 	if u.energy_points() < cost:
-		_log("  ⚠ %s 精力不足（剩 %d，需 %d），打不出这一击" % [u.name, u.energy_points(), cost])
 		return false
 	u.has_acted = true
 	u.has_moved = true
@@ -3262,9 +3300,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 		if phase == Phase.CHOOSE_TARGET:
-			# 点格子类目标：技能（俯冲轰炸）或"点格子"类普攻，都是点一格即选定
+			# 点格子类目标：技能（俯冲轰炸）或"点格子"类普攻
+			# 用户口径（第 84 轮）：粉色可选格 + **两次点击确认**（第一次出黄勾）
 			if _cell_targeting:
-				_confirm_cell_target(cell)
+				_click_cell_target(cell)
 				return
 			# 用户口径：远程和近战【选单位都要确认】—— 第一次点只出黄勾，第二次才弹攻击菜单
 			# 沙盒元素（木刺/土堆）也可以被锁定，流程一样：第一次出勾，第二次打
@@ -3351,6 +3390,7 @@ func _cancel_to_menu() -> void:
 		return
 	if phase == Phase.CHOOSE_TARGET:
 		_cell_targeting = false          # 点格子类目标取消后不许残留，否则下一次点地格会误放技能
+		cell_targets = {}
 		_aim_skill_id = ""
 		_clear_pending()
 		_show_action_menu()
@@ -3633,6 +3673,9 @@ func _draw_hints() -> void:
 	# 可攻击范围（紫色）
 	for cell in attackable.keys():
 		_hint_cell(cell, Color(0.62, 0.28, 0.92, 0.38))
+	# 点格子类技能的可选格（粉色，用户口径第 84 轮）
+	for cell in cell_targets.keys():
+		_hint_cell(cell, Color(1.00, 0.36, 0.82, 0.40))
 	# ── 待确认：用"常驻的一根脉冲灯柱 + 橙色描边格"表示 ──
 	# 之前的彩色流动方案依赖每帧重建 mesh，实测看不见；改成常驻节点 + 直接改材质色。
 	_update_pending_visual()
