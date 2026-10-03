@@ -259,6 +259,86 @@ func _initialize() -> void:
 		[ab_unit2] as Array[Unit])
 	_expect(ab_hits2.is_empty(), "高空空爆打不到人", fails)
 
+	# ── 高度轴（第 83 轮）：悬空单位的身体抬高了 ──
+	print("\n── 高度轴（悬空单位）──")
+	var hv_name := "俯冲轰炸直升机（不要问那么多）"
+	var hv := Unit.from_data(by_name[hv_name])
+	hv.hover = 2.0
+	hv.cell = Vector2i(5, 5)
+	var grd := Unit.from_data(by_name["Gerald"])
+	grd.cell = Vector2i(9, 5)
+	_expect(Targeting.body_span(hv) == Vector2(2.0, 3.0), "悬停 2 格：身体区间 [2, 3]", fails)
+	_expect(absf(Targeting.aim_height(hv) - 2.5) < 0.001, "打直升机要瞄 2.5 高（身体中心）", fails)
+	_expect(absf(Targeting.aim_height(grd) - 0.5) < 0.001, "打地面角色瞄 0.5 高", fails)
+	# 箭矢类（strict = false）：瞄 0.55 的地面弹道打不到悬停 2 格的直升机（要从它下面穿过）
+	var seg_lo := Targeting.arrow_body_hit_seg(Vector3(5.5, 0.55, 2.5), Vector3(5.5, 0.55, 8.5),
+		grd, [hv] as Array[Unit], 0.30, 0.075, false)
+	_expect(seg_lo == null, "贴着地面飞的箭打不到悬停 2 格的直升机", fails)
+	var seg_hi := Targeting.arrow_body_hit_seg(Vector3(5.5, 2.5, 2.5), Vector3(5.5, 2.5, 8.5),
+		grd, [hv] as Array[Unit], 0.30, 0.075, false)
+	_expect(seg_hi == hv, "瞄到 2.5 高就能打中直升机（远程瞄准必须考虑高度轴）", fails)
+	# 炮弹类（strict = true）：对地面单位也要真的碰到身体，否则会"从头顶飞过还炸"
+	var seg_over := Targeting.arrow_body_hit_seg(Vector3(9.5, 3.0, 2.5), Vector3(9.5, 3.0, 8.5),
+		hv, [grd] as Array[Unit], 0.30, 0.16, true)
+	_expect(seg_over == null, "炮弹从地面角色头顶 3 格飞过 -> 不算撞上", fails)
+	var seg_touch := Targeting.arrow_body_hit_seg(Vector3(9.5, 0.8, 2.5), Vector3(9.5, 0.8, 8.5),
+		hv, [grd] as Array[Unit], 0.30, 0.16, true)
+	_expect(seg_touch == grd, "炮弹真的碰到身体 -> 撞上（会被拦下空爆）", fails)
+	# 贴地空爆 vs 悬停的直升机：炸在地面够不到 2 格高的身体
+	_expect(not Targeting.sphere_hits_body(Vector3(5.5, 0.6, 5.5), 0.5, Vector2i(5, 5), 0.30, 1.0, 2.0),
+		"贴地空爆打不到悬停 2 格的直升机", fails)
+	_expect(Targeting.sphere_hits_body(Vector3(5.5, 2.5, 5.5), 0.5, Vector2i(5, 5), 0.30, 1.0, 2.0),
+		"在它身体高度上炸 -> 命中", fails)
+	var ab_hv := Unit.from_data(by_name[hv_name])
+	ab_hv.hover = 2.0
+	ab_hv.cell = Vector2i(5, 5)
+	ab_hv.power_cur = ab_hv.power_max
+	var hv_hits: Array = Damage.air_burst(null, Vector3(5.5, 2.5, 5.5), ab_opts, [ab_hv] as Array[Unit])
+	_expect(hv_hits.size() == 1, "空爆结算会按 hover 判定（悬空单位也能被空爆打到）", fails)
+
+	# ── 炮弹类的"撞到人就空爆"规则表（第 83 轮）──
+	print("\n── 弹道撞人规则 ──")
+	_expect(Ballistics.body_impact(Projectile.KIND_SHELL) == "burst"
+		and Ballistics.body_impact(Projectile.KIND_ROCKET) == "burst"
+		and Ballistics.body_impact(Projectile.KIND_GRENADE) == "burst",
+		"炮弹 / 火箭 / 枪榴弹：飞行中撞到人 -> 就地空爆", fails)
+	_expect(Ballistics.body_impact(Projectile.KIND_ARROW) == "direct"
+		and Ballistics.body_impact(Projectile.KIND_BULLET) == "direct",
+		"箭矢 / 子弹仍是直接命中", fails)
+	_expect(Ballistics.body_impact(Projectile.KIND_MARKER) == "",
+		"召唤球只是信标：不撞人（穿过去）", fails)
+	_expect(Ballistics.is_shell_class(Projectile.KIND_ROCKET) and Ballistics.triggers_sentry(
+		Ordnance.make_rocket(hv, Vector3(5.5, 2.0, 5.5), Vector2(9.5, 5.5), true)),
+		"火箭是炮弹类：会惊动哨兵（用户口径第 83 轮）", fails)
+	# 哨兵箭只吃 25% 力量（用户口径第 83 轮）
+	var snt := Ordnance.make_arrow(grd, Vector3(5.5, 0.75, 5.5), Vector3(9.5, 0.55, 5.5), null,
+		false, false, true)
+	var snt2 := Ordnance.make_arrow(grd, Vector3(5.5, 0.75, 5.5), Vector3(9.5, 0.55, 5.5), null,
+		false, false, false)
+	_expect(absf(snt.shot.power_mult - 0.25) < 0.0001, "哨兵箭力量系数 = 25%", fails)
+	_expect(absf(snt2.shot.power_mult - 1.0) < 0.0001, "普攻箭不受影响（100%）", fails)
+	_expect(snt.shot.tint_sentry and not snt2.shot.tint_sentry, "哨兵箭有 tint 标记", fails)
+	# 真的算一次：40 力量 × 25% - 0 护甲 = 10（口径：先乘系数，再减护甲、再过抗性）
+	var s_pow := Unit.from_data(by_name["萨尼铁塔"])
+	s_pow.power_cur = Rules.points_to_milli(40)
+	s_pow.armor_break = 0
+	var s_tgt := Unit.from_data(by_name["Gerald"])
+	s_tgt.pr = 0
+	s_tgt.armor_cur = 0
+	s_tgt.power_cur = s_tgt.power_max
+	var s_hit: Damage.Hit = Damage.strike(s_pow, s_tgt, false, RngService.new(7), 0,
+		Ordnance.SENTRY_POWER_MULT)
+	var s_dmg: int = s_tgt.power_max - s_tgt.power_cur
+	_expect(s_hit != null and s_dmg == Rules.points_to_milli(10),
+		"哨兵箭伤害 = 40 × 25%% = 10（实际 %d 千分比）" % s_dmg, fails)
+	var s_tgt2 := Unit.from_data(by_name["Gerald"])
+	s_tgt2.pr = 0
+	s_tgt2.armor_cur = 0
+	s_tgt2.power_cur = s_tgt2.power_max
+	Damage.strike(s_pow, s_tgt2, false, RngService.new(7), 0, 1.0)
+	_expect(s_tgt2.power_max - s_tgt2.power_cur == Rules.points_to_milli(40),
+		"同一个射手打普攻箭仍是 40（对照）", fails)
+
 	# ── 加农炮弹 ──
 	print("\n── 加农炮弹 ──")
 	_expect(Ordnance.CANNON_TILES_PER_SEC == 12.0, "弹速 12 格/秒", fails)
@@ -441,13 +521,17 @@ func _initialize() -> void:
 	_expect(fr_p.hit_tags.is_empty() and not fr_p.sentry_trigger, "破片是箭矢类：不会被击落、不惊动哨兵", fails)
 	_expect(fr_p.from.distance_to(fr_p.pos()) < 0.01 and not fr_p.alive == false, "破片从生成点出发", fails)
 	var fr_vals := [
-		[0.0, 25, 25], [1.5, 18, 18], [3.0, 12, 12], [9.5, 6, 6], [16.0, 0, 0], [20.0, 0, 0]]
+		[0.0, 12500], [1.5, 9250], [3.0, 6000], [9.5, 3000], [16.0, 0], [20.0, 0]]
 	for row in fr_vals:
 		var d: float = row[0]
-		var pw: int = Damage.fragment_power_milli(d) / 1000
-		var bk: int = Damage.fragment_break_milli(d) / 1000
-		print("    距离 %4.1f 格 → 力 %2d / 甲 %2d" % [d, pw, bk])
-		_expect(pw == int(row[1]) and bk == int(row[2]), "破片 %.1f 格伤害 = %d/%d" % [d, row[1], row[2]], fails)
+		var pw: int = Damage.fragment_power_milli(d)
+		var bk: int = Damage.fragment_break_milli(d)
+		print("    距离 %4.1f 格 → 力 %s / 甲 %s（千分比 %d）" % [d, pw / 1000.0, bk / 1000.0, pw])
+		_expect(pw == int(row[1]) and bk == int(row[1]), "破片 %.1f 格伤害 = %d 千分比" % [d, int(row[1])], fails)
+	# 用户口径（第 83 轮）：破片伤害 = 原来的一半
+	_expect(Damage.fragment_power_milli(0.0) == 12500 and Damage.fragment_break_milli(0.0) == 12500,
+		"破片贴脸伤害 12.5/12.5（原 25/25 的一半）", fails)
+	_expect(Damage.fragment_power_milli(3.0) == 6000, "破片 3 格伤害 6（原 12 的一半）", fails)
 
 	# ── 俯冲轰炸直升机（第 1 步：数据 + 场景元数据）──
 	print("\n── 直升机 ──")
@@ -481,27 +565,33 @@ func _initialize() -> void:
 	# ── 火箭（37mm，变速炮弹）──
 	print("\n── 火箭 ──")
 	_expect(Projectile.KIND_ROCKET == "rocket", "火箭是独立弹种", fails)
-	_expect(absf(Ordnance.ROCKET_DIAMETER - 0.37) < 0.001 and absf(Ordnance.ROCKET_LEN - 0.7) < 0.001,
-		"火箭 直径 0.37 / 长 0.7", fails)
-	# 速度函数：v(0)=2、v(12)=6、之后封顶 6；t(12)=3·ln3=3.295837
-	var sp_vals := [[0.0, 2.0], [4.0, 10.0 / 3.0], [8.0, 14.0 / 3.0], [12.0, 6.0], [16.0, 6.0], [32.0, 6.0]]
+	# 用户口径（第 83 轮）：直径减半（0.37 -> 0.185），长度不变（0.7）
+	_expect(absf(Ordnance.ROCKET_DIAMETER - 0.185) < 0.0005 and absf(Ordnance.ROCKET_LEN - 0.7) < 0.001,
+		"火箭 直径 0.185 / 长 0.7（长度不变直径减半）", fails)
+	_expect(absf(Ordnance.ROCKET_DIAMETER - 0.37 * 0.5) < 0.0005,
+		"直径正好是原来 0.37 的一半（截面积 = 原来的四分之一）", fails)
+	# 速度函数：v(0)=1、v(12)=8、之后封顶 8
+	var sp_vals := [[0.0, 1.0], [3.0, 2.75], [6.0, 4.5], [12.0, 8.0], [16.0, 8.0], [32.0, 8.0]]
 	for row3 in sp_vals:
 		var sv := Ordnance.rocket_speed_at(float(row3[0]))
 		_expect(absf(sv - float(row3[1])) < 0.0001, "火箭 %.0f 格处速度 %.4f" % [float(row3[0]), float(row3[1])], fails)
-	_expect(absf(Ordnance.rocket_t_of_s(12.0) - 3.0 * log(3.0)) < 0.0001, "飞满 12 格耗时 3·ln3 ≈ 3.2958 秒", fails)
+	var t_ramp := log(8.0) * 12.0 / 7.0
+	_expect(absf(Ordnance.rocket_t_of_s(12.0) - t_ramp) < 0.0001,
+		"飞满 12 格耗时 (12/7)·ln8 ≈ %.4f 秒" % t_ramp, fails)
 	_expect(absf(Ordnance.rocket_s_of_t(Ordnance.rocket_t_of_s(12.0)) - 12.0) < 0.001,
 		"反解与闭式解自洽（s(t(12)) = 12）", fails)
 	# 单调性：距离越远总时长越长，且平均速度介于 2~6 之间
 	var t4 := Ordnance.rocket_t_of_s(4.0)
 	var t40 := Ordnance.rocket_t_of_s(40.0)
 	_expect(t40 > t4 and t4 > 0.0, "总时长随距离单调增加", fails)
-	_expect(4.0 / t4 > 2.0 and 4.0 / t4 < 6.0, "前 4 格平均速度在 2~6 之间", fails)
-	# 工厂：半径/剖面/不惊动哨兵/落地半径 1 格
+	_expect(4.0 / t4 > 1.0 and 4.0 / t4 < 8.0, "前 4 格平均速度在 1~8 之间", fails)
+	# 工厂：半径/剖面/惊动哨兵/落地半径 1 格
 	var heli_u := Unit.from_data(heli_d)
 	var rk := Ordnance.make_rocket(heli_u, Vector3(5.5, 2.0, 5.5), Vector2(25.5, 5.5), true)
-	_expect(absf(rk.hit_r - 0.185) < 0.001, "火箭碰撞半径 = 直径的一半", fails)
+	_expect(absf(rk.hit_r - 0.0925) < 0.001, "火箭碰撞半径 = 直径的一半（0.0925）", fails)
 	_expect(rk.speed_profile == Projectile.SPEED_ROCKET, "火箭走变速剖面", fails)
-	_expect(rk.hit_tags.is_empty() and not rk.sentry_trigger, "火箭不被打掉、不惊动哨兵", fails)
+	# 用户口径（第 83 轮）：火箭属于炮弹类 —— 不被打掉，但**会惊动哨兵**
+	_expect(rk.hit_tags.is_empty() and rk.sentry_trigger, "火箭不被打掉、但会惊动哨兵", fails)
 	_expect(absf(rk.dur - Ordnance.rocket_t_of_s(20.0)) < 0.001, "总时长 = 解析解 t(20 格)", fails)
 	_expect(absf(float(Ordnance.ROCKET_BLAST_R) - 1.0) < 0.001, "落地范围直径 2 格（半径 1）", fails)
 	_expect(int(Ordnance.ROCKET_FRAGMENTS) == 2, "落地生成 2 枚破片", fails)
@@ -664,7 +754,17 @@ func _initialize() -> void:
 	_expect(Level.ids().size() == 2 and Level.ids().has("field") and Level.ids().has("arena"),
 		"两个关卡：测试场 + 皇室竞技场", fails)
 	_expect(Level.gw("field") == 48 and Level.gh("field") == 48, "测试场 48×48", fails)
-	_expect(Level.gw("arena") == 21 and Level.gh("arena") == 41, "竞技场 21×41", fails)
+	_expect(Level.gw("arena") == 100 and Level.gh("arena") == 100,
+		"竞技场物理边界 100×100（第 83 轮：炮弹不再飞出边界就消失）", fails)
+	_expect(Level.play_rect("arena") == [0, 0, 21, 41], "竞技场可行动区域还是 21×41", fails)
+	_expect(Level.play_rect("field") == [0, 0, 48, 48], "测试场：可行动区域 = 整张图", fails)
+	_expect(Level.in_play(Vector2i(10, 20), "arena") and not Level.in_play(Vector2i(21, 20), "arena"),
+		"可行动区域边界：x=20 有格子、x=21 是空场", fails)
+	_expect(Level.is_void(Vector2i(50, 50), "arena") and not Level.is_void(Vector2i(0, 0), "arena"),
+		"空场判定正确", fails)
+	_expect(not Level.is_river(Vector2i(50, 20), "arena"), "空场不算河（否则炮弹会被当落水删掉）", fails)
+	_expect(Level.cam_center("arena") == Vector2(10.5, 20.5),
+		"相机中心仍是竞技场中心（扩了空场相机不动）", fails)
 	_expect(not Level.has_river("field"), "测试场没有河", fails)
 	# 竞技场：河 3 格宽、跨满 21 格；两座宽 2 的桥（左起 4 / 右起 4）
 	var river := Level.river_cells("arena")

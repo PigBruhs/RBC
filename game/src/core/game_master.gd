@@ -75,6 +75,15 @@ class Target extends RefCounted:
 			return Vector2(unit.visual.position.x, unit.visual.position.z)
 		return Vector2(float(unit.cell.x) + 0.5, float(unit.cell.y) + 0.5)
 
+	## 该瞄多高（高度轴）。用户口径第 83 轮：悬空单位（直升机）要瞄它的身体中心，
+	## 弹道物则瞄它当前飞行高度 —— 否则哨兵箭永远从直升机下面穿过去。
+	func aim_y() -> float:
+		if proj != null:
+			return proj.height()
+		if unit != null:
+			return Targeting.aim_height(unit)
+		return 0.55
+
 
 
 ## 一次哨兵触发（view 拿到后负责真的把箭射出去）
@@ -82,6 +91,7 @@ class Shot extends RefCounted:
 	var is_projectile: bool = false      # 目标是弹道物（哨兵要精确瞄）
 	var sentry: Sentry
 	var at: Vector2 = Vector2.ZERO        # 触发点（浮点）
+	var y: float = 0.55                   # 触发点的高度（悬空单位/弹道物都要按高度瞄）
 	var target_name: String = ""
 	var reason: String = ""
 
@@ -308,10 +318,22 @@ func check_projectile(p: Projectile) -> bool:
 			continue                      # 已经在队列里了，不重复入队
 		var t := Target.new()
 		t.proj = p
-		t.label = "炮弹" if p.kind == Projectile.KIND_SHELL else "召唤球"
+		t.label = _proj_label(p.kind)
 		s.queue.append(t)
 		any = true
 	return any
+
+
+## 哨兵日志里怎么称呼这一类弹道物（第 83 轮：火箭也算炮弹类，会惊动哨兵）
+static func _proj_label(kind: String) -> String:
+	match kind:
+		Projectile.KIND_SHELL:
+			return "炮弹"
+		Projectile.KIND_ROCKET:
+			return "火箭"
+		Projectile.KIND_GRENADE:
+			return "枪榴弹"
+	return "召唤球"
 
 
 ## 这一发是否已经在该哨兵的队列里
@@ -369,12 +391,14 @@ func sentry_tick(dt: float) -> Array[Shot]:
 				s.queue.remove_at(0)
 				continue
 			var at := t.pos()
+			var at_y := t.aim_y()
 			if not s.in_range(sentry_center(s), at):
 				s.queue.remove_at(0)      # 出界就剔除，保持队列合法
 				continue
 			var sh := Shot.new()
 			sh.sentry = s
 			sh.at = at
+			sh.y = at_y
 			sh.is_projectile = t.proj != null   # 拦弹道物时必须精确瞄准（否则拦不住）
 			sh.target_name = t.label
 			sh.reason = "%s进入射界" % t.label

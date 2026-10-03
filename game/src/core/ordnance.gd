@@ -36,39 +36,46 @@ const BULLET_LEN := 0.2
 const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
 
 ## ── 37mm 火箭（炮弹类）──────────────────────────────────────────────────────
-## 用户口径：直径 0.37、长 0.7；**飞行速度与飞行时间正相关**（初始 2 格/秒，
-## 飞满 12 格后到上限 6 格/秒）；落地范围直径 2 格；落点同时随机两个方向生成 2 枚破片。
-## 设计稿给出的函数：ds/dt = v(s) = min(6, 2 + s/3)
-##   · 闭式解 t(s) = 3·ln(1 + s/6)     （飞满 12 格 = 3.295837 秒）
-##   · 反解   s(t) = 6·(e^(t/3) − 1)
-##   · 平台段 s = 12 + 6·(t − 3.295837)
-const ROCKET_DIAMETER := 0.37
+## 用户口径（第 83 轮）：直径 0.185（原来是 0.37 的一半）、长 0.7（不变）；
+## **飞行速度与飞行距离正相关**：初始 1 格/秒，飞满 12 格后达到上限 8 格/秒；
+## 落地范围直径 2 格；落点同时随机两个方向生成 2 枚破片。
+##   ds/dt = v(s) = min(8, 1 + 7s/12)
+##   · 闭式解 t(s) = (12/7)·ln(1 + 7s/12)      （飞满 12 格 ≈ 3.5648 秒）
+##   · 反解   s(t) = (12/7)·(e^(7t/12) − 1)
+##   · 平台段 s = 12 + 8·(t − 3.5648)
+const ROCKET_DIAMETER := 0.185
 const ROCKET_LEN := 0.7
 const ROCKET_R := ROCKET_DIAMETER * 0.5
-const ROCKET_V0 := 2.0
-const ROCKET_VMAX := 6.0
+const ROCKET_V0 := 1.0
+const ROCKET_VMAX := 8.0
 const ROCKET_RAMP_DIST := 12.0
+const ROCKET_ACCEL_K := 7.0 / 12.0     # v = 1 + k·s（爬坡段）
 const ROCKET_BLAST_R := 1.0          # 落地范围直径 2 格
 const ROCKET_FRAGMENTS := 2
+
+
+## 爬坡段结束的时刻（飞满 12 格）
+static func rocket_t_ramp() -> float:
+	return log(1.0 + ROCKET_ACCEL_K * ROCKET_RAMP_DIST) / ROCKET_ACCEL_K
 
 
 static func rocket_t_of_s(s: float) -> float:
 	var d: float = maxf(0.0, s)
 	if d <= ROCKET_RAMP_DIST:
-		return 3.0 * log(1.0 + d / 6.0)
-	return 3.0 * log(3.0) + (d - ROCKET_RAMP_DIST) / ROCKET_VMAX
+		return log(1.0 + ROCKET_ACCEL_K * d) / ROCKET_ACCEL_K
+	return rocket_t_ramp() + (d - ROCKET_RAMP_DIST) / ROCKET_VMAX
 
 
 static func rocket_s_of_t(t: float) -> float:
 	var tt: float = maxf(0.0, t)
-	var t_ramp: float = 3.0 * log(3.0)
+	var t_ramp: float = rocket_t_ramp()
 	if tt <= t_ramp:
-		return 6.0 * (exp(tt / 3.0) - 1.0)
+		return (exp(tt * ROCKET_ACCEL_K) - 1.0) / ROCKET_ACCEL_K
 	return ROCKET_RAMP_DIST + ROCKET_VMAX * (tt - t_ramp)
 
 
 static func rocket_speed_at(s: float) -> float:
-	return minf(ROCKET_VMAX, ROCKET_V0 + s / (ROCKET_RAMP_DIST / (ROCKET_VMAX - ROCKET_V0)))
+	return minf(ROCKET_VMAX, ROCKET_V0 + s * ROCKET_ACCEL_K)
 
 
 ## 火箭：从 from 飞向 to；总时长 = 解析解 t(s)
@@ -86,8 +93,9 @@ static func make_rocket(caster: Unit, from: Vector3, to: Vector2, ends_turn: boo
 	p.arc_max = 2.4
 	p.recalc_apex()
 	p.hit_r = ROCKET_R
-	p.hit_tags = []                      # 不被打掉
-	p.sentry_trigger = false             # 与炮击炮弹一样不惊动哨兵
+	p.hit_tags = []                      # 不被打掉（箭头不能拦火箭）
+	# 用户口径（第 83 轮）：火箭属于【炮弹类】—— 飞进哨兵射界同样会惊动哨兵
+	p.sentry_trigger = true
 	p.shot = _shot(Projectile.KIND_ROCKET, caster, ends_turn, ROCKET_BLAST_R, {}, "")
 	return p
 
@@ -173,8 +181,8 @@ static func make_marker(caster: Unit, to: Vector2) -> Projectile:
 	return p
 
 
-## 哨兵箭的力量倍率（用户口径：力量回调到 100%）
-const SENTRY_POWER_MULT := 1.0
+## 哨兵箭的力量倍率（用户口径第 83 轮：力量只吃 25%，先乘再减护甲）
+const SENTRY_POWER_MULT := 0.25
 
 ## 每两支箭之间的最小间隔（和 GameMaster.SENTRY_FIRE_INTERVAL 对应，日志/测试用）
 const SENTRY_FIRE_INTERVAL_REF := 0.25
@@ -197,9 +205,10 @@ static func make_grenade(caster: Unit, to: Vector2, ends_turn: bool) -> Projecti
 	return p
 
 
-## 子弹：从 from 沿 dir 平飞（无重力），32 格后消失
+## 子弹：从 from 沿 dir 平飞（无重力），32 格后消失。
+## aim_y >= 0 时平飞高度改成 aim_y（瞄悬空的直升机要抬高，否则从它下面飞过去）
 static func make_bullet(caster: Unit, from: Vector3, to: Vector2,
-		ends_turn: bool = true) -> Projectile:
+		ends_turn: bool = true, aim_y: float = -1.0) -> Projectile:
 	var start := Vector2(from.x, from.z)
 	# 瞄准点只决定【方向】：弹道一直飞到 32 格才消失（用户口径）
 	var dir := (to - start)
@@ -207,8 +216,9 @@ static func make_bullet(caster: Unit, from: Vector3, to: Vector2,
 	var p := Projectile.make(Projectile.KIND_BULLET, start, start + dir * BULLET_MAX_DIST, 1.0)
 	p.set_speed(BULLET_TILES_PER_SEC)
 	_config_owner(p, caster)
-	p.y0 = BULLET_HEIGHT
-	p.y1 = BULLET_HEIGHT
+	var fly_y: float = aim_y if aim_y >= 0.0 else BULLET_HEIGHT
+	p.y0 = fly_y
+	p.y1 = fly_y
 	p.arc_scale = 0.0                 # 不受重力
 	p.arc_min = 0.0
 	p.arc_max = 0.0

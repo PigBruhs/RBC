@@ -1202,12 +1202,20 @@ func _initialize() -> void:
 	_s.clear_projectiles()
 	var rings_before: int = _s.count_impact_rings()
 	_s.active = null
-	var p_out: Projectile = _s._spawn_shell(g25, Vector2(float(_s.GW) + 12.0, 5.0), true, 1.0)
+	# 第 83 轮起：炮弹飞行途中撞到角色会被拦下就地空爆 —— 所以先清空弹道（所有人挪到角落）
+	for u in _s.units:
+		u.cell = Vector2i(1, 40)
+		if u.visual != null:
+			u.visual.position = Vector3(1.5, u.hover, 40.5)
+	g25.cell = Vector2i(2, 45)
+	if g25.visual != null:
+		g25.visual.position = Vector3(2.5, 0.0, 45.5)
+	var p_out: Projectile = _s._spawn_shell(g25, Vector2(float(_s.GW) + 12.0, 45.0), true, 1.0)
 	for i in 3000:
 		_s.field.step(1.0 / 30.0)
 		if not p_out.alive:
 			break
-	print("    打向界外 (40,5)：存活=%s 移除原因=%s 红圈 %d -> %d" % [
+	print("    打向界外 (60,45)：存活=%s 移除原因=%s 红圈 %d -> %d" % [
 		p_out.alive, p_out.removed_reason, rings_before, _s.count_impact_rings()])
 	_chk(not p_out.alive, "飞出边界的炮弹应被移除")
 	_chk(p_out.removed_reason == "out_of_bounds", "移除原因应是出界")
@@ -1290,6 +1298,7 @@ func _initialize() -> void:
 	gerald.power_cur = gerald.power_max
 	gerald.armor_cur = Rules.points_to_milli(10)
 	var hp_low: int = gerald.power_cur
+	shooter_b.power_cur = shooter_b.power_max      # 保证"发射者活着"：发射单里的力量是开火那一刻的快照
 	var low_shell: Projectile = _s._spawn_shell(shooter_b, Vector2(6.5, 6.5), false)
 	low_shell.from = Vector2(6.5, 6.5)
 	low_shell.to = Vector2(6.5, 6.5)
@@ -1850,16 +1859,17 @@ func _initialize() -> void:
 		if pp.kind == Projectile.KIND_ROCKET: rockets += 1
 	print("    一次普攻：场上火箭 %d 发 ｜ 精力 %d -> %d ｜ 回合已结束=%s" % [
 		rockets, e0, he2.energy_points(), _s.active != he2])
-	_chk(rockets == 2, "第一次齐射应左右各一发（共 4 次、8 发，250ms 一发）")
+	_chk(rockets == 2, "第一次齐射应左右各一发（共 4 次、8 发，每两波间隔 1 秒）")
 	_chk(he2.energy_points() == e0 - 4, "普攻必须消耗 4 点精力")
-	# 齐射是异步的：等它把 4 次打完
-	await create_timer(1.2).timeout
+	_chk(int(Level.heli()["salvo_gap"]) == 1, "第 83 轮：每两波火箭弹间隔 1 秒")
+	# 齐射是异步的：等它把 4 次打完（间隔 1 秒 -> 至少 3 秒）
+	await create_timer(3.6).timeout
 	var rockets2 := 0
 	for it2 in _s.field.items:
 		var pp2: Projectile = it2["p"]
 		if pp2.kind == Projectile.KIND_ROCKET: rockets2 += 1
 	print("    齐射完成：场上火箭（含在飞）%d 发" % rockets2)
-	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，1.2 秒内 8 发基本都在飞）")
+	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，3.6 秒内 8 发基本都在飞）")
 	_chk(_s.active != he2, "发射完即进入下一回合（无需等待落地）")
 	# 坠机：走"受伤"这条真实路径
 	_s.clear_projectiles()
@@ -2140,6 +2150,176 @@ func _initialize() -> void:
 	_chk(_s.gm.turn_count - tcb > 0, "等复活期间会推进回合边界（复活计时照常走）")
 	_chk(left2[0] > 0 or left2[1] > 0 or _s.game_over,
 		"推进回合边界后英雄会复活（或直接判结束），战斗不会卡死")
+
+	# ── 40. 敌方直升机：移动中开火（火箭从当前位置出膛 + 落点平移）──
+	print("\n[40] 敌方直升机移动中开火")
+	# 第 39 节把人都打死了：先把要用的单位救回来
+	var he_e: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	var mate_e: Unit = _unit_by("Gerald", 1)
+	var foe_p: Unit = _unit_by("Alette", 0)
+	he_e.power_cur = he_e.power_max
+	he_e.energy = he_e.energy_max
+	he_e.controllable = false              # 这一节要测"AI 操作的直升机"，所以先摘掉可控标记
+	he_e.cell = Vector2i(10, 10)
+	he_e.visual.position = Vector3(10.5, he_e.hover, 10.5)
+	_s.gm.ai_enabled = false
+	_s._turn_just_finished = null
+	_s.active = he_e
+	# 先发起一次长距离移动：逻辑格子立刻到终点，视觉位置沿路径走
+	_s._do_move(he_e, Vector2i(10, 30))
+	await create_timer(0.5).timeout
+	print("    走位中：逻辑格 %s ｜ 视觉位置 (%.2f, %.2f) ｜ 在走=%s" % [
+		he_e.cell, _s._unit_pos(he_e).x, _s._unit_pos(he_e).y, he_e.visual.is_walking()])
+	_chk(he_e.visual.is_walking() and _s._unit_pos(he_e).y < 15.0,
+		"移动中：逻辑格已经瞬移到终点，但人还在半路上")
+	# 在半路上开火
+	_s.clear_projectiles()
+	_s._ai_attack(he_e, {"target": mate_e, "aim": Vector2(10.5, 34.5)})
+	var wave1: Array[Vector2] = []
+	var late1: Array[Vector2] = []
+	var ids1: Array = []
+	for it in _s.field.items:
+		var pp: Projectile = it["p"]
+		if pp.kind == Projectile.KIND_ROCKET:
+			wave1.append(pp.from)
+			late1.append(pp.to)
+			ids1.append(pp.id)
+	var pos_at_fire: Vector2 = _s._unit_pos(he_e)
+	var near_fire := 0
+	for f in wave1:
+		if f.distance_to(pos_at_fire) < 1.0:
+			near_fire += 1
+	print("    第一波 %d 发：出膛 %s ｜ 开火时位置 (%.2f, %.2f)" % [
+		wave1.size(), wave1, pos_at_fire.x, pos_at_fire.y])
+	_chk(wave1.size() == 2, "第一波应有左右各一发")
+	_chk(near_fire == wave1.size(), "每一波的两发都必须从【当前位置】出膛（不是还没走到的格子）")
+	_chk(wave1.size() > 0 and wave1[0].distance_to(Vector2(10.5, 30.5)) > 2.0,
+		"出膛点不在终点格上（以前的 bug：火箭在还没到达的位置生成）")
+	# 等第二波（间隔 1 秒）
+	await create_timer(1.15).timeout
+	var wave2: Array[Vector2] = []
+	var late2: Array[Vector2] = []
+	for it2 in _s.field.items:
+		var pp2: Projectile = it2["p"]
+		if pp2.kind == Projectile.KIND_ROCKET and not ids1.has(pp2.id):
+			wave2.append(pp2.from)
+			late2.append(pp2.to)
+	var m1f := Vector2.ZERO
+	for f2 in wave1:
+		m1f += f2
+	m1f /= maxf(1.0, float(wave1.size()))
+	var m2f := Vector2.ZERO
+	for f3 in wave2:
+		m2f += f3
+	m2f /= maxf(1.0, float(wave2.size()))
+	var m1t := Vector2.ZERO
+	for t1 in late1:
+		m1t += t1
+	m1t /= maxf(1.0, float(late1.size()))
+	var m2t := Vector2.ZERO
+	for t2 in late2:
+		m2t += t2
+	m2t /= maxf(1.0, float(late2.size()))
+	print("    两波：出膛 %s -> %s ｜ 落点 %s -> %s" % [m1f, m2f, m1t, m2t])
+	_chk(wave2.size() == 2, "第二波也应出膛（间隔 1 秒）")
+	_chk((m2f - m1f).length() > 0.5, "直升机在移动：第二波出膛点更靠前")
+	# 落点平移的口径（用户第 83 轮）：落点 = 开火时随机出的落点 + (当前位置 − 开火位置)。
+	# 用实现自己记下来的基准/位移来验（统计平均会被 ±8 格散布淹没，所以直接查不变量）。
+	var salvo: Dictionary = _s._salvo_dbg
+	var spawns: Array = salvo.get("spawns", [])
+	var shifts: Array = salvo.get("shifts", [])
+	_chk(bool(salvo.get("moving", false)), "AI 直升机走【移动中开火】分支")
+	_chk((salvo.get("base", Vector2.ZERO) as Vector2).distance_to(pos_at_fire) < 0.3,
+		"基准 = 开火那一刻的视觉位置")
+	_chk(spawns.size() >= 2 and (spawns[0] as Vector2).distance_to(pos_at_fire) < 0.05,
+		"第一波两发从【当前位置】出膛")
+	_chk(spawns.size() >= 2 and (spawns[1] as Vector2).y > (spawns[0] as Vector2).y + 0.5,
+		"第二波出膛点更靠前（确实在移动中开火）")
+	_chk(spawns.size() >= 2 and (shifts[1] as Vector2).distance_to(
+			(spawns[1] as Vector2) - (salvo["base"] as Vector2)) < 0.001,
+		"位移 = 当前位置 − 开火位置")
+	# 每一波的两发：出膛点必须在"那一波的当前位置"上（±侧向偏移 0.32）
+	var far_from_spawn := 0
+	for j in range(spawns.size()):
+		for f4 in [wave1, wave2][mini(j, 1)]:
+			if f4.distance_to(spawns[j] as Vector2) > 0.6:
+				far_from_spawn += 1
+	_chk(wave1.size() > 0 and wave1[0].distance_to(Vector2(10.5, 30.5)) > 2.0,
+		"出膛点不在终点格上（以前的 bug：火箭在还没到达的位置生成）")
+	_chk(far_from_spawn == 0, "每一波的出膛点都落在该波的当前位置上")
+	await create_timer(3.2).timeout          # 等 4 波打完，别污染后面
+	_s.clear_projectiles()
+
+	# ── 41. 敌方直升机坠毁：死亡附加伤害必须打到所有人（不分敌我）──
+	print("\n[41] 敌方直升机坠毁的附加伤害")
+	var he_c: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	var bud_p: Unit = _unit_by("Gerald", 0)
+	var bud_e: Unit = _unit_by("Alette", 1)
+	for w in [he_c, bud_p, bud_e]:
+		w.power_cur = w.power_max
+		w.armor_cur = w.armor_max
+		w.tags.erase("crashing")
+		if w.visual != null:
+			w.visual.visible = true
+	he_c.cell = Vector2i(12, 10)
+	he_c.visual.position = Vector3(12.5, he_c.hover, 12.5)
+	bud_p.cell = Vector2i(13, 10)          # 我方：紧贴坠机点
+	bud_p.visual.position = Vector3(13.5, 0.0, 13.5)
+	bud_e.cell = Vector2i(11, 10)          # 敌方友军：也要吃（不分敌我）
+	bud_e.visual.position = Vector3(11.5, 0.0, 11.5)
+	he_c.power_cur = 15 * 1000             # 低于阈值 21
+	var hp_p0: int = bud_p.power_cur
+	var hp_e0: int = bud_e.power_cur
+	_s._after_damage_to_unit(he_c)          # 真实受伤路径 -> 坠机
+	print("    触发坠机：crashing=%s" % he_c.tags.has("crashing"))
+	_chk(he_c.tags.has("crashing"), "敌方直升机力量低于阈值 -> 坠机（走受伤主路径）")
+	await create_timer(0.8).timeout
+	print("    落地后：直升机 alive=%s ｜ 我方 %d -> %d ｜ 敌方 %d -> %d" % [
+		he_c.is_alive(), hp_p0 / 1000, bud_p.power_cur / 1000, hp_e0 / 1000, bud_e.power_cur / 1000])
+	_chk(not he_c.is_alive(), "坠机后敌方直升机死亡")
+	_chk(bud_p.power_cur < hp_p0, "坠机的死亡附加伤害必须打到我方单位")
+	_chk(bud_e.power_cur < hp_e0, "坠机的死亡附加伤害不分敌我（敌方友军也吃）")
+
+	# ── 42. 远程瞄准悬停的直升机（高度轴，第 83 轮）──
+	print("\n[42] 远程瞄准悬停的直升机")
+	var he_t: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	var arch_t: Unit = _unit_by("Alette", 0)
+	for w2 in [he_t, arch_t]:
+		w2.power_cur = w2.power_max
+		w2.armor_cur = w2.armor_max
+		w2.tags.erase("crashing")
+		w2.tags.erase("diving")
+		if w2.visual != null:
+			w2.visual.visible = true
+	he_t.power_cur = Rules.points_to_milli(100)      # 抬高上限：只要看到掉血，不触发坠机
+	he_t.cell = Vector2i(10, 10)
+	he_t.visual.position = Vector3(10.5, he_t.hover, 10.5)
+	arch_t.cell = Vector2i(10, 16)
+	arch_t.visual.position = Vector3(10.5, 0.0, 16.5)
+	arch_t.has_acted = false
+	arch_t.has_moved = false
+	arch_t.energy = arch_t.energy_max
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()
+	_s._turn_just_finished = null
+	_s.active = arch_t
+	var hp_t0: int = he_t.power_cur
+	_s._attack_target_unit(he_t, false)
+	var arrow_y := -1.0
+	var arrow_to := Vector2.ZERO
+	for it3 in _s.field.items:
+		var pa: Projectile = it3["p"]
+		if pa.kind == Projectile.KIND_ARROW:
+			arrow_y = pa.y1
+			arrow_to = pa.to
+	print("    箭的出膛瞄准点 (%.1f, %.1f) 高度 %.2f ｜ 直升机悬停 %.1f" % [
+		arrow_to.x, arrow_to.y, arrow_y, he_t.hover])
+	_chk(absf(arrow_y - Targeting.aim_height(he_t)) < 0.01,
+		"瞄悬停的直升机要抬到它的身体中心（%.1f）" % Targeting.aim_height(he_t))
+	await create_timer(2.0).timeout
+	print("    箭飞完：直升机力量 %d -> %d" % [hp_t0 / 1000, he_t.power_cur / 1000])
+	_chk(he_t.power_cur < hp_t0, "远程普攻必须能真的打到悬停的直升机（高度轴正确）")
+	_s.clear_projectiles()
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():

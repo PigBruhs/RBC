@@ -20,6 +20,9 @@ const Y_GLOW := 0.068
 var parent: Node3D = null
 var grid_w: int = 48
 var grid_h: int = 48
+## 可行动区域左上角（竞技场扩了空场之后：只画真格子，不许画到空场）
+var grid_x0: int = 0
+var grid_y0: int = 0
 ## owner_name -> {"node": Node3D, "cell": Vector2i, "rmin": int, "rmax": int, "edges": int}
 var items: Dictionary = {}
 
@@ -48,7 +51,7 @@ func sync(sentries: Array) -> void:
 			continue
 		if it != null:
 			_free_one(key)
-		items[key] = make_item(s.rng_min, s.rng_max, cell, grid_w, grid_h, parent)
+		items[key] = make_item(s.rng_min, s.rng_max, cell, grid_w, grid_h, parent, grid_x0, grid_y0)
 	for key in items.keys():
 		if not live.has(key):
 			_free_one(key)
@@ -67,10 +70,11 @@ func _free_one(key: String) -> void:
 
 
 ## 建一个哨兵的描边节点。返回条目字典（测试会看 edges / cells）。
+## x0/y0 = 可行动区域左上角（竞技场扩了空场之后，只画真格子）。
 static func make_item(rmin: int, rmax: int, cell: Vector2i, gw: int, gh: int,
-		p_parent: Node3D) -> Dictionary:
+		p_parent: Node3D, x0: int = 0, y0: int = 0) -> Dictionary:
 	var ctr := Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5)
-	var cells := Targeting.ring_cells(ctr, float(rmin), float(rmax), gw, gh)
+	var cells := Targeting.ring_cells(ctr, float(rmin), float(rmax), gw, gh, x0, y0)
 	var edges := Targeting.ring_outline_edges(cells)
 	var root := Node3D.new()
 	if p_parent != null:

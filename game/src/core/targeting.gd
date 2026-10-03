@@ -11,26 +11,51 @@ extends RefCounted
 ## 箭矢"身体"判定半径（用户口径：直径 0.15 格）
 const ARROW_BODY_R := 0.075
 
+## 角色身高（和 Damage.BODY_H / UnitData 的口径一致）
+const BODY_H := 1.0
+
+
+## 角色身体在【高度轴】上的区间 [下, 上]。
+## 用户口径（第 83 轮）：悬空单位（直升机 hover = 2 格）整个身体抬高 ——
+## 所以"瞄得对不对"必须考虑高度轴：瞄地面高度是打不到悬停的直升机的。
+static func body_span(u: Unit) -> Vector2:
+	return Vector2(u.hover, u.hover + BODY_H)
+
+
+## 瞄准一个角色时应该瞄的高度 = 身体中心
+static func aim_height(u: Unit) -> float:
+	return u.hover + BODY_H * 0.5
+
 
 ## 当前位置能打到的所有格子。
 ##   近战   = 4 邻格
 ##   远程/投掷 = 曼哈顿距离 [rng_min, rng_max] 的环带
-static func attack_range_cells(u: Unit, gw: int, gh: int) -> Dictionary:
+## 只扫【可行动区域】矩形（x0,y0,w,h）——空场没有格子，不能打也不高亮。
+static func attack_range_cells_rect(u: Unit, x0: int, y0: int, w: int, h: int) -> Dictionary:
 	var res := {}
 	if u.has_acted:
 		return res
 	if u.role == UnitData.Role.MELEE:
 		for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 			var c: Vector2i = u.cell + off
-			if c.x >= 0 and c.y >= 0 and c.x < gw and c.y < gh:
+			if in_rect(c, x0, y0, w, h):
 				res[c] = true
 		return res
-	for y in gh:
-		for x in gw:
+	for y in range(y0, y0 + h):
+		for x in range(x0, x0 + w):
 			var d: int = absi(x - u.cell.x) + absi(y - u.cell.y)
 			if d >= u.rng_min and d <= u.rng_max:
 				res[Vector2i(x, y)] = true
 	return res
+
+
+static func attack_range_cells(u: Unit, gw: int, gh: int) -> Dictionary:
+	return attack_range_cells_rect(u, 0, 0, gw, gh)
+
+
+## 格子在矩形里吗
+static func in_rect(c: Vector2i, x0: int, y0: int, w: int, h: int) -> bool:
+	return c.x >= x0 and c.y >= y0 and c.x < x0 + w and c.y < y0 + h
 
 
 ## 当前打得到的【敌人所在格】（用 in_range_of，和实际结算同一条规则）
@@ -60,18 +85,18 @@ static func blast_covers(ctr: Vector2, cell: Vector2i, radius: float) -> bool:
 
 
 ## 三维空爆：球心 ctr（带高度）+ 半径 radius，是否碰到角色的身体。
-## 角色身体按一根【竖直圆柱】算：半径 body_r，高 body_h。
+## 角色身体按一根【竖直圆柱】算：半径 body_r，高 body_h，底面在 body_y0（= 该单位的悬浮高度）。
 ## 用户口径：空爆做三维判定、范围恒定为一格球（半径 0.5）——所以"在头顶上炸但飞得高"
 ## 是打不到的；同时贴着地面炸也够不到隔壁一整格。
 static func sphere_hits_body(ctr: Vector3, radius: float, cell: Vector2i,
-		body_r: float, body_h: float) -> bool:
+		body_r: float, body_h: float, body_y0: float = 0.0) -> bool:
 	var cx := float(cell.x) + 0.5
 	var cz := float(cell.y) + 0.5
 	var dy := 0.0
-	if ctr.y < 0.0:
-		dy = -ctr.y
-	elif ctr.y > body_h:
-		dy = ctr.y - body_h
+	if ctr.y < body_y0:
+		dy = body_y0 - ctr.y
+	elif ctr.y > body_y0 + body_h:
+		dy = ctr.y - (body_y0 + body_h)
 	var hd := maxf(0.0, Vector2(ctr.x - cx, ctr.z - cz).length() - body_r)
 	return hd * hd + dy * dy <= radius * radius
 
@@ -79,8 +104,15 @@ static func sphere_hits_body(ctr: Vector3, radius: float, cell: Vector2i,
 ## 箭矢在这一小段路径上打到了哪个角色（细圆柱 vs 脚下小圆）。
 ## 用线段采样：细判定配大步长会漏检，所以沿路径取若干点。
 ## body_r = 这一发自己的"身体"半径（箭矢 0.075、加农炮弹 0.25）
+##
+## 高度轴（用户口径第 83 轮）分两档：
+##   · strict = false（箭矢类沿用老口径）：地面单位不看高度轴；但**悬空单位必须瞄对高度** ——
+##     从悬停 2 格的直升机下面飞过去不算命中（所以瞄准时要瞄它的身体中心）。
+##   · strict = true（炮弹类"撞到人就空爆"）：对**所有**单位都要真的碰到身体，
+##     否则炮弹从别人头顶飞过也会被判成"被拦下"，看起来就是半空乱炸。
 static func arrow_body_hit_seg(from: Vector3, to: Vector3, attacker: Unit,
-		units: Array[Unit], unit_body_r: float, body_r: float = ARROW_BODY_R) -> Unit:
+		units: Array[Unit], unit_body_r: float, body_r: float = ARROW_BODY_R,
+		strict: bool = false) -> Unit:
 	var rr := body_r + unit_body_r
 	var steps := maxi(2, int(from.distance_to(to) / 0.05) + 1)
 	for s in steps + 1:
@@ -90,21 +122,28 @@ static func arrow_body_hit_seg(from: Vector3, to: Vector3, attacker: Unit,
 				continue
 			var dx := p.x - (float(o.cell.x) + 0.5)
 			var dz := p.z - (float(o.cell.y) + 0.5)
-			if dx * dx + dz * dz <= rr * rr:
-				return o
+			if dx * dx + dz * dz > rr * rr:
+				continue
+			if strict or o.hover > 0.0001:
+				var span := body_span(o)
+				if p.y < span.x - body_r or p.y > span.y + body_r:
+					continue
+			return o
 	return null
 
 
 ## 欧氏环带（射界）覆盖的【格子】：格心到圆心的距离落在 [rmin, rmax] 内。
 ## 判定本身仍然是浮点欧氏距离（GameMaster.Sentry.in_range），这里只是把它画出来。
-static func ring_cells(ctr: Vector2, rmin: float, rmax: float, gw: int, gh: int) -> Dictionary:
+## gw/gh = 可行动区域的宽高，x0/y0 = 它的左上角（竞技场扩了空场之后只画真格子）。
+static func ring_cells(ctr: Vector2, rmin: float, rmax: float, gw: int, gh: int,
+		x0: int = 0, y0: int = 0) -> Dictionary:
 	var res := {}
-	var x0: int = maxi(0, int(floor(ctr.x - rmax)) - 1)
-	var x1: int = mini(gw - 1, int(ceil(ctr.x + rmax)) + 1)
-	var y0: int = maxi(0, int(floor(ctr.y - rmax)) - 1)
-	var y1: int = mini(gh - 1, int(ceil(ctr.y + rmax)) + 1)
-	for y in range(y0, y1 + 1):
-		for x in range(x0, x1 + 1):
+	var cx0: int = maxi(x0, int(floor(ctr.x - rmax)) - 1)
+	var cx1: int = mini(x0 + gw - 1, int(ceil(ctr.x + rmax)) + 1)
+	var cy0: int = maxi(y0, int(floor(ctr.y - rmax)) - 1)
+	var cy1: int = mini(y0 + gh - 1, int(ceil(ctr.y + rmax)) + 1)
+	for y in range(cy0, cy1 + 1):
+		for x in range(cx0, cx1 + 1):
 			var d := ctr.distance_to(Vector2(float(x) + 0.5, float(y) + 0.5))
 			if d >= rmin - 0.0001 and d <= rmax + 0.0001:
 				res[Vector2i(x, y)] = true

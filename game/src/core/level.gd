@@ -26,6 +26,7 @@ const DEFS := {
 	"field": {
 		"name": "测试场 48×48",
 		"gw": 48, "gh": 48,
+		"play": [0, 0, 48, 48],                 # 可行动区域 = 整张图
 		"cam_yaw": 225.0,                       # 对角俯视：玩家那一方落在屏幕【左下方】
 		"player": {"king": Vector2i(2, 20), "forward": Vector2i(1, 0), "lateral": Vector2i(0, -1)},
 		"enemy": {"king": Vector2i(45, 20), "forward": Vector2i(-1, 0), "lateral": Vector2i(0, -1)},
@@ -50,8 +51,12 @@ const DEFS := {
 		"bridge_cols": [],
 	},
 	"arena": {
-		"name": "皇室竞技场 21×41",
-		"gw": 21, "gh": 41,
+		"name": "皇室竞技场 21×41（四周 100×100 空场）",
+		# 用户口径（第 83 轮）：物理边界扩到 100×100，所以炮弹不会再"飞出竞技场就消失"；
+		# 但**只有 play 这块矩形是有格子的**（能走、能放、能画地形），外面是空场：
+		# 没有格子划分，炮弹照飞、照常触发碰撞，枪榴弹/信标落进去则作废。
+		"gw": 100, "gh": 100,
+		"play": [0, 0, 21, 41],                 # 真正的竞技场：x 0~20、y 0~40（和以前完全一样）
 		"cam_yaw": 225.0,                       # 和测试场同一个角度（玩家在左下方）
 		"player": {"king": Vector2i(10, 0), "forward": Vector2i(0, 1), "lateral": Vector2i(1, 0)},
 		"enemy": {"king": Vector2i(10, 40), "forward": Vector2i(0, -1), "lateral": Vector2i(1, 0)},
@@ -108,6 +113,51 @@ static func gw(id: String = "") -> int:
 
 static func gh(id: String = "") -> int:
 	return int(def(id).get("gh", 48))
+
+
+## ── 可行动区域（用户口径第 83 轮）────────────────────────────────────────────
+## 返回 [x0, y0, w, h]（格）。兵、地形、路径、各种高亮都只在这个矩形里；
+## 矩形之外是"空场"：没有格子划分，但炮弹可以飞过去、也能正常触发碰撞。
+## 默认 = 整张图（测试场就是这样），竞技场把它设成真正的 21×41。
+static func play_rect(id: String = "") -> Array:
+	var r: Array = def(id).get("play", [])
+	if r.size() == 4:
+		return [int(r[0]), int(r[1]), int(r[2]), int(r[3])]
+	return [0, 0, gw(id), gh(id)]
+
+
+static func play_x0(id: String = "") -> int:
+	return int(play_rect(id)[0])
+
+
+static func play_y0(id: String = "") -> int:
+	return int(play_rect(id)[1])
+
+
+static func play_w(id: String = "") -> int:
+	return int(play_rect(id)[2])
+
+
+static func play_h(id: String = "") -> int:
+	return int(play_rect(id)[3])
+
+
+## 这个格在可行动区域里吗（= 有格子划分）
+static func in_play(cell: Vector2i, id: String = "") -> bool:
+	var r := play_rect(id)
+	return cell.x >= int(r[0]) and cell.y >= int(r[1]) \
+		and cell.x < int(r[0]) + int(r[2]) and cell.y < int(r[1]) + int(r[3])
+
+
+## 空场（可行动区域之外）：没有格子，但炮弹照飞照炸
+static func is_void(cell: Vector2i, id: String = "") -> bool:
+	return not in_play(cell, id)
+
+
+## 相机注视的中心点 = 可行动区域的中心 —— 所以扩了空场以后相机**一动不动**
+static func cam_center(id: String = "") -> Vector2:
+	var r := play_rect(id)
+	return Vector2(float(r[0]) + float(r[2]) * 0.5, float(r[1]) + float(r[3]) * 0.5)
 
 
 static func cam_yaw(id: String = "") -> float:
@@ -171,8 +221,8 @@ const HELI_DEFAULTS := {
 	"basic_cost": 4,         # 普攻（吊射 37mm 火箭）精力消耗
 	"aim_mult": 2.0,         # 瞄准结果翻倍：先前飞 x 格，现在 2x
 	"salvo_pairs": 4,        # 一共四次
-	"salvo_gap": 0.25,       # 每次间隔 250ms
-	"scatter_r": 4.0,        # 落点：半径 4 格圆内随机
+	"salvo_gap": 1.0,        # 每次间隔 1 秒（用户口径第 83 轮：250ms -> 1s）
+	"scatter_r": 8.0,        # 落点：半径 8 格圆内随机（用户口径第 83 轮：4 -> 8，散布翻倍）
 	"rockets": 8,            # 一共 8 发
 	"crash_threshold": 21,   # 力量低于 21 坠机
 	"crash_r": 2.5,          # 坠机炮击半径
@@ -200,12 +250,14 @@ static func dummy_cells(id: String = "") -> Array:
 	return def(id).get("dummies", [])
 
 
-## 这个格是不是水（河面，不含桥）
+## 这个格是不是水（河面，不含桥）。空场（可行动区域之外）永远不算水。
 static func is_river(cell: Vector2i, id: String = "") -> bool:
 	var d := def(id)
 	var rows: Array = d.get("river_rows", [])
 	if rows.is_empty():
 		return false
+	if not in_play(cell, id):
+		return false                              # 空场没有格子，也就不可能是河
 	if not rows.has(cell.y):
 		return false
 	for br in d.get("bridge_cols", []):
@@ -225,12 +277,13 @@ static func has_river(id: String = "") -> bool:
 	return not (def(id).get("river_rows", []) as Array).is_empty()
 
 
-## 河面覆盖的所有格子（整张地图都要检查，用于渲染/阻挡）
+## 河面覆盖的所有格子（只扫可行动区域，用于渲染/阻挡）
 static func river_cells(id: String = "") -> Dictionary:
 	var out := {}
 	var d := def(id)
+	var r := play_rect(id)
 	for row in d.get("river_rows", []):
-		for x in gw(id):
+		for x in range(int(r[0]), int(r[0]) + int(r[2])):
 			var c := Vector2i(x, int(row))
 			if is_river(c, id):
 				out[c] = true

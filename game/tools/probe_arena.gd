@@ -41,9 +41,32 @@ func _process(d: float) -> bool:
 		0:
 			if _t >= 0.25:
 				print("\n[1] 竞技场地形")
-				print("    尺寸 %d×%d ｜ 关卡 %s ｜ 相机偏航 %.0f" % [
-					_s.GW, _s.GH, Level.name_of(), _s._cam_yaw])
-				_chk(_s.GW == 21 and _s.GH == 41, "竞技场是 21×41")
+				print("    物理 %d×%d ｜ 可行动 %d×%d @ %d,%d ｜ 关卡 %s ｜ 相机偏航 %.0f" % [
+					_s.GW, _s.GH, _s.PW, _s.PH, _s.PX, _s.PY, Level.name_of(), _s._cam_yaw])
+				_chk(_s.GW == 100 and _s.GH == 100, "竞技场物理边界是 100×100（炮弹不再飞出边界就消失）")
+				_chk(_s.PW == 21 and _s.PH == 41, "真正有格子的还是 21×41")
+				_chk(Level.play_rect("arena") == [0, 0, 21, 41], "可行动区域写在关卡元数据里")
+				_chk(Level.is_void(Vector2i(60, 60), "arena") and Level.in_play(Vector2i(10, 20), "arena"),
+					"空场判定：60,60 是空场，10,20 是真格子")
+				_chk(not Level.is_river(Vector2i(60, 20), "arena"),
+					"空场不算河（否则炮弹飞过去会被当成落水消失）")
+				# 空场的落地规则（第 83 轮）：投掷类作废，炮弹照常爆炸
+				var carrier = unit_by("Airburst mortar")
+				var gp_void := Ordnance.make_grenade(carrier, Vector2(60.0, 60.0), true)
+				gp_void.from = Vector2(60.0, 60.0)
+				gp_void.to = Vector2(60.0, 60.0)
+				var models0: int = _s._grenade_models.size()
+				var pend0: int = _s.gm.pending.size()
+				_s._on_proj_landed(gp_void)
+				_chk(_s._grenade_models.size() == models0 and _s.gm.pending.size() == pend0,
+					"枪榴弹落在空场：作废（不立模型、不登记 GM）")
+				var sh_void: Projectile = Ordnance.make_shell(carrier, Vector2(60.0, 60.0), false, _s.rng)
+				sh_void.from = Vector2(60.0, 60.0)
+				sh_void.to = Vector2(60.0, 60.0)
+				var rings0: int = _s.count_impact_rings()
+				_s._on_proj_landed(sh_void)
+				_chk(_s.count_impact_rings() == rings0 + 1,
+					"炮弹落在空场：照常落地爆炸（不再因为飞出竞技场边界就消失）")
 				# 河不可走，桥可走
 				var blocked: Dictionary = _s._blocked_cells()
 				_chk(blocked.has(Vector2i(10, 20)), "河面不可移动")

@@ -33,7 +33,8 @@ const ARROW_LINGER_SEC := 2.0
 # 上报给 hub 的事件名
 const EV_OUT := "out_of_bounds"       # 飞出边界
 const EV_HIT_PROJ := "hit_projectile" # 打中另一发弹道物
-const EV_HIT_TARGET := "hit_target"   # 打中角色/沙盒道具
+const EV_HIT_TARGET := "hit_target"   # 打中角色/沙盒道具（直接命中型）
+const EV_HIT_BODY := "hit_body"       # 炮弹类飞行中撞到角色 -> 被拦下就地空爆（用户口径第 83 轮）
 const EV_LANDED := "landed"           # 落地
 const EV_REMOVED := "removed"         # 任何一次消亡（最后必然发一次）
 
@@ -183,11 +184,14 @@ func step(delta: float) -> void:
 			items.remove_at(i)
 			continue
 
-		# ③ 直接命中型弹道物（箭矢 / 加农炮弹）命中角色 / 挡道道具
-		if Ballistics.is_direct_hit(p.kind) and hit_test.is_valid():
+		# ③ 撞到角色 / 挡道道具：
+		#    箭矢类是"直接命中"，炮弹类是"被拦下就地空爆"（用户口径第 83 轮）
+		var impact := Ballistics.body_impact(p.kind)
+		if impact != "" and hit_test.is_valid():
 			var what: Dictionary = hit_test.call(p, prev, cur)
 			if not what.is_empty():
-				_report(EV_HIT_TARGET, p, what)
+				p.kill("body_impact")          # 被拦下就是消亡（不然"活着"的它还会被当成在场上）
+				_report(EV_HIT_TARGET if impact == "direct" else EV_HIT_BODY, p, what)
 				retire(e)
 				items.remove_at(i)
 				continue
@@ -393,10 +397,11 @@ func make_rocket_node(parent: Node3D) -> Node3D:
 	root.add_child(nose)
 	var fin_mat := StandardMaterial3D.new()
 	fin_mat.albedo_color = Color(0.30, 0.31, 0.34)
+	# 用户口径（第 83 轮）：直径减半的同时尾翼也要跟着缩小（长度不变）
 	for i in 4:
 		var fin := MeshInstance3D.new()
 		var pm := PrismMesh.new()
-		pm.size = Vector3(Ordnance.ROCKET_R * 1.6, Ordnance.ROCKET_R * 1.6, Ordnance.ROCKET_LEN * 0.35)
+		pm.size = Vector3(Ordnance.ROCKET_R * 1.3, Ordnance.ROCKET_R * 1.3, Ordnance.ROCKET_LEN * 0.28)
 		fin.mesh = pm
 		fin.position = Vector3(0, 0, Ordnance.ROCKET_LEN * 0.35)   # 尾翼在后（+Z）
 		var pivot := Node3D.new()

@@ -25,9 +25,17 @@ signal unit_died(u: Unit)
 const BLAST_RADIUS := 1.5
 
 ## 地图尺寸 / 相机偏航都来自【当前关卡】（Level.current），所以这里是变量不是常量
+## GW/GH = 物理边界（炮弹能飞到哪）；PX/PY/PW/PH = 可行动区域（有格子的地方）。
+## 用户口径（第 83 轮）：竞技场的物理边界扩到 100×100，但真正有格子的还是那块 21×41 ——
+## 外面是"空场"：不能走、不能放、不画地形，但炮弹照飞、照常触发碰撞。
 var GW := 48
 
 var GH := 48
+
+var PX := 0                  # 可行动区域左上角 x
+var PY := 0                  # 可行动区域左上角 y
+var PW := 48                 # 可行动区域宽
+var PH := 48                 # 可行动区域高
 
 const TILE := 1.0
 
@@ -290,8 +298,9 @@ func _build_terrain() -> void:
 	var b1 := Color(0.62, 0.50, 0.14)
 	var b2 := Color(0.54, 0.43, 0.11)
 	var water := Level.river_cells()
-	for y in GH:
-		for x in GW:
+	# 只铺【可行动区域】的地板：空场没有格子划分（用户口径第 83 轮）
+	for y in range(PY, PY + PH):
+		for x in range(PX, PX + PW):
 			var c := Vector2i(x, y)
 			var col: Color
 			if water.has(c):
@@ -326,7 +335,7 @@ func _build_camera() -> void:
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	_camera.name = "Cam"
 	add_child(_camera)
-	_cam_focus = Vector3(GW * 0.5, 0.0, GH * 0.5)
+	_cam_focus = Vector3(Level.cam_center().x, 0.0, Level.cam_center().y)
 	_update_camera()
 
 func _update_camera() -> void:
@@ -453,8 +462,9 @@ func _camera_process(delta: float) -> void:
 		right = right.normalized()
 	_cam_focus += (fwd * move.y + right * move.x) * speed
 	_cam_height = clampf(_cam_height + height * 6.0 * delta, -8.0, 24.0)
-	_cam_focus.x = clampf(_cam_focus.x, -8.0, float(GW) + 8.0)
-	_cam_focus.z = clampf(_cam_focus.z, -8.0, float(GH) + 8.0)
+	# 平移只允许在【可行动区域】附近（空场没什么好看的，别让相机漂到 100×100 中间去）
+	_cam_focus.x = clampf(_cam_focus.x, float(PX) - 8.0, float(PX + PW) + 8.0)
+	_cam_focus.z = clampf(_cam_focus.z, float(PY) - 8.0, float(PY + PH) + 8.0)
 	_update_camera()
 
 ## 阵营显示名：敌方阵营里"玩家可控"的角色要标出来，否则玩家分不清谁能操作
@@ -503,8 +513,12 @@ func _ready() -> void:
 	# 先按当前关卡定尺寸与相机角度，再建一切
 	GW = Level.gw()
 	GH = Level.gh()
+	PX = Level.play_x0()
+	PY = Level.play_y0()
+	PW = Level.play_w()
+	PH = Level.play_h()
 	_cam_yaw = Level.cam_yaw()
-	_log("[关卡] %s（%d×%d）" % [Level.name_of(), GW, GH])
+	_log("[关卡] %s（物理 %d×%d，可行动 %d×%d @ %d,%d）" % [Level.name_of(), GW, GH, PW, PH, PX, PY])
 	# 弹道物场：只做物理与上报，后果由 _on_projectile_event 处理
 	field = ProjectileField.new()
 	field.setup(self, gm, _arrow_hit_check)
@@ -515,8 +529,10 @@ func _ready() -> void:
 	# 哨兵射界高亮：只画描边，判定仍然走 Sentry.in_range
 	sentry_range = SentryRange.new()
 	sentry_range.setup(self)
-	sentry_range.grid_w = GW
-	sentry_range.grid_h = GH
+	sentry_range.grid_w = PW
+	sentry_range.grid_h = PH
+	sentry_range.grid_x0 = PX
+	sentry_range.grid_y0 = PY
 	_build_env()
 	_build_terrain()
 	_build_camera()
@@ -576,7 +592,7 @@ func _pick_place_kind(nm: String) -> void:
 ## 该格能不能放：在界内、不在河里、不压单位、不压已有道具
 
 func _can_place_at(c: Vector2i) -> bool:
-	if c.x < 0 or c.y < 0 or c.x >= GW or c.y >= GH:
+	if not Level.in_play(c):          # 空场不能放（用户口径：那里没有格子）
 		return false
 	if Level.is_river(c):
 		return false
@@ -950,8 +966,8 @@ func _pick_shell_centers(center: Vector2, r: float, n: int) -> Array[Vector2]:
 		var ang := rng.next_int(100000) / 100000.0 * TAU
 		var rad := sqrt(rng.next_int(100000) / 100000.0) * r
 		var q := center + Vector2(cos(ang), sin(ang)) * rad
-		q.x = clampf(q.x, 0.05, float(GW) - 0.05)
-		q.y = clampf(q.y, 0.05, float(GH) - 0.05)
+		q.x = clampf(q.x, float(PX) + 0.05, float(PX + PW) - 0.05)
+		q.y = clampf(q.y, float(PY) + 0.05, float(PY + PH) - 0.05)
 		var dup := false
 		for e in out:
 			if q.distance_to(e) < 0.9:
@@ -1254,10 +1270,10 @@ func _ai_ctx(u: Unit) -> Ai.Ctx:
 			continue
 		var ctr := gm.sentry_center(s)
 		var r := float(s.rng_max)
-		var x0: int = maxi(0, int(ctr.x - r) - 1)
-		var x1: int = mini(GW - 1, int(ctr.x + r) + 1)
-		var y0: int = maxi(0, int(ctr.y - r) - 1)
-		var y1: int = mini(GH - 1, int(ctr.y + r) + 1)
+		var x0: int = maxi(PX, int(ctr.x - r) - 1)
+		var x1: int = mini(PX + PW - 1, int(ctr.x + r) + 1)
+		var y0: int = maxi(PY, int(ctr.y - r) - 1)
+		var y1: int = mini(PY + PH - 1, int(ctr.y + r) + 1)
 		for y in range(y0, y1 + 1):
 			for x in range(x0, x1 + 1):
 				if s.in_range(ctr, Vector2(float(x) + 0.5, float(y) + 0.5)):
@@ -1276,7 +1292,10 @@ func _ai_take_turn(u: Unit) -> void:
 	_log("  🤖 %s：%s" % [u.name, plan.get("note", "-")])
 	var mv = plan.get("move_to", null)
 	if mv != null:
-		await _ai_move(u, mv)
+		# 用户口径（第 83 轮）：**敌方直升机可以在移动中任意时刻开始普攻** ——
+		# 所以它发起移动后不再等走完，直接继续决策/开火（火箭会从"当时的当前位置"出膛）。
+		var ai_heli := AttackProfile.is_heli(u)
+		await _ai_move(u, mv, not ai_heli)
 		if not u.is_alive():
 			_ai_turn = false
 			_finish_turn()
@@ -1307,10 +1326,13 @@ func _ai_take_turn(u: Unit) -> void:
 	_ai_turn = false
 
 
-func _ai_move(u: Unit, cell: Vector2i) -> void:
+## AI 走位。wait = false 时只发起移动、不等走完（直升机边走边打用，用户口径第 83 轮）
+func _ai_move(u: Unit, cell: Vector2i, wait: bool = true) -> void:
 	if u == null or cell == u.cell:
 		return
 	_do_move(u, cell)
+	if not wait:
+		return
 	var guard := 0.0
 	while u.visual != null and u.visual.is_walking() and guard < 4.0:
 		guard += 0.05
@@ -1375,7 +1397,8 @@ func _fire_cannon_ai(u: Unit, ends_turn: bool = true) -> void:
 	if u.visual != null:
 		u.visual.rotation.y = atan2(dir.x, dir.y)        # 炮口转向目标（炮在身前 +Z）
 	var muzzle := from + dir * 0.55
-	_spawn_cannon(u, Vector3(muzzle.x, 0.80, muzzle.y), Vector3(land.x, 0.55, land.y), ends_turn)
+	_spawn_cannon(u, Vector3(muzzle.x, 0.80, muzzle.y),
+		Vector3(land.x, Targeting.aim_height(t), land.y), ends_turn)
 	_log("  💣 %s 的加农炮瞄准最近的 %s（%.1f 格，射程 %.0f）：出膛" %
 		[u.name, t.name, from.distance_to(to), reach])
 
@@ -1665,7 +1688,7 @@ func _menu_attack() -> void:
 			phase = Phase.CHOOSE_TARGET
 			reachable = {}
 			# 只显示"当前位置能打到的格子"（紫色高亮）
-			attackable = Targeting.attack_range_cells(active, GW, GH)
+			attackable = Targeting.attack_range_cells_rect(active, PX, PY, PW, PH)
 			_draw_hints()
 			_refresh_all()
 
@@ -1919,7 +1942,9 @@ func _arrow_hit_check(p: Projectile, prev: Vector3, cur: Vector3) -> Dictionary:
 	var skip: Unit = null if p.hit_self else (p.ignore_unit if p.ignore_unit != null else p.owner_unit)
 	# ① 角色（细圆柱判定；沿线采样，保证不漏）。判定半径用这一发自己的身体半径
 	#    （箭矢 0.075 / 加农炮弹 0.25）
-	var u := Targeting.arrow_body_hit_seg(prev, cur, skip, units, UNIT_BODY_R, p.hit_r)
+	#    炮弹类（第 83 轮）：必须真的碰到身体，否则就从头顶飞过去了
+	var strict: bool = Ballistics.body_impact(p.kind) == "burst"
+	var u := Targeting.arrow_body_hit_seg(prev, cur, skip, units, UNIT_BODY_R, p.hit_r, strict)
 	if u != null:
 		if p.shot != null:
 			p.shot.last_hit_dist = p.from.distance_to(p.pos())   # 破片伤害要用"飞了多远"
@@ -1970,6 +1995,21 @@ func _on_projectile_event(event: String, p: Projectile, extra = null) -> void:
 							Passives.focus_stacks(pr2.shot.caster)])
 		ProjectileField.EV_HIT_TARGET:
 			_resolve_arrow_hit(sh, extra)
+		ProjectileField.EV_HIT_BODY:
+			# 用户口径（第 83 轮）：炮弹类（炮弹 / 火箭 / 枪榴弹）飞行途中撞到角色
+			# -> 按【被拦下的空爆】处理。枪榴弹例外：它本来就"落地才炸"，所以就地落地开始计时。
+			var hit_u: Unit = extra.get("unit", null) if extra is Dictionary else null
+			if p.kind == Projectile.KIND_GRENADE:
+				var gc := Vector2i(int(floor(p.pos().x)), int(floor(p.pos().y)))
+				_log("  🛑 %s的枪榴弹在空中撞到 %s，就地落地（%d, %d）" % [
+					p.owner_name, hit_u.name if hit_u != null else "障碍", gc.x, gc.y])
+				_spawn_grenade_model(gc, p)
+			else:
+				_log("  🛑 %s的%s在半空撞到 %s，被拦下就地空爆" % [
+					p.owner_name, ProjectileField.kind_cn(p.kind),
+					hit_u.name if hit_u != null else "障碍"])
+				_flash_sphere(p.pos3(), 0.6, 0.25)
+				_air_burst(p, "被身体拦下")
 		ProjectileField.EV_LANDED:
 			_on_proj_landed(p)
 		ProjectileField.EV_REMOVED:
@@ -1992,19 +2032,23 @@ func _after_projectile_gone(sh: Ordnance.Shot) -> void:
 
 ## 半空被打爆的炮弹：落点就是它当时的位置。
 ## 用户口径：三维判定 + 爆炸范围恒定为一格球（半径 0.5）——在头顶上炸但飞得高就没伤害。
-func _air_burst(p: Projectile) -> void:
+## why：日志措辞（"被打爆" / "被身体拦下"），伤害口径完全一样。
+func _air_burst(p: Projectile, why: String = "被打爆") -> void:
 	var sh: Ordnance.Shot = p.shot
 	var ctr: Vector3 = p.pos3()
-	_log("  💥 炮弹在半空被打爆：(%.2f, %.2f) 高度 %.2f 空爆（一格球，三维判定）" %
-		[ctr.x, ctr.z, ctr.y])
+	_log("  💥 炮弹在半空%s：(%.2f, %.2f) 高度 %.2f 空爆（一格球，三维判定）" %
+		[why, ctr.x, ctr.z, ctr.y])
 	_show_impact(Vector2(ctr.x, ctr.z), ctr.y)
 	var ring := _make_impact_ring(Vector2(ctr.x, ctr.z),
 		sh.blast_r if sh != null else BLAST_RADIUS)
 	ring.position.y = maxf(0.05, ctr.y)
 	_flash_impact(ring)
 	var attacker: Unit = sh.caster if sh != null else null
-	var hits: Array = Damage.air_burst(attacker, ctr,
-		sh.opts if sh != null else {}, units, attacker, Damage.AIR_BURST_R)
+	# 火箭这类"落地才算威力"的弹种发射单里没有 opts：空爆时按发射者现算一份（口径与落地一致）
+	var opts: Dictionary = sh.opts if sh != null else {}
+	if opts.is_empty() and attacker != null:
+		opts = Damage.blast_opts(attacker, rng)
+	var hits: Array = Damage.air_burst(attacker, ctr, opts, units, attacker, Damage.AIR_BURST_R)
 	if hits.is_empty():
 		_log("  （一格球内没有角色）")
 		return
@@ -2019,10 +2063,19 @@ func _air_burst(p: Projectile) -> void:
 func _on_proj_landed(p: Projectile) -> void:
 	var at := p.pos()
 	var sh: Ordnance.Shot = p.shot
+	var land_cell := Vector2i(int(floor(at.x)), int(floor(at.y)))
 	# 用户口径：炮弹 / 召唤球落进河里直接消失（河里不拦弹道，只是落进去就没了）
-	if Level.is_river(Vector2i(int(floor(at.x)), int(floor(at.y)))):
+	if Level.is_river(land_cell):
 		_log("  🌊 %s的%s落进河里，直接消失（无爆炸）" % [
 			p.owner_name, ProjectileField.kind_cn(p.kind)])
+		return
+	# 用户口径（第 83 轮）：竞技场外面的"空场"没有格子划分 ——
+	#   · 投掷类（枪榴弹 / 轨道信标）落进去直接作废（套用河的规则）
+	#   · **炮弹类照常落地结算**：炮弹不会再因为飞出竞技场边界就消失
+	if Level.is_void(land_cell) \
+			and (p.kind == Projectile.KIND_GRENADE or p.kind == Projectile.KIND_MARKER):
+		_log("  🌫 %s的%s落在空场 (%d, %d)，直接消失（无效果）" % [
+			p.owner_name, ProjectileField.kind_cn(p.kind), land_cell.x, land_cell.y])
 		return
 	match p.kind:
 		Projectile.KIND_SHELL:
@@ -2075,14 +2128,27 @@ func _rocket_fragments(caster: Unit, at: Vector2) -> void:
 		at.x, at.y, Ordnance.ROCKET_FRAGMENTS])
 
 
-## ── 直升机的吊射 37mm 火箭：8 发、4 次齐射（左右各一发）、间隔 250ms ──────────
+## 移动中开火：自检用（试玩第 40 节读它来验证"从当前位置出膛 + 落点按位移平移"）
+var _salvo_dbg: Dictionary = {}
+
+
+## ── 直升机的吊射 37mm 火箭：8 发、4 次齐射（左右各一发）、每次间隔 1 秒 ────────
 ## 用户口径：普攻需 4 精力；瞄准同投掷手但"结果翻倍"（先前飞 x 格现在飞 2x 格）；
-## 落点 = 以瞄准落点为圆心、半径 4 格圆内随机 8 个点；每发直击范围 = 半径 1 格圆。
+## 落点 = 以瞄准落点为圆心、半径 8 格圆内随机 8 个点；每发直击范围 = 半径 1 格圆。
 ## 精力消耗与"已行动"标记由 _perform_basic 统一处理（唯一入口），这里只管表现与弹道。
+##
+## 用户口径（第 83 轮）：**敌方直升机可以在移动中任意时刻开火** ——
+##   · "使用普攻时"的位置 = 基准 base（每一波按当前位移平移落点）
+##   · 每一波的两发都从【当时的当前位置】出膛（再也不会出现在"还没走到的格子上生成"）
+##   · 落点在开火瞬间一次性随机好（用户口径"从使用普攻时随机出的落点"）
+## 玩家的直升机不需要这一套（开火时站着不动，行为与以前逐字节一致）。
 func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var cfg := Level.heli()
-	# 瞄准翻倍：以自身为原点，把拖拽得到的位移 ×2
-	var base := _cc(u.cell)
+	# 用户口径（第 83 轮）：只有【AI 操作的】直升机需要"边走边打"这一套；
+	# 玩家那边开火时站着不动，行为与以前逐字节一致。
+	var moving_fire: bool = not u.is_manual()
+	# 瞄准翻倍：以开火位置为原点，把瞄准位移 ×2
+	var base := _unit_pos(u) if moving_fire else _cc(u.cell)
 	var dir := fpos - base
 	var doubled := base + dir * float(cfg["aim_mult"])
 	var max_d := float(u.rng_max)
@@ -2093,26 +2159,46 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var pairs := int(cfg["salvo_pairs"])
 	var gap := float(cfg["salvo_gap"])
 	var per := maxi(1, rockets / maxi(1, pairs))
-	_log("  🚁 %s 吊射火箭：瞄准 (%.1f, %.1f)（原始 (%.1f, %.1f) ×%.0f），%d 发 / %d 次齐射" % [
-		u.name, doubled.x, doubled.y, fpos.x, fpos.y, float(cfg["aim_mult"]), rockets, pairs])
+	_log("  🚁 %s 吊射火箭：瞄准 (%.1f, %.1f)（原始 (%.1f, %.1f) ×%.0f），%d 发 / %d 次齐射%s" % [
+		u.name, doubled.x, doubled.y, fpos.x, fpos.y, float(cfg["aim_mult"]), rockets, pairs,
+		"（移动中开火：%s）" % base if moving_fire else ""])
 	# 每发火箭从"机侧"出膛：左手边一发、右手边一发（用户口径）
 	var side := (doubled - base).normalized()
 	if side.length() < 0.001:
 		side = Vector2.RIGHT
 	var perp := Vector2(-side.y, side.x)
+	# 移动中开火：落点在开火瞬间一次性掷好，之后每一波按"当前位置 − 基准"平移
+	var rolled: Array[Vector2] = []
+	if moving_fire:
+		for i0 in rockets:
+			var ang0 := rng.next_float() * TAU
+			var rr0 := scatter * sqrt(rng.next_float())     # 圆内均匀
+			rolled.append(doubled + Vector2(cos(ang0) * rr0, sin(ang0) * rr0))
+	# 自检用：把这次齐射的"基准/落点/每波出膛点与位移"记下来（试玩第 40 节直接读）
+	_salvo_dbg = {"moving": moving_fire, "base": base, "rolled": rolled,
+		"spawns": [], "shifts": []}
 	for k in pairs:
+		var cur: Vector2 = _unit_pos(u) if moving_fire else base
+		var shift: Vector2 = cur - base
+		(_salvo_dbg["spawns"] as Array).append(cur)
+		(_salvo_dbg["shifts"] as Array).append(shift)
 		for i in per:
-			var ang := rng.next_float() * TAU
-			var rr := scatter * sqrt(rng.next_float())     # 圆内均匀
-			var aim := doubled + Vector2(cos(ang) * rr, sin(ang) * rr)
+			var aim: Vector2
+			if moving_fire:
+				aim = rolled[k * per + i] + shift
+			else:
+				var ang := rng.next_float() * TAU
+				var rr := scatter * sqrt(rng.next_float())     # 圆内均匀
+				aim = doubled + Vector2(cos(ang) * rr, sin(ang) * rr)
+				rolled.append(aim)
 			var lateral := -0.32 if i % 2 == 0 else 0.32    # 左 / 右
-			var from := Vector3(float(u.cell.x) + 0.5 + perp.x * lateral,
-				u.hover + 0.25, float(u.cell.y) + 0.5 + perp.y * lateral)
+			var from := Vector3(cur.x + perp.x * lateral, u.hover + 0.25, cur.y + perp.y * lateral)
 			var p := Ordnance.make_rocket(u, from, aim, false)   # 不等落地
 			p.shot.target = null
 			field.register(p)
-		_log("  🚁 %s 齐射 %d/%d：左右各一发（瞄准 (%.1f, %.1f)，散布半径 %.0f）" % [
-			u.name, k + 1, pairs, doubled.x, doubled.y, scatter])
+		_log("  🚁 %s 齐射 %d/%d：左右各一发（瞄准 (%.1f, %.1f)，散布半径 %.0f%s）" % [
+			u.name, k + 1, pairs, doubled.x, doubled.y, scatter,
+			"，出膛 (%.1f, %.1f)" % cur if moving_fire else ""])
 		if k < pairs - 1:
 			await get_tree().create_timer(gap).timeout
 	# 用户口径：发射完即进入下一回合，无需等待落地
@@ -2350,7 +2436,8 @@ func _sentry_fire(sh: GameMaster.Shot) -> void:
 	# 用户口径：不再瞄准对象当前位置，而是【以它当前位置为球心、半径 1 格的球内随机一点】
 	# 用户口径：拦弹道物也吃同一套散布 —— 炮弹有速度，随机性正好允许"提前量"出现，多抽几次总有一次是对的
 	var j := Spread.ball_offset(SENTRY_AIM_BALL_R, rng)
-	var aim := Vector3(sh.at.x + j.x, 0.55 + j.y * 0.5, sh.at.y + j.z)
+	# 高度轴（第 83 轮）：瞄悬空单位要抬到它的身体中心；拦弹道物则瞄它当前飞行高度
+	var aim := Vector3(sh.at.x + j.x, sh.y + j.y * 0.5, sh.at.y + j.z)
 	_log("  🎯 哨兵射击（%s）：%s 实际位置 (%.2f, %.2f) → 瞄准 (%.2f, %.2f)｜队列剩余 %d" %
 		[sh.reason, sh.target_name, sh.at.x, sh.at.y, aim.x, aim.z, gm.sentry_queue_size()])
 	_spawn_arrow(a, Vector3(float(a.cell.x) + 0.5, 0.75, float(a.cell.y) + 0.5),
@@ -2500,13 +2587,13 @@ var _cell_targeting: bool = false         # 正在"点格子"选技能目标（�
 var _turn_watch_t: float = 0.0            # AI 回合看门狗
 
 
-## 把格子钳进地图内（用户口径：任何单位都不该跑到场外）
+## 把格子钳进【可行动区域】内（用户口径：任何单位都不该跑到空场/场外去）
 func _in_bounds(c: Vector2i) -> bool:
-	return c.x >= 0 and c.y >= 0 and c.x < GW and c.y < GH
+	return Level.in_play(c)
 
 
 func _clamp_cell(c: Vector2i) -> Vector2i:
-	return Vector2i(clampi(c.x, 0, GW - 1), clampi(c.y, 0, GH - 1))
+	return Vector2i(clampi(c.x, PX, PX + PW - 1), clampi(c.y, PY, PY + PH - 1))
 
 
 func _dive_marker(cell: Vector2i, on: bool) -> void:
@@ -2636,8 +2723,8 @@ func _dive_tick(delta: float) -> void:
 func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
 	u.cell = _clamp_cell(Vector2i(int(floor(pos.x)), int(floor(pos.y))))
 	if u.visual != null:
-		u.visual.position = Vector3(clampf(pos.x, 0.5, float(GW) - 0.5), h,
-			clampf(pos.y, 0.5, float(GH) - 0.5))
+		u.visual.position = Vector3(clampf(pos.x, float(PX) + 0.5, float(PX + PW) - 0.5), h,
+			clampf(pos.y, float(PY) + 0.5, float(PY + PH) - 0.5))
 	_check_heli_crash(u)          # 用户口径：俯冲期间会受伤、也会触发被动
 
 
@@ -2871,6 +2958,17 @@ static func _cc(c: Vector2i) -> Vector2:
 	return Vector2(float(c.x) + 0.5, float(c.y) + 0.5)
 
 
+## 单位"现在在哪"（浮点格坐标）。**走路中的角色要用视觉位置** ——
+## 逻辑格子（u.cell）在移动发起时就瞬移到终点了，视觉位置才是它当下真正所在的地方
+## （用户口径第 83 轮：直升机边走边打时，火箭必须从"当前位置"出膛）。
+static func _unit_pos(u: Unit) -> Vector2:
+	if u == null:
+		return Vector2.ZERO
+	if u.visual != null:
+		return Vector2(u.visual.position.x, u.visual.position.z)
+	return _cc(u.cell)
+
+
 ## 【唯一】普攻入口。返回 false = 这一击没打出去（精力不够 / 目标非法）。
 ##   aim         : 落点（浮点格坐标）。近战/锁敌时传目标中心即可
 ##   target      : 锁定的角色（可空）
@@ -2920,12 +3018,14 @@ func _basic_melee(u: Unit, t: Unit, pl: Placeable, ba: bool) -> bool:
 	return false
 
 
-## 弓箭：恒定速度抛物线，命中靠碰撞判定（可能打空）
+## 弓箭：恒定速度抛物线，命中靠碰撞判定（可能打空）。
+## 高度轴（第 83 轮）：瞄角色就瞄【身体中心】—— 悬停 2 格的直升机要瞄 2.5 高，
+## 否则箭从它下面穿过去（以前判定不看高度，看着就像穿模）。
 func _basic_arrow(u: Unit, aim: Vector2, t: Unit, pl: Placeable, ba: bool) -> bool:
 	var from := Vector3(float(u.cell.x) + 0.5, 0.75, float(u.cell.y) + 0.5)
 	var to := Vector3(aim.x, 0.55, aim.y)
 	if t != null and t.is_alive():
-		to = Vector3(float(t.cell.x) + 0.5, 0.55, float(t.cell.y) + 0.5)
+		to = Vector3(float(t.cell.x) + 0.5, Targeting.aim_height(t), float(t.cell.y) + 0.5)
 	elif pl != null and pl.is_alive():
 		to = Vector3(float(pl.cell.x) + 0.5, 0.55, float(pl.cell.y) + 0.5)
 	var p := _spawn_arrow(u, from, to, t, ba, true)
@@ -2971,10 +3071,12 @@ func _volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
 		ctr = _cc(pl.cell)
 	var from := Vector3(float(u.cell.x) + 0.5, 0.75, float(u.cell.y) + 0.5)
 	var dist := _cc(u.cell).distance_to(ctr)
+	# 高度轴（第 83 轮）：打悬空单位要把弹道抬到它的身体中心
+	var fly_y: float = Targeting.aim_height(t) if t != null and t.is_alive() else -1.0
 	for i in count:
 		var a := Spread.linear_scatter(ctr, dist, rng)
 		var last := i == count - 1
-		var p := Ordnance.make_bullet(u, from, a, last)
+		var p := Ordnance.make_bullet(u, from, a, last, fly_y)
 		p.shot.target = t
 		p.shot.break_armor = break_armor
 		if pl != null and pl.is_alive():
@@ -3345,7 +3447,7 @@ func _path_to(u: Unit, goal: Vector2i) -> Array[Vector2i]:
 		for c in frontier:
 			for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var n: Vector2i = c + off
-				if n.x < 0 or n.y < 0 or n.x >= GW or n.y >= GH:
+				if not Level.in_play(n):
 					continue
 				if prev.has(n) or occupied.has(n):
 					continue
@@ -3387,7 +3489,7 @@ func _pick_cell(mouse: Vector2) -> Variant:
 		return null
 	var p := from + dir * t
 	var cell := Vector2i(int(floor(p.x)), int(floor(p.z)))
-	if cell.x < 0 or cell.y < 0 or cell.x >= GW or cell.y >= GH:
+	if not Level.in_play(cell):
 		return null
 	return cell
 
@@ -3415,7 +3517,7 @@ func _compute_reachable(u: Unit) -> Dictionary:
 				continue
 			for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var n: Vector2i = c + off
-				if n.x < 0 or n.y < 0 or n.x >= GW or n.y >= GH:
+				if not Level.in_play(n):
 					continue
 				if occupied.has(n) or dist.has(n):
 					continue
@@ -3658,7 +3760,7 @@ func _hover_cell() -> Variant:
 		return null
 	var p := from + dir * t
 	var c := Vector2i(int(floor(p.x)), int(floor(p.z)))
-	if c.x < 0 or c.y < 0 or c.x >= GW or c.y >= GH:
+	if not Level.in_play(c):
 		return null
 	return c
 

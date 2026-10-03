@@ -41,6 +41,24 @@ static func is_direct_hit(kind: String) -> bool:
 		or kind == Projectile.KIND_FRAGMENT or kind == Projectile.KIND_BULLET
 
 
+## 飞行途中撞到角色会怎样（用户口径第 83 轮）：
+##   "direct" -> 直接命中，按命中结算（箭矢 / 加农炮弹 / 破片 / 子弹）
+##   "burst"  -> 被身体拦下，就地空爆（炮弹类：炮弹 / 火箭 / 枪榴弹）
+##   ""       -> 不撞（召唤球：它只是个信标，穿过去）
+static func body_impact(kind: String) -> String:
+	if is_direct_hit(kind):
+		return "direct"
+	if kind == Projectile.KIND_SHELL or kind == Projectile.KIND_ROCKET \
+			or kind == Projectile.KIND_GRENADE:
+		return "burst"
+	return ""
+
+
+## 这一发是不是【炮弹类】（会惊动哨兵、撞到角色会空爆的那种）
+static func is_shell_class(kind: String) -> bool:
+	return body_impact(kind) == "burst" or kind == Projectile.KIND_MARKER
+
+
 static func placeable_blocks(pl: Placeable, kind: String) -> bool:
 	return placeable_block_mode(pl, kind) == Block.ALWAYS
 

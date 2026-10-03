@@ -108,7 +108,7 @@ static func air_burst(attacker: Unit, ctr: Vector3, opts: Dictionary, units: Arr
 	for u in units:
 		if not u.is_alive() or u == skip:
 			continue
-		if not Targeting.sphere_hits_body(ctr, radius, u.cell, BODY_R, BODY_H):
+		if not Targeting.sphere_hits_body(ctr, radius, u.cell, BODY_R, BODY_H, u.hover):
 			continue
 		var h := Hit.new()
 		h.unit = u
@@ -147,10 +147,11 @@ static func bullet_mult(dist: float) -> float:
 ##   0 格：25 力 + 25 甲 ｜ 3 格：12 力 + 12 甲 ｜ 16 格：0（仍可命中）｜ 20 格：模型消失
 const FRAG_NEAR_DIST := 3.0
 const FRAG_FAR_DIST := 16.0
-const FRAG_NEAR_POWER := 25
-const FRAG_NEAR_BREAK := 25
-const FRAG_MID_POWER := 12
-const FRAG_MID_BREAK := 12
+## 用户口径（第 83 轮）：破片伤害整体降为原来的一半 —— 0 格 12.5/12.5 → 3 格 6/6 → 16 格 0
+const FRAG_NEAR_POWER := 12.5
+const FRAG_NEAR_BREAK := 12.5
+const FRAG_MID_POWER := 6.0
+const FRAG_MID_BREAK := 6.0
 
 static func fragment_power_milli(dist: float) -> int:
 	return _frag_lerp(dist, FRAG_NEAR_POWER, FRAG_MID_POWER, 0)
@@ -158,15 +159,15 @@ static func fragment_power_milli(dist: float) -> int:
 static func fragment_break_milli(dist: float) -> int:
 	return _frag_lerp(dist, FRAG_NEAR_BREAK, FRAG_MID_BREAK, 0)
 
-static func _frag_lerp(dist: float, near_v: int, mid_v: int, far_v: int) -> int:
+static func _frag_lerp(dist: float, near_v: float, mid_v: float, far_v: float) -> int:
 	var d: float = maxf(0.0, dist)
 	if d <= FRAG_NEAR_DIST:
 		var t: float = d / FRAG_NEAR_DIST
-		return int(round(lerpf(float(near_v), float(mid_v), t) * 1000.0))
+		return int(round(lerpf(near_v, mid_v, t) * 1000.0))
 	if d >= FRAG_FAR_DIST:
-		return far_v * 1000
+		return int(far_v * 1000.0)
 	var t2: float = (d - FRAG_NEAR_DIST) / (FRAG_FAR_DIST - FRAG_NEAR_DIST)
-	return int(round(lerpf(float(mid_v), float(far_v), t2) * 1000.0))
+	return int(round(lerpf(mid_v, far_v, t2) * 1000.0))
 
 
 ## 对单个角色的一次攻击（近战立即生效 / 直接命中弹道物命中）
