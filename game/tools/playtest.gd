@@ -6,6 +6,7 @@ extends SceneTree
 var _s: Node
 var _fails: Array[String] = []
 var _checks := 0
+var _do_move_probe_start: int = 0        # 走位耗时探针（第 40 节）
 
 ## 统计高亮格数量（排除常驻的待确认 √ sprite）
 func _count_hint_boxes() -> int:
@@ -1676,7 +1677,7 @@ func _initialize() -> void:
 	print("    贴脸计划：%s（走位 %s）" % [pl.get("note", "-"), pl.get("move_to", null)])
 	_chk(String(pl.get("action", "")) == "attack" and pl.get("move_to", null) == null,
 		"能直接打到就该原地打，不要白走一步")
-	# ③ 投掷手不该把地毯丢进敌方哨兵射界
+	# ③ 投掷手：有目标就优先技能；**只有"自己在敌方哨兵射界里"才不用**
 	var mortar_ai: Unit = null
 	for u in _s.units:
 		if u.name == "Airburst mortar": mortar_ai = u
@@ -1687,15 +1688,37 @@ func _initialize() -> void:
 	mctx.foe_king = foe_king
 	mctx.reachable = {}
 	mctx.placeables = []
+	# 落点在哨兵射界里、但自己不在 -> 照丢（第 86 轮口径：不再检查落点）
 	var blocked := {}
 	for o in ctx.foes:
 		blocked[o.cell] = true
 		blocked[Vector2i(o.cell.x + 1, o.cell.y)] = true
 	mctx.sentry_cells = blocked
 	var mpl := Ai.plan(mctx)
-	print("    投掷手（落点全在哨兵射界里）：%s" % mpl.get("note", "-"))
-	_chk(String(mpl.get("action", "")) != "skill" or String(mpl.get("skill", "")) != "carpet_bomb",
-		"投掷手不应把地毯式轰炸丢进敌方哨兵射界")
+	print("    投掷手（落点在哨兵射界里、自己不在）：%s" % mpl.get("note", "-"))
+	_chk(String(mpl.get("action", "")) == "skill" and String(mpl.get("skill", "")) == "carpet_bomb",
+		"投掷手面对目标永远优先用技能（落点是否在射界里不管）")
+	# 自己踩在敌方哨兵射界里 -> 不用技能
+	var walked_into := blocked.duplicate()
+	walked_into[mortar_ai.cell] = true
+	mctx.sentry_cells = walked_into
+	var mpl2 := Ai.plan(mctx)
+	print("    投掷手（自己在哨兵射界里）：%s" % mpl2.get("note", "-"))
+	_chk(String(mpl2.get("action", "")) != "skill" or String(mpl2.get("skill", "")) != "carpet_bomb",
+		"自己在敌方哨兵射界里时不用地毯式轰炸（用户口径第 86 轮）")
+	mctx.sentry_cells = blocked
+	# 同一个目标只出现一次：也应该丢技能（不再要求 ≥2 人挤在一起）
+	var solo_ctx := Ai.Ctx.new()
+	solo_ctx.rng = RngService.new(4)
+	solo_ctx.me = mortar_ai
+	solo_ctx.foes = [ctx.foes[0]]
+	solo_ctx.foe_king = ctx.foes[0]
+	solo_ctx.reachable = {}
+	solo_ctx.sentry_cells = {}
+	var mpl3 := Ai.plan(solo_ctx)
+	print("    投掷手（只有 1 个目标）：%s" % mpl3.get("note", "-"))
+	_chk(String(mpl3.get("action", "")) == "skill" and String(mpl3.get("skill", "")) == "carpet_bomb",
+		"只有一个目标也优先用技能（第 86 轮：不再要求 ≥2 人集聚）")
 	# ④ 打不到人 + 血不满 -> 休息；打不到人 + 血满 -> 靠拢
 	#    用近战（没有技能分支干扰），敌人在很远处、且不是国王
 	var foe_far: Unit = null
@@ -1836,20 +1859,28 @@ func _initialize() -> void:
 	_chk(_s._dive_markers.size() == 1, "目标格应有地面标识（橙色圆盘）")
 	_chk(Ai.heli_threatens_cell(heli, dtgt + Vector2i(1, 1)), "AI 能算出它威胁到的格子")
 	_chk(Ai.ready_helis([heli]).size() == 1, "AI 能列出正在准备的敌方直升机")
-	_chk(_s._dive_begin(heli), "轮到它的回合应开始俯冲")
-	_chk(heli.tags.has("diving"), "俯冲中要打上 diving 标记")
+	_chk(_s._dive_begin(heli), "轮到它的回合应开始爬升轰炸")
+	_chk(heli.tags.has("diving"), "爬升轰炸中要打上 diving 标记")
 	var dummy_v: Unit = victim_near
 	dummy_v.cell = dtgt
 	dummy_v.power_cur = dummy_v.power_max
 	var hp_bomb: int = dummy_v.power_cur
+	var top_h := 0.0
 	for i in 400:
 		_s._dive_tick(1.0 / 60.0)
+		top_h = maxf(top_h, heli.visual.position.y)
 		if not heli.tags.has("diving"):
 			break
-	print("    俯冲结束：diving=%s ｜ 目标格角色力量 %d -> %d" % [
-		heli.tags.has("diving"), hp_bomb / 1000, dummy_v.power_cur / 1000])
-	_chk(not heli.tags.has("diving"), "俯冲应完整走完（投弹后返航）")
+	print("    爬升轰炸结束：diving=%s ｜ 最高爬到 %.2f 格 ｜ 目标格角色力量 %d -> %d" % [
+		heli.tags.has("diving"), top_h, hp_bomb / 1000, dummy_v.power_cur / 1000])
+	print("    爬升高度（第 86 轮口径）：%.2f 格（要求 >= %.1f，才不会炸到自己）" % [
+		top_h, float(Level.heli()["climb_h"])])
+	_chk(not heli.tags.has("diving"), "爬升轰炸应完整走完（投弹后返航）")
+	_chk(top_h >= float(Level.heli()["climb_h"]) - 0.01, "要爬到设定高度再投弹")
+	await create_timer(1.4).timeout          # 炸弹下落 1 秒后才触地结算
+	print("    投弹后：目标格角色力量 %d -> %d" % [hp_bomb / 1000, dummy_v.power_cur / 1000])
 	_chk(dummy_v.power_cur < hp_bomb, "投弹应打到目标格半径 3 格内的角色")
+	_chk(heli.power_cur == heli.power_max, "投弹不能炸到自己（爬到安全高度了）")
 
 	# ── 35. 选技能链路（枪榴弹）：说明文案 + 刷新界面不许崩（用户报过崩溃）──
 	print("\n[35] 枪榴弹选技能链路")
@@ -2053,6 +2084,14 @@ func _initialize() -> void:
 		broke_plan.get("action", "-"), broke_plan.get("note", "-")])
 	_chk(String(broke_plan.get("action", "")) != "attack",
 		"AI 不会选一个自己付不起的普攻（否则出手即空转）")
+	_chk(String(broke_plan.get("action", "")) == "rest",
+		"付不起普攻时所有 AI 都必须选【休息】（用户口径第 86 轮）")
+	# 对照：同一个人，精力够就该打（说明上面选休息不是别的原因）
+	heli_b.energy = heli_b.energy_max
+	var paid_plan := Ai.plan(_s._ai_ctx(heli_b))
+	print("    精力满的同一个直升机：%s" % paid_plan.get("action", "-"))
+	_chk(String(paid_plan.get("action", "")) == "attack", "精力够就该打（对照）")
+	heli_b.energy = 0
 	heli_b.energy = heli_b.energy_max
 
 	# ── 38c. 技能：玩家入口与 AI 入口同一条生产线 ──
@@ -2186,9 +2225,8 @@ func _initialize() -> void:
 	_chk(left2[0] > 0 or left2[1] > 0 or _s.game_over,
 		"推进回合边界后英雄会复活（或直接判结束），战斗不会卡死")
 
-	# ── 40. 敌方直升机：移动中开火（火箭从当前位置出膛 + 落点平移）──
-	print("\n[40] 敌方直升机移动中开火")
-	# 第 39 节把人都打死了：先把要用的单位救回来
+	# ── 40. 移动结束后才能开火（第 86 轮口径）──
+	print("\n[40] 移动结束后才能释放技能/普攻")
 	var he_e: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
 	var mate_e: Unit = _unit_by("Gerald", 1)
 	var foe_p: Unit = _unit_by("Alette", 0)
@@ -2200,88 +2238,52 @@ func _initialize() -> void:
 	_s.gm.ai_enabled = false
 	_s._turn_just_finished = null
 	_s.active = he_e
-	# 先发起一次长距离移动：逻辑格子立刻到终点，视觉位置沿路径走
-	_s._do_move(he_e, Vector2i(10, 30))
-	await create_timer(0.5).timeout
-	print("    走位中：逻辑格 %s ｜ 视觉位置 (%.2f, %.2f) ｜ 在走=%s" % [
-		he_e.cell, _s._unit_pos(he_e).x, _s._unit_pos(he_e).y, he_e.visual.is_walking()])
-	_chk(he_e.visual.is_walking() and _s._unit_pos(he_e).y < 15.0,
-		"移动中：逻辑格已经瞬移到终点，但人还在半路上")
-	# 在半路上开火
+	# 发起一次移动：AI 走位函数必须等它走完才返回（摇杆期间不许开火）
+	_do_move_probe_start = Time.get_ticks_msec()
+	await _s._ai_move(he_e, Vector2i(10, 20))
+	print("    走位结束：逻辑格 %s ｜ 视觉位置 (%.2f, %.2f) ｜ 还在走=%s ｜ 用时 %.1f 秒（2.5 格/秒）" % [
+		he_e.cell, _s._unit_pos(he_e).x, _s._unit_pos(he_e).y, he_e.visual.is_walking(),
+		(Time.get_ticks_msec() - _do_move_probe_start) / 1000.0])
+	_chk(not he_e.visual.is_walking(), "AI 走位函数会等走完（移动中不释放技能/普攻）")
+	_chk(_s._unit_pos(he_e).distance_to(Vector2(10.5, 20.5)) < 0.05,
+		"走完后视觉位置 = 脚下格中心（不会停在半路）")
+	_chk(he_e.visual.walk_speed > 2.4 and he_e.visual.walk_speed < 2.6,
+		"直升机移动速度 = 2.5 格/秒（第 86 轮）")
+	# 站定后开火：所有齐射都从脚下这个位置出膛
 	_s.clear_projectiles()
-	_s._ai_attack(he_e, {"target": mate_e, "aim": Vector2(10.5, 34.5)})
+	_s._ai_attack(he_e, {"target": mate_e, "aim": Vector2(10.5, 30.5)})
 	var wave1: Array[Vector2] = []
-	var late1: Array[Vector2] = []
 	var ids1: Array = []
 	for it in _s.field.items:
 		var pp: Projectile = it["p"]
 		if pp.kind == Projectile.KIND_ROCKET:
 			wave1.append(pp.from)
-			late1.append(pp.to)
 			ids1.append(pp.id)
-	var pos_at_fire: Vector2 = _s._unit_pos(he_e)
+	var here: Vector2 = _s._unit_pos(he_e)
 	var near_fire := 0
 	for f in wave1:
-		if f.distance_to(pos_at_fire) < 1.0:
+		if f.distance_to(here) < 0.6:
 			near_fire += 1
-	print("    第一波 %d 发：出膛 %s ｜ 开火时位置 (%.2f, %.2f)" % [
-		wave1.size(), wave1, pos_at_fire.x, pos_at_fire.y])
+	var salvo0: Dictionary = _s._salvo_dbg
+	print("    第一波 %d 发：出膛 %s ｜ 当前位置 (%.2f, %.2f) ｜ 基准 %s" % [
+		wave1.size(), wave1, here.x, here.y, salvo0.get("base", "-")])
 	_chk(wave1.size() == 2, "第一波应有左右各一发")
-	_chk(near_fire == wave1.size(), "每一波的两发都必须从【当前位置】出膛（不是还没走到的格子）")
-	_chk(wave1.size() > 0 and wave1[0].distance_to(Vector2(10.5, 30.5)) > 2.0,
-		"出膛点不在终点格上（以前的 bug：火箭在还没到达的位置生成）")
-	# 等第二波（间隔 1 秒）
+	_chk(near_fire == wave1.size(), "齐射必须从脚下（当前位置）出膛")
+	_chk((salvo0.get("base", Vector2.ZERO) as Vector2).distance_to(here) < 0.001,
+		"齐射基准 = 开火那一刻的当前位置")
 	await create_timer(1.15).timeout
 	var wave2: Array[Vector2] = []
-	var late2: Array[Vector2] = []
 	for it2 in _s.field.items:
 		var pp2: Projectile = it2["p"]
 		if pp2.kind == Projectile.KIND_ROCKET and not ids1.has(pp2.id):
 			wave2.append(pp2.from)
-			late2.append(pp2.to)
-	var m1f := Vector2.ZERO
-	for f2 in wave1:
-		m1f += f2
-	m1f /= maxf(1.0, float(wave1.size()))
-	var m2f := Vector2.ZERO
-	for f3 in wave2:
-		m2f += f3
-	m2f /= maxf(1.0, float(wave2.size()))
-	var m1t := Vector2.ZERO
-	for t1 in late1:
-		m1t += t1
-	m1t /= maxf(1.0, float(late1.size()))
-	var m2t := Vector2.ZERO
-	for t2 in late2:
-		m2t += t2
-	m2t /= maxf(1.0, float(late2.size()))
-	print("    两波：出膛 %s -> %s ｜ 落点 %s -> %s" % [m1f, m2f, m1t, m2t])
+	var same_spot := true
+	for f2 in wave2:
+		if f2.distance_to(here) > 0.6:
+			same_spot = false
+	print("    第二波 %d 发：出膛 %s（应与第一波同一处）" % [wave2.size(), wave2])
 	_chk(wave2.size() == 2, "第二波也应出膛（间隔 1 秒）")
-	_chk((m2f - m1f).length() > 0.5, "直升机在移动：第二波出膛点更靠前")
-	# 落点平移的口径（用户第 83 轮）：落点 = 开火时随机出的落点 + (当前位置 − 开火位置)。
-	# 用实现自己记下来的基准/位移来验（统计平均会被 ±8 格散布淹没，所以直接查不变量）。
-	var salvo: Dictionary = _s._salvo_dbg
-	var spawns: Array = salvo.get("spawns", [])
-	var shifts: Array = salvo.get("shifts", [])
-	_chk(bool(salvo.get("moving", false)), "AI 直升机走【移动中开火】分支")
-	_chk((salvo.get("base", Vector2.ZERO) as Vector2).distance_to(pos_at_fire) < 0.3,
-		"基准 = 开火那一刻的视觉位置")
-	_chk(spawns.size() >= 2 and (spawns[0] as Vector2).distance_to(pos_at_fire) < 0.05,
-		"第一波两发从【当前位置】出膛")
-	_chk(spawns.size() >= 2 and (spawns[1] as Vector2).y > (spawns[0] as Vector2).y + 0.5,
-		"第二波出膛点更靠前（确实在移动中开火）")
-	_chk(spawns.size() >= 2 and (shifts[1] as Vector2).distance_to(
-			(spawns[1] as Vector2) - (salvo["base"] as Vector2)) < 0.001,
-		"位移 = 当前位置 − 开火位置")
-	# 每一波的两发：出膛点必须在"那一波的当前位置"上（±侧向偏移 0.32）
-	var far_from_spawn := 0
-	for j in range(spawns.size()):
-		for f4 in [wave1, wave2][mini(j, 1)]:
-			if f4.distance_to(spawns[j] as Vector2) > 0.6:
-				far_from_spawn += 1
-	_chk(wave1.size() > 0 and wave1[0].distance_to(Vector2(10.5, 30.5)) > 2.0,
-		"出膛点不在终点格上（以前的 bug：火箭在还没到达的位置生成）")
-	_chk(far_from_spawn == 0, "每一波的出膛点都落在该波的当前位置上")
+	_chk(same_spot and (he_e.visual.is_walking() == false), "站定开火：两波都从同一处出膛")
 	await create_timer(3.2).timeout          # 等 4 波打完，别污染后面
 	_s.clear_projectiles()
 

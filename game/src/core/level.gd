@@ -62,10 +62,11 @@ const DEFS := {
 		"enemy": {"king": Vector2i(10, 40), "forward": Vector2i(0, -1), "lateral": Vector2i(1, 0)},
 		# 假人只出现在测试场（用户口径：竞技场没有假人）
 		"dummies": [],
-		# 三个英雄的【出生点 = 重生点】：河两岸紧贴河沿、左右居中，两边各一套
+		# 英雄【重生点】（用户口径第 86 轮）：**老国王前方 3 格那一行**，三格彼此间隔一个、居中；
+		# 开局的出场位置仍由 roster 决定（在河边）。
 		"spawn": {
-			"player": [Vector2i(9, 18), Vector2i(10, 18), Vector2i(11, 18)],
-			"enemy": [Vector2i(9, 22), Vector2i(10, 22), Vector2i(11, 22)],
+			"player": [Vector2i(8, 3), Vector2i(10, 3), Vector2i(12, 3)],
+			"enemy": [Vector2i(8, 37), Vector2i(10, 37), Vector2i(12, 37)],
 		},
 		# 本场景有哪些角色、各自在哪（没有假人）
 		"roster": [
@@ -230,10 +231,11 @@ const HELI_DEFAULTS := {
 	"crash_break": 40,
 	"crash_res": 0.5,        # 无视 50% 物抗
 	"dive_range": 20.0,      # 俯冲目标格最远 20 格
-	"dive_speed": 6.0,       # 俯冲 6 格/秒
-	"dive_h": 0.5,           # 俯冲终点高度
-	"drop_hold": 0.5,        # 到位后停 0.5 秒投弹
-	"drop_blast_r": 3.0,     # 投弹半径 3 格
+	"climb_speed": 2.5,      # 技能移动速度 = 悬停移动速度 2.5 格/秒（用户口径第 86 轮）
+	"climb_h": 4.0,          # 爬升到 4 格再投弹（投弹是三维球判定，4 格以上炸不到自己）
+	"drop_hold": 0.5,        # 到位后停 0.5 秒投弹（用户口径第 86 轮）
+	"bomb_fall_sec": 1.0,    # 投弹下落耗时 1 秒（用户口径第 86 轮）
+	"drop_blast_r": 3.0,     # 投弹半径 3 格（三维球）
 	"drop_power": 20,
 	"drop_break": 40,
 }

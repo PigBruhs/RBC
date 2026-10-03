@@ -1294,10 +1294,9 @@ func _ai_take_turn(u: Unit) -> void:
 	_log("  🤖 %s：%s" % [u.name, plan.get("note", "-")])
 	var mv = plan.get("move_to", null)
 	if mv != null:
-		# 用户口径（第 83 轮）：**敌方直升机可以在移动中任意时刻开始普攻** ——
-		# 所以它发起移动后不再等走完，直接继续决策/开火（火箭会从"当时的当前位置"出膛）。
-		var ai_heli := AttackProfile.is_heli(u)
-		await _ai_move(u, mv, not ai_heli)
+		# 用户口径（第 86 轮）：**移动结束后才能释放技能或普攻** ——
+		# 所以这里一律等它走完（直升机也一样：看上去"边走边打"做不到，就不做）。
+		await _ai_move(u, mv)
 		if not u.is_alive():
 			_ai_turn = false
 			_finish_turn()
@@ -1328,7 +1327,7 @@ func _ai_take_turn(u: Unit) -> void:
 	_ai_turn = false
 
 
-## AI 走位。wait = false 时只发起移动、不等走完（直升机边走边打用，用户口径第 83 轮）
+## AI 走位。wait = false 时只发起移动、不等走完（保留参数：现在所有 AI 都等走完）
 func _ai_move(u: Unit, cell: Vector2i, wait: bool = true) -> void:
 	if u == null or cell == u.cell:
 		return
@@ -2174,18 +2173,11 @@ var _salvo_dbg: Dictionary = {}
 ## 落点 = 以瞄准落点为圆心、半径 8 格圆内随机 8 个点；每发直击范围 = 半径 1 格圆。
 ## 精力消耗与"已行动"标记由 _perform_basic 统一处理（唯一入口），这里只管表现与弹道。
 ##
-## 用户口径（第 83 轮）：**敌方直升机可以在移动中任意时刻开火** ——
-##   · "使用普攻时"的位置 = 基准 base（每一波按当前位移平移落点）
-##   · 每一波的两发都从【当时的当前位置】出膛（再也不会出现在"还没走到的格子上生成"）
-##   · 落点在开火瞬间一次性随机好（用户口径"从使用普攻时随机出的落点"）
-## 玩家的直升机不需要这一套（开火时站着不动，行为与以前逐字节一致）。
+## 用户口径（第 86 轮）：**移动结束后才能释放技能或普攻** —— 所以不再有"边走边打"分支：
+## 一律以开火那一刻的【当前位置】为基准（未移动时就是脚下格中心），落点在开火瞬间一次掷好。
 func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var cfg := Level.heli()
-	# 用户口径（第 83 轮）：只有【AI 操作的】直升机需要"边走边打"这一套；
-	# 玩家那边开火时站着不动，行为与以前逐字节一致。
-	var moving_fire: bool = not u.is_manual()
-	# 瞄准翻倍：以开火位置为原点，把瞄准位移 ×2
-	var base := _unit_pos(u) if moving_fire else _cc(u.cell)
+	var base := _unit_pos(u)
 	var dir := fpos - base
 	var doubled := base + dir * float(cfg["aim_mult"])
 	var max_d := float(u.rng_max)
@@ -2196,46 +2188,32 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var pairs := int(cfg["salvo_pairs"])
 	var gap := float(cfg["salvo_gap"])
 	var per := maxi(1, rockets / maxi(1, pairs))
-	_log("  🚁 %s 吊射火箭：瞄准 (%.1f, %.1f)（原始 (%.1f, %.1f) ×%.0f），%d 发 / %d 次齐射%s" % [
-		u.name, doubled.x, doubled.y, fpos.x, fpos.y, float(cfg["aim_mult"]), rockets, pairs,
-		"（移动中开火：%s）" % base if moving_fire else ""])
+	_log("  🚁 %s 吊射火箭：瞄准 (%.1f, %.1f)（原始 (%.1f, %.1f) ×%.0f），%d 发 / %d 次齐射" % [
+		u.name, doubled.x, doubled.y, fpos.x, fpos.y, float(cfg["aim_mult"]), rockets, pairs])
 	# 每发火箭从"机侧"出膛：左手边一发、右手边一发（用户口径）
 	var side := (doubled - base).normalized()
 	if side.length() < 0.001:
 		side = Vector2.RIGHT
 	var perp := Vector2(-side.y, side.x)
-	# 移动中开火：落点在开火瞬间一次性掷好，之后每一波按"当前位置 − 基准"平移
+	# 落点在开火瞬间一次性掷好（每波取其中两发）
 	var rolled: Array[Vector2] = []
-	if moving_fire:
-		for i0 in rockets:
-			var ang0 := rng.next_float() * TAU
-			var rr0 := scatter * sqrt(rng.next_float())     # 圆内均匀
-			rolled.append(doubled + Vector2(cos(ang0) * rr0, sin(ang0) * rr0))
-	# 自检用：把这次齐射的"基准/落点/每波出膛点与位移"记下来（试玩第 40 节直接读）
-	_salvo_dbg = {"moving": moving_fire, "base": base, "rolled": rolled,
-		"spawns": [], "shifts": []}
+	for i0 in rockets:
+		var ang0 := rng.next_float() * TAU
+		var rr0 := scatter * sqrt(rng.next_float())        # 圆内均匀
+		rolled.append(doubled + Vector2(cos(ang0) * rr0, sin(ang0) * rr0))
+	# 自检用：把这次齐射的基准与落点记下来（试玩直接读）
+	_salvo_dbg = {"base": base, "rolled": rolled, "spawns": []}
 	for k in pairs:
-		var cur: Vector2 = _unit_pos(u) if moving_fire else base
-		var shift: Vector2 = cur - base
-		(_salvo_dbg["spawns"] as Array).append(cur)
-		(_salvo_dbg["shifts"] as Array).append(shift)
+		(_salvo_dbg["spawns"] as Array).append(base)
 		for i in per:
-			var aim: Vector2
-			if moving_fire:
-				aim = rolled[k * per + i] + shift
-			else:
-				var ang := rng.next_float() * TAU
-				var rr := scatter * sqrt(rng.next_float())     # 圆内均匀
-				aim = doubled + Vector2(cos(ang) * rr, sin(ang) * rr)
-				rolled.append(aim)
+			var aim: Vector2 = rolled[k * per + i]
 			var lateral := -0.32 if i % 2 == 0 else 0.32    # 左 / 右
-			var from := Vector3(cur.x + perp.x * lateral, u.hover + 0.25, cur.y + perp.y * lateral)
+			var from := Vector3(base.x + perp.x * lateral, u.hover + 0.25, base.y + perp.y * lateral)
 			var p := Ordnance.make_rocket(u, from, aim, false)   # 不等落地
 			p.shot.target = null
 			field.register(p)
-		_log("  🚁 %s 齐射 %d/%d：左右各一发（瞄准 (%.1f, %.1f)，散布半径 %.0f%s）" % [
-			u.name, k + 1, pairs, doubled.x, doubled.y, scatter,
-			"，出膛 (%.1f, %.1f)" % cur if moving_fire else ""])
+		_log("  🚁 %s 齐射 %d/%d：左右各一发（瞄准 (%.1f, %.1f)，散布半径 %.0f，出膛 (%.1f, %.1f)）" % [
+			u.name, k + 1, pairs, doubled.x, doubled.y, scatter, base.x, base.y])
 		if k < pairs - 1:
 			await get_tree().create_timer(gap).timeout
 	# 用户口径：发射完即进入下一回合，无需等待落地
@@ -2695,7 +2673,9 @@ func _cast_dive(u: Unit, cell: Vector2i) -> void:
 		u.name, cell.x, cell.y, Ai.manhattan(u.cell, cell)])
 
 
-## 轮到它的回合：开始俯冲（返回 true 表示本回合由俯冲接管）
+## 轮到它的回合：开始【爬升轰炸】（返回 true 表示本回合由它接管）
+## 用户口径（第 86 轮）：不再俯冲下去，而是**均匀爬升到不会自伤的高度** ——
+## 爬到目标上方（升到 climb_h）-> 停 0.5 秒 -> 投弹（弹下落 1 秒）-> 原路返回并降回悬停高度。
 func _dive_begin(u: Unit) -> bool:
 	if not u.tags.has("dive_ready"):
 		return false
@@ -2704,14 +2684,16 @@ func _dive_begin(u: Unit) -> bool:
 	_dive_clear(u)
 	u.tags["diving"] = true
 	_dive = {
-		"u": u, "phase": "out",
-		"from": Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5),
-		"to": Vector2(float(target.x) + 0.5, float(target.y) + 0.5),
-		"t": 0.0, "speed": float(cfg["dive_speed"]), "hold": 0.0,
+		"u": u, "phase": "up",
+		"from": _cc(u.cell),
+		"to": _cc(target),
+		"t": 0.0, "speed": float(cfg["climb_speed"]), "hold": 0.0,
+		"hi": float(cfg["climb_h"]),
 	}
 	if u.visual != null:
 		u.visual.position.y = u.hover
-	_log("  🚁 %s 开始俯冲 -> (%d, %d)" % [u.name, target.x, target.y])
+	_log("  🚁 %s 开始爬升轰炸 -> (%d, %d)（升到 %.1f 格，%.1f 格/秒）" % [
+		u.name, target.x, target.y, float(cfg["climb_h"]), float(cfg["climb_speed"])])
 	return true
 
 
@@ -2727,27 +2709,29 @@ func _dive_tick(delta: float) -> void:
 	var from: Vector2 = _dive["from"]
 	var to: Vector2 = _dive["to"]
 	var speed: float = float(_dive["speed"])
+	var hi: float = float(_dive["hi"])
 	var total := maxf(0.5, from.distance_to(to))
-	if phase == "out":
+	if phase == "up":
 		_dive["t"] = minf(1.0, float(_dive["t"]) + speed * delta / total)
 		var k: float = float(_dive["t"])
 		var pos := from.lerp(to, k)
-		_place_diving(u, pos, lerpf(u.hover, float(cfg["dive_h"]), k))
+		_place_diving(u, pos, lerpf(u.hover, hi, k))          # 均匀爬升
 		if k >= 1.0:
 			_dive["phase"] = "hold"
 			_dive["hold"] = float(cfg["drop_hold"])
-			_log("  🚁 %s 抵达目标上方，停 %.2f 秒投弹" % [u.name, float(cfg["drop_hold"])])
+			_log("  🚁 %s 爬到目标上方 %.1f 格，停 %.2f 秒投弹" % [
+				u.name, hi, float(cfg["drop_hold"])])
 	elif phase == "hold":
 		_dive["hold"] = float(_dive["hold"]) - delta
 		if float(_dive["hold"]) <= 0.0:
 			_dive["phase"] = "back"
 			_dive["t"] = 1.0
-			_drop_bomb(u, to)
+			_start_bomb_fall(u, to)                            # 投弹：弹下落 1 秒
 	elif phase == "back":
 		_dive["t"] = maxf(0.0, float(_dive["t"]) - speed * delta / total)
 		var k2: float = float(_dive["t"])
 		var pos2 := from.lerp(to, k2)
-		_place_diving(u, pos2, lerpf(u.hover, float(cfg["dive_h"]), k2))
+		_place_diving(u, pos2, lerpf(u.hover, hi, k2))         # 返航时均匀降回
 		if k2 <= 0.0:
 			u.tags.erase("diving")
 			_dive = {}
@@ -2755,6 +2739,31 @@ func _dive_tick(delta: float) -> void:
 				u.visual.position.y = u.hover
 			_log("  🚁 %s 返航完成" % u.name)
 			_finish_turn()
+
+
+## 把炸弹从直升机脚下丢下去：下落 bomb_fall_sec 秒后触地结算（用户口径第 86 轮）
+func _start_bomb_fall(u: Unit, at: Vector2) -> void:
+	var cfg := Level.heli()
+	var fall := float(cfg["bomb_fall_sec"])
+	var h0: float = u.visual.position.y if u.visual != null else u.hover
+	var bomb := MeshInstance3D.new()
+	var bm := SphereMesh.new()
+	bm.radius = 0.36                       # 投掷手普攻模型直径翻倍
+	bm.height = 0.72
+	bomb.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.18, 0.18, 0.20)
+	mat.metallic = 0.5
+	bomb.material_override = mat
+	bomb.position = Vector3(at.x, h0, at.y)
+	add_child(bomb)
+	_log("  💣 %s 投弹：炸弹从 %.1f 格下落（%.2f 秒后触地）" % [u.name, h0, fall])
+	var tw := create_tween()
+	tw.tween_property(bomb, "position:y", 0.15, fall).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(bomb):
+			bomb.queue_free()
+		_drop_bomb(u, at))
 
 
 ## 俯冲中的位置同步（格坐标 + 高度）
@@ -2766,9 +2775,12 @@ func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
 	_check_heli_crash(u)          # 用户口径：俯冲期间会受伤、也会触发被动
 
 
-## 投弹：投掷手普攻模型直径翻倍、半径 3 格、40 破甲 + 20 力量、不触发哨兵、下落速度同轨道空爆
+## 投弹：投掷手普攻模型直径翻倍、半径 3 格、40 破甲 + 20 力量、不触发哨兵。
+## 用户口径（第 86 轮）：判定改成**三维球**（球心在地面、半径 3 格）——
+## 所以爬到 4 格以上投弹就炸不到自己（以前是"红圈沾格"，站多高都吃伤害）。
 func _drop_bomb(u: Unit, at: Vector2) -> void:
 	var cfg := Level.heli()
+	var radius := float(cfg["drop_blast_r"])
 	_flash_sphere(Vector3(at.x, 0.8, at.y), 1.2, 0.3)
 	var opts := Combat.opts({
 		"power": int(cfg["drop_power"]) * 1000,
@@ -2776,15 +2788,24 @@ func _drop_bomb(u: Unit, at: Vector2) -> void:
 		"ignore_res": 0.0,
 		"rng": rng,
 	})
-	_log("  💣 %s 投弹 (%.1f, %.1f)：半径 %.1f 格，%d 破甲 + %d 力量（不触发哨兵）" % [
-		u.name, at.x, at.y, float(cfg["drop_blast_r"]), int(cfg["drop_break"]), int(cfg["drop_power"])])
-	var hits: Array = Damage.blast(u, at, float(cfg["drop_blast_r"]), opts, units, placeables,
-		null, u.side, true)
-	_show_impact(at)
+	_log("  💣 %s 投弹 (%.1f, %.1f)：半径 %.1f 格（三维球），%d 破甲 + %d 力量（不触发哨兵）" % [
+		u.name, at.x, at.y, radius, int(cfg["drop_break"]), int(cfg["drop_power"])])
+	# skip = null：不分敌我（用户口径）；球心在离地 0.15 格
+	var hits: Array = Damage.air_burst(u, Vector3(at.x, 0.15, at.y), opts, units, null, radius)
 	for h in hits:
 		if h.unit != null:
 			_log(h.text)
 			_after_damage_to_unit(h.unit)
+	# 沙盒道具：照旧按格子判定（道具没有高度轴）
+	for pl in placeables:
+		if not pl.is_alive():
+			continue
+		if Vector2(float(pl.cell.x) + 0.5, float(pl.cell.y) + 0.5).distance_to(at) > radius:
+			continue
+		var r2 := Combat.deal_to_placeable(pl, opts)
+		_log("  [道具] %s：%s" % [pl.name, Combat.describe(r2, pl.pr, 0.0)])
+		_after_damage_to_placeable(pl)
+	_show_impact(at)
 
 
 ## 受伤后的被动钩子表：被动表里声明 on_damaged = true 的，在这里依次执行。
@@ -4176,7 +4197,7 @@ func _tick_heli_fx(delta: float) -> void:
 		HeliFx.tick(u.visual, u, delta)
 		_heli_shadow(u)
 	# AI 回合看门狗：万一某条异步路径没结束回合，也不许把游戏卡死
-	if active != null and _is_ai_unit(active) and not get_tree().paused:
+	if active != null and _is_ai_unit(active) and not get_tree().paused and _dive.is_empty():
 		_turn_watch_t += delta
 		if _turn_watch_t > 9.0:
 			_log("  ⚠ AI 回合超时（%.0f 秒未结束），强制结束以免软锁：%s" % [_turn_watch_t, active.name])

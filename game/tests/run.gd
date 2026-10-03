@@ -809,12 +809,18 @@ func _initialize() -> void:
 	print("    我方：国王 %s ｜ 公主 %s / %s ｜ 英雄 %s" % [pk_cell, pads[0], pads[1], heroes])
 	_expect(pads[0] == Vector2i(5, 3) and pads[1] == Vector2i(15, 3),
 		"公主在国王前 3 格、左右各 5 格", fails)
-	_expect(heroes[0] == Vector2i(9, 18) and heroes[1] == Vector2i(10, 18) and heroes[2] == Vector2i(11, 18),
-		"英雄出生点/重生点在河边居中三格", fails)
+	_expect(heroes[0] == Vector2i(8, 3) and heroes[1] == Vector2i(10, 3) and heroes[2] == Vector2i(12, 3),
+		"英雄重生点在国王前 3 格那一行、彼此间隔一格居中（第 86 轮）", fails)
+	var roster_cells: Array = []
+	for e in Level.roster("arena"):
+		if String(e[0]) == "Gerald":
+			roster_cells = [int(e[2]), int(e[3])]
+	_expect(roster_cells == [9, 18],
+		"开局出场位置仍走 roster（河边居中三格），与重生点分开", fails)
 	var epads: Array = Level.pad_cells(UnitData.Side.ENEMY, "arena")
 	var eheroes: Array = Level.hero_cells(UnitData.Side.ENEMY, "arena")
-	_expect(epads[0] == Vector2i(5, 37) and eheroes[1] == Vector2i(10, 22),
-		"敌方镜像对称（公主 3 格前、英雄在河另一侧居中三格）", fails)
+	_expect(epads[0] == Vector2i(5, 37) and eheroes[1] == Vector2i(10, 37),
+		"敌方镜像对称（公主 3 格前、英雄重生在国王前 3 格那一行）", fails)
 	_expect(absf(Level.cam_yaw("arena") - Level.cam_yaw("field")) < 0.001, "两个关卡相机角度一致（与测试场同角度）", fails)
 
 	# ── 英雄重生（GM 记 10 个回合）──
@@ -873,6 +879,22 @@ func _initialize() -> void:
 	_expect(AttackProfile.cost_of(Unit.from_data(by_name["Gerald"])) == 0, "近战普攻不花精力", fails)
 	_expect(AttackProfile.aim_of(heli_u2) == AttackProfile.AIM_DRAG,
 		"直升机普攻走拖拽瞄准（与投掷手同一手感）", fails)
+	# 第 86 轮：爬升轰炸 + 2.5 格/秒
+	var hcfg := Level.heli()
+	_expect(absf(float(hcfg["climb_speed"]) - 2.5) < 0.001,
+		"直升机技能移动速度 2.5 格/秒（含技能）", fails)
+	_expect(float(hcfg["climb_h"]) >= 3.2,
+		"爬升高度 %.1f 格要够高（投弹是三维球，半径 %.1f）" % [
+			float(hcfg["climb_h"]), float(hcfg["drop_blast_r"])], fails)
+	_expect(absf(float(hcfg["drop_hold"]) - 0.5) < 0.001 and absf(float(hcfg["bomb_fall_sec"]) - 1.0) < 0.001,
+		"投弹发生在到达后 0.5 秒、下落耗时 1 秒", fails)
+	_expect(absf(UnitVisual.HELI_TILES_PER_SEC - 2.5) < 0.001
+		and absf(UnitVisual.WALK_TILES_PER_SEC - 2.0) < 0.001,
+		"直升机走路 2.5 格/秒、其他角色 2 格/秒", fails)
+	# 爬升高度必须高于三维球顶（否则还会自伤）
+	var ball_top: float = 0.15 + float(hcfg["drop_blast_r"])
+	_expect(float(hcfg["climb_h"]) > ball_top,
+		"爬升 %.1f 格 > 爆心球顶 %.2f 格 -> 炸不到自己" % [float(hcfg["climb_h"]), ball_top], fails)
 	print("    直升机普攻：%s" % AttackProfile.describe(heli_u2))
 	print("    Alette 普攻：%s" % AttackProfile.describe(Unit.from_data(by_name["Alette"])))
 

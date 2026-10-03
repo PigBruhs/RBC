@@ -15,6 +15,7 @@ const ORB_PX_H := 388              # 贴图高（多出来的部分留给上方�
 const ORB_WORLD := 1.05            # 指示器在世界里的边长（对齐方块宽度）
 const ORB_HEIGHT := 1.62           # 悬浮高度（要高于最高职业的头顶）
 const WALK_TILES_PER_SEC := 2.0    # 移动速度：每秒 2 格（匀速滑动）
+const HELI_TILES_PER_SEC := 2.5    # 悬浮单位（直升机）2.5 格/秒（用户口径第 86 轮）
 const GLYPH_ADV := 6               # 字距（像素/点）：3x5 点阵 + 3 点间隔
 
 # 色系（用户指定"诡异"风）：力量/血量=洋红、护甲=青黄
@@ -51,6 +52,8 @@ var _walk_tween: Tween = null
 var _base_y: float = 0.0
 var _idle_tween: Tween = null
 var _cycling: bool = false               # 脚下环是否正在彩色流动（待确认状态）
+## 这一位的移动速度（格/秒）。用户口径（第 86 轮）：**直升机 2.5 格/秒**，其余角色 2 格/秒。
+var walk_speed: float = WALK_TILES_PER_SEC
 
 
 func setup(u: Unit) -> void:
@@ -61,6 +64,8 @@ func setup(u: Unit) -> void:
 	var h: float = maxf(0.0, u.hover)
 	position = Vector3(float(u.cell.x) + 0.5, h, float(u.cell.y) + 0.5)
 	_base_y = h
+	# 用户口径（第 86 轮）：直升机移动 2.5 格/秒（其余 2 格/秒）
+	walk_speed = HELI_TILES_PER_SEC if h > 0.0 else WALK_TILES_PER_SEC
 	_build_model()
 	_build_orb()
 	_build_label()
@@ -628,7 +633,7 @@ func walk_path(path: Array[Vector2i]) -> void:
 		var i: int = mini(int(floor(u)), segs - 1)
 		var f: float = u - float(i)
 		position = (pts[i] as Vector3).lerp(pts[i + 1], f)
-		, 0.0, 1.0, float(segs) / UnitVisual.WALK_TILES_PER_SEC)
+		, 0.0, 1.0, float(segs) / maxf(0.1, walk_speed))
 	# 走完恢复待机浮动
 	tw.tween_callback(Callable(self, "_start_idle"))
 

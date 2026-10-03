@@ -148,7 +148,7 @@ static func aim_at(me: Unit, cell: Vector2i, ctx: Ctx) -> Vector2:
 	return Spread.scatter(ctr, from.distance_to(ctr), speed, ctx.rng)
 
 
-## 这一格能不能安全丢技能（投掷手：落点不能在敌方哨兵射界里）
+## 这一格能不能安全丢技能（备用工具：某个技能以后想避开敌方哨兵射界时用）
 static func safe_skill_spot(ctx: Ctx, cells: Array) -> bool:
 	for c in cells:
 		if ctx.sentry_cells.has(c):
@@ -228,8 +228,12 @@ static func plan(ctx: Ctx) -> Dictionary:
 		return sk
 
 	# ③ 都没得做：还没移动 + 状态不满 -> 休息；否则朝评分最高的敌人靠过去
-	if not me.has_moved and (me.power_cur < me.power_max * 3 / 4 or me.energy_points() < 2):
-		return {"action": "rest", "note": "回血/回精力：休息"}
+	# 用户口径（第 86 轮）：**连普攻的精力都付不起时，所有 AI 都必须选休息** ——
+	# 否则会出现"没精力还硬冲上去、这回合什么也做不了"的空转（直升机 4 精力一条最明显）。
+	var need_energy: int = maxi(2, AttackProfile.cost_of(me))
+	if not me.has_moved and (me.power_cur < me.power_max * 3 / 4 or me.energy_points() < need_energy):
+		return {"action": "rest", "note": "回血/回精力：休息（精力 %d < %d）" % [
+			me.energy_points(), need_energy]}
 	if me.has_moved:
 		return {"action": "end", "note": "已经动过了，这回合就这样"}   # 规则：移动后不能休息
 	var far: Unit = approach
@@ -310,28 +314,37 @@ static func _plan_skill(ctx: Ctx) -> Dictionary:
 			return {"action": "skill", "skill": "grenade_launcher",
 				"aim": aim_at(me, best_c.cell, ctx),
 				"note": "枪榴弹：朝 %s 那边丢（附近 %d 人）" % [best_c.name, best_m]}
-	# 投掷手：地毯式轰炸（≥2 个敌人挤在一起，且落点不在敌方哨兵射界里）
+	# 投掷手：地毯式轰炸。
+	# 用户口径（第 86 轮）：**面对同样的目标永远优先用技能** —— 所以不再要求"≥2 人挤在一起"，
+	# 只有一个目标也照炸；只有两种情况不用：
+	#   ① 没精力（energy < cost，下面第一行就挡掉）
+	#   ② **自己在敌方哨兵射界里**（用了技能就是站着挨箭，先躲出去）
 	if me.role == UnitData.Role.THROWER:
 		var d := Skills.get_def("carpet_bomb")
-		if have.has("carpet_bomb") and not d.is_empty() and energy >= int(d["cost"]):
+		if have.has("carpet_bomb") and not d.is_empty() and energy >= int(d["cost"]) \
+				and not ctx.sentry_cells.has(me.cell):
 			var half_w := float(d["rect_width"]) * 0.5
 			var half_l := float(d["rect_len"]) * 0.5
+			var best_t: Unit = null
+			var best_n := 0
 			for t in ctx.foes:
 				if not t.is_alive() or manhattan(me.cell, t.cell) < int(d["range_min"]):
 					continue
 				var n := 0
-				var cells: Array = []
 				for o in ctx.foes:
 					if not o.is_alive():
 						continue
 					if absi(o.cell.x - t.cell.x) <= int(half_w) \
 							and absi(o.cell.y - t.cell.y) <= int(half_l):
 						n += 1
-						cells.append(o.cell)
-				if n >= 2 and safe_skill_spot(ctx, cells + [t.cell]):
-					return {"action": "skill", "skill": "carpet_bomb",
-						"aim": aim_at(me, t.cell, ctx),
-						"note": "地毯式轰炸：%s 附近挤了 %d 个" % [t.name, n]}
+				# 优先炸人最多的那一格；只有一个目标也要炸（用户口径）
+				if n > best_n:
+					best_n = n
+					best_t = t
+			if best_t != null:
+				return {"action": "skill", "skill": "carpet_bomb",
+					"aim": aim_at(me, best_t.cell, ctx),
+					"note": "地毯式轰炸：%s（附近 %d 个）" % [best_t.name, best_n]}
 		return {}
 	# 弓箭手：没人可打时开哨兵（防御姿态，顺便给下一回合攒机会）
 	if me.role == UnitData.Role.RANGED:
