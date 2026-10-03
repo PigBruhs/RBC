@@ -52,6 +52,14 @@ const DEFS := {
 		"name": "常备哨兵",
 		"desc": "永远处于哨兵状态（没有自己的回合）",
 	},
+	## 受伤触发的被动统一走这条声明：battle_scene 把它实现成"钩子表"里的一项，
+	## 加新被动 = 这里加一行 + 钩子表加一行，不用再改 _after_damage_to_unit。
+	"heli_crash": {
+		"name": "坠机",
+		"desc": "力量掉到阈值以下时当场坠落：加速下坠 → 落地时以自身为中心 2.5 格炮击"
+			+ "（不分敌我，无视 50% 物抗）→ 阵亡。",
+		"on_damaged": true,
+	},
 }
 
 ## 单位名 -> 被动 id 列表。查表时会同时试【全名】和【base_name】，
@@ -62,6 +70,11 @@ const BY_NAME := {
 	"老国王": ["cannon_ai"],
 	"公主": ["always_sentry"],
 	"萨尼铁塔": ["holy_sani"],
+}
+
+## 名字前缀 -> 被动 id 列表（给"这一族"用：直升机的名字带后缀，前缀匹配更稳）
+const BY_PREFIX := {
+	"俯冲轰炸直升机": ["heli_crash"],
 }
 
 ## 职业 -> 被动 id 列表（投掷手都有装填）
@@ -78,14 +91,27 @@ static func exists(id: String) -> bool:
 	return DEFS.has(id)
 
 
-## 这个单位身上有哪些被动（名字 + 职业两种来源合并）
+## 这个单位身上有哪些被动（名字 + 前缀 + 职业三种来源合并）
 static func for_unit(u: Unit) -> Array:
 	if u == null:
 		return []
 	var out: Array = []
+	var base := Unit.base_name(u.name)
 	out.append_array(BY_NAME.get(u.name, []))
-	out.append_array(BY_NAME.get(Unit.base_name(u.name), []))
+	out.append_array(BY_NAME.get(base, []))
+	for pre in BY_PREFIX:
+		if base.begins_with(String(pre)):
+			out.append_array(BY_PREFIX[pre])
 	out.append_array(BY_ROLE.get(u.role, []))
+	return out
+
+
+## 这个单位身上"受伤时要跑"的被动 id（按 DEFS 里的 on_damaged 声明）
+static func damaged_hooks(u: Unit) -> Array[String]:
+	var out: Array[String] = []
+	for id in for_unit(u):
+		if bool(def(String(id)).get("on_damaged", false)):
+			out.append(String(id))
 	return out
 
 

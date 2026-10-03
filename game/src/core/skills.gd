@@ -13,6 +13,26 @@ extends RefCounted
 ## 用 tag 记录"下一次自己回合开始时要先结算什么"
 const TAG_ORBITAL := "orbital_incoming"
 
+## ── 技能的两个正交属性（用户要求：玩家路径与 AI 路径必须是同一条生产线）──────
+## cast：施放方式（battle_scene._perform_skill 按它分派，只此一处）
+##   "self"    不需要瞄准，点一下就用（哨兵）
+##   "cell"    点一格（俯冲轰炸）
+##   "drag"    拖拽瞄准后松手（投掷类）
+## aim：UI 该怎么让玩家选目标（battle_scene._choose_skill 按它分派）
+##   "self" / "cell" / "drag"
+## 加新技能 = DEFS 加一条（带 cast/aim）+ 一个 cast 实现，玩家与 AI 自动同步。
+const CAST_SENTRY := "sentry"
+const CAST_DIVE := "dive"
+const CAST_CARPET := "carpet"
+const CAST_GRENADE := "grenade"
+const CAST_MARKER := "marker"
+const CAST_ALL := [CAST_SENTRY, CAST_DIVE, CAST_CARPET, CAST_GRENADE, CAST_MARKER]
+
+const AIM_SELF := "self"
+const AIM_CELL := "cell"
+const AIM_DRAG := "drag"
+const AIM_ALL := [AIM_SELF, AIM_CELL, AIM_DRAG]
+
 ## 技能定义。key = 技能 id
 const DEFS := {
 	"dive_bomb": {
@@ -22,6 +42,8 @@ const DEFS := {
 		"cost": 6,                               # 用户口径：6 精力
 		"kind": "marker",                        # 与投掷手同款拖拽瞄准；dive=true 时不投掷物，只落指示点
 		"dive": true,
+		"cast": CAST_DIVE,                       # 施放方式：点一格 -> 进入准备状态
+		"aim": AIM_CELL,                         # 瞄准方式：直接点 0~20 格内的一格（不拖拽、不投标记球）
 		"desc": "选定 20 格以内的一格作为目标，直升机进入准备状态。"
 			+ "下一次轮到它的回合时会以 6 格/秒俯冲过去（高度 2 → 0.5 格），"
 			+ "途中受伤可能触发坠机；抵达后停 0.5 秒投下一枚威力巨大的炸弹（半径 3 格、"
@@ -35,6 +57,8 @@ const DEFS := {
 		"cost": 2,
 		"kind": "marker",                        # 与投掷手同款：拖拽瞄准 + 抛物线
 		"grenade": true,                         # 但落下去的是手榴弹（不召唤炮击）
+		"cast": CAST_GRENADE,
+		"aim": AIM_DRAG,
 		"desc": "朝指定地点抛出一枚手榴弹。空中阶段按炮弹处理：会惊动哨兵、可被箭击落。"
 			+ "落地后只是模型（不可交互），4 个回合后爆炸，向 8 个方向各射出一枚破片，"
 			+ "破片不分敌我（会伤到自己人）。",
@@ -49,6 +73,8 @@ const DEFS := {
 		"owner": "Gerald",                       # 用户口径：轨道空爆是杰拉尔德的技能
 		"cost": 2,                               # 精力消耗（用户口径：回到 2）
 		"kind": "marker",                        # marker = 先扔标记球，下回合召唤炮击
+		"cast": CAST_MARKER,
+		"aim": AIM_DRAG,
 		"tag": TAG_ORBITAL,
 		"desc": "向指定地点投出一枚轨道标记。5 个回合后，轨道火力将在该点周围 3 格"
 			+ "（外圈直径 6 格）内随机落下 5 发炮弹；每发的作用范围是直径 3 格的圆。"
@@ -73,6 +99,8 @@ const DEFS := {
 		"owner": "Airburst mortar",              # 投掷手专属（空爆迫击炮）
 		"cost": 6,                               # 精力消耗（用户口径：3 -> 6）
 		"kind": "carpet",                        # carpet = 立即在矩形内撒 7 发炮弹
+		"cast": CAST_CARPET,
+		"aim": AIM_DRAG,
 		"desc": "以落点为中心、沿飞行方向铺开一片 5 格宽 7 格长的轰炸区，"
 			+ "在区内随机撒下 7 发炮弹，由近及远依次落地。"
 			+ "每发炮弹的威力与投掷手普攻完全一致，不分敌我。",
@@ -91,6 +119,8 @@ const DEFS := {
 		"owner": "Alette",
 		"cost": 2,                               # 精力消耗
 		"kind": "sentry",                        # sentry = 进入警戒状态，不瞄准
+		"cast": CAST_SENTRY,
+		"aim": AIM_SELF,
 		"desc": "进入警戒状态，持续到阿莱特的下一个回合开始。"
 			+ "期间只要有敌对角色【从射界外进入射界】或【在射界内移动】，"
 			+ "或有不分敌我的炮弹（土堆挡不住的那种，箭矢不算）飞入射界，"
@@ -169,6 +199,51 @@ static func _far_enough(q: Vector2, out: Array[Vector2], min_gap: float) -> bool
 
 static func get_def(id: String) -> Dictionary:
 	return DEFS.get(id, {})
+
+
+## 施放方式。老技能没写 cast 的话按 kind/标志位反推，保证向后兼容。
+static func cast_of(id: String) -> String:
+	var d := get_def(id)
+	if d.is_empty():
+		return ""
+	var c := String(d.get("cast", ""))
+	if c != "":
+		return c
+	match String(d.get("kind", "")):
+		"carpet":
+			return CAST_CARPET
+		"sentry":
+			return CAST_SENTRY
+	if bool(d.get("dive", false)):
+		return CAST_DIVE
+	if bool(d.get("grenade", false)):
+		return CAST_GRENADE
+	return CAST_MARKER
+
+
+## 瞄准方式（决定 UI 走哪条选目标流程）
+static func aim_of(id: String) -> String:
+	var d := get_def(id)
+	if d.is_empty():
+		return ""
+	var a := String(d.get("aim", ""))
+	if a != "":
+		return a
+	match cast_of(id):
+		CAST_SENTRY:
+			return AIM_SELF
+		CAST_DIVE:
+			return AIM_CELL
+	return AIM_DRAG
+
+
+## 自检用：所有技能的施放方式与瞄准方式都必须在这两张表里
+static func unknown_casts() -> Array[String]:
+	var out: Array[String] = []
+	for k in DEFS:
+		if not CAST_ALL.has(cast_of(String(k))) or not AIM_ALL.has(aim_of(String(k))):
+			out.append(String(k))
+	return out
 
 
 ## 技能的一行摘要（给按钮/详情面板用）

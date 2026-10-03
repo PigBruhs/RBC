@@ -37,6 +37,128 @@ func _clear_ai_corner() -> void:
 				u.visual.position = Vector3(float(far.x) + 0.5, 0.0, float(far.y) + 0.5)
 
 
+## 按基础名找一个活着的单位（都死了就把第一个满血复活，方便反复测试）
+func _unit_by(bname: String, side: int = -1) -> Unit:
+	var fallback: Unit = null
+	for u in _s.units:
+		if Unit.base_name(u.name) != bname:
+			continue
+		if side >= 0 and u.side != side:
+			continue
+		if u.is_alive():
+			return u
+		if fallback == null:
+			fallback = u
+	if fallback != null:
+		fallback.power_cur = fallback.power_max
+		fallback.armor_cur = fallback.armor_max
+		fallback.tags.erase("crashing")
+		if fallback.visual != null:
+			fallback.visual.visible = true
+	return fallback
+
+
+## 数场上某种弹道物有几发（kind 是字符串，见 Projectile.KIND_*）
+func _count_kind(kind: String) -> int:
+	var n := 0
+	for it in _s.field.items:
+		if (it["p"] as Projectile).kind == kind:
+			n += 1
+	return n
+
+
+## 用【某一条入口】打一次普攻，返回这一击的指纹。
+## 三条入口（拖拽 / 点目标 / AI）产出的指纹必须一模一样 —— 这是本轮重构的防回归核心。
+## 探测前把参战双方拉回满血：前面的小节可能已经把人打死了（这不影响入口一致性）。
+func _basic_sig(u: Unit, victim: Unit, entry: String) -> String:
+	_s.clear_projectiles()
+	_s.gm.pending.clear()
+	_s.gm.clear_all_sentries()
+	for o in [u, victim]:
+		o.power_cur = o.power_max
+		o.armor_cur = o.armor_max
+		o.tags.erase("crashing")
+		o.tags.erase("diving")
+		o.tags.erase("dive_ready")
+		o.has_acted = false
+		o.has_moved = false
+		if o.visual != null:
+			o.visual.visible = true
+	u.energy = u.energy_max
+	u.cell = Vector2i(10, 10)
+	if u.visual != null:
+		u.visual.position = Vector3(10.5, u.hover, 10.5)
+	var melee: bool = AttackProfile.basic_of(u) == AttackProfile.BASIC_MELEE
+	victim.cell = Vector2i(11, 10) if melee else Vector2i(14, 10)
+	if victim.visual != null:
+		victim.visual.position = Vector3(float(victim.cell.x) + 0.5, victim.hover,
+			float(victim.cell.y) + 0.5)
+	var hp0: int = victim.power_cur
+	var aim := Vector2(float(victim.cell.x) + 0.5, float(victim.cell.y) + 0.5)
+	_s.active = u
+	_s._turn_just_finished = null
+	_s.phase = _s.Phase.IDLE
+	match entry:
+		"drag":
+			_s.phase = _s.Phase.AIMING
+			_s._aim_active = true
+			_s._aim_valid = true
+			_s._aim_origin = Vector2.ZERO
+			_s._aim_now = Vector2(220, 0)
+			_s._aim_float_pos = aim
+			_s._planned_cell = victim.cell
+			_s._aim_skill_id = ""
+			_s._fire()
+		"click":
+			_s._attack_target_unit(victim, false)
+		_:
+			_s._ai_attack(u, {"target": victim, "aim": aim})
+	var kinds: Array = []
+	for it in _s.field.items:
+		var kn := ProjectileField.kind_cn((it["p"] as Projectile).kind)
+		if not kinds.has(kn):
+			kinds.append(kn)
+	kinds.sort()
+	var hit_ok := int(victim.power_cur < hp0)
+	var sig := "有效 %d｜%s｜发弹 %d｜精力 %d｜已出手 %d｜掉血 %d" % [
+		int(_s.field.items.size() > 0 or hit_ok > 0), ",".join(PackedStringArray(kinds)),
+		_s.field.items.size(), u.energy_points(), int(u.has_acted), hit_ok]
+	# 齐射/连发是异步的：等它把剩下的打完再交给下一次探测（免得污染下一条入口的计数）
+	await create_timer(1.3).timeout
+	_s.clear_projectiles()
+	return sig
+
+
+## 某个技能"真的产生了效果"的计数（两条入口必须一致）
+func _skill_effect(sid: String, caster: Unit) -> int:
+	match sid:
+		"sentry":
+			return _s.gm.sentries.size()
+		"dive_bomb":
+			return 1 if caster.tags.has("dive_ready") else 0
+		"carpet_bomb":
+			return _count_kind(Projectile.KIND_SHELL)
+		"grenade_launcher":
+			return _count_kind(Projectile.KIND_GRENADE)
+		"orbital_strike":
+			return _count_kind(Projectile.KIND_MARKER)
+	return -1
+
+
+## 把一次技能测试的现场清干净（弹道物 / GM 在途 / 哨兵 / 俯冲准备）
+func _reset_skill_scene(caster: Unit) -> void:
+	_s.clear_projectiles()
+	_s.gm.pending.clear()
+	_s.gm.clear_all_sentries()
+	_s._clear_pylons()
+	caster.tags.erase("dive_ready")
+	caster.tags.erase("diving")
+	_s._dive_clear(caster)
+	caster.energy = caster.energy_max
+	caster.has_acted = false
+	caster.has_moved = false
+
+
 func _initialize() -> void:
 	_s = (load("res://src/view/battle_scene.tscn") as PackedScene).instantiate()
 	root.add_child(_s)
@@ -1797,6 +1919,227 @@ func _initialize() -> void:
 	await create_timer(0.4).timeout
 	print("    强制向场外移动后：位置 %s ｜ 在界内=%s" % [he3.cell, _s._in_bounds(he3.cell)])
 	_chk(_s._in_bounds(he3.cell), "单位不可能被移动到地图外")
+
+	# ── 38. 普攻/技能统一入口（本轮重构的防回归核心）──
+	# 病根：一次普攻有四条并行入口，每加一个角色要改四处；漏一处就出 bug
+	#       （直升机火箭只接了拖拽、坠机只挂了俯冲、枪榴弹 AI 分支被冲掉）。
+	# 现在：入口只算"打哪里"，全部调 _perform_basic / _perform_skill。
+	print("\n[38] 统一入口：三条普攻入口必须产出同一击")
+	_s.gm.ai_enabled = false
+	_clear_ai_corner()          # 国王/公主挪到角落：免得他们的加农炮在探测期间打死参战者
+	_s.clear_projectiles()
+	_s.gm.pending.clear()
+	_s.gm.clear_all_sentries()
+	# 代表角色：近战 / 弓箭 / 连发 / 投掷 / 火箭齐射
+	var reps := [
+		_unit_by("Gerald", 0),
+		_unit_by("Alette", 0),
+		_unit_by("萨尼铁塔", 0),
+		_unit_by("Airburst mortar", 0),
+		_unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0),
+	]
+	var fp_ok := 0
+	for u in reps:
+		if u == null:
+			continue
+		var rep_victim := _unit_by("Alette", 1 - u.side)
+		if rep_victim == null or rep_victim == u:
+			rep_victim = _unit_by("Gerald", 1 - u.side)
+		if rep_victim == null:
+			continue
+		# 只有该模板允许的入口才参与比对：近战是"点目标"，没有拖拽普攻
+		var entries: Array = ["click", "ai"]
+		if AttackProfile.basic_of(u) != AttackProfile.BASIC_MELEE:
+			entries.push_front("drag")
+		var sigs: Array = []
+		for e in entries:
+			sigs.append(await _basic_sig(u, rep_victim, String(e)))
+		var same := true
+		for i in range(1, sigs.size()):
+			if sigs[i] != sigs[0]:
+				same = false
+		print("    %s（%s）× %s：%s" % [u.name, AttackProfile.basic_of(u), str(entries), sigs[0]])
+		if not same:
+			print("       ❌ 不一致：%s" % [sigs])
+		else:
+			fp_ok += 1
+		_chk(same, "%s：%s 三条入口产出完全一致" % [u.name, str(entries)])
+		_chk(String(sigs[0]).begins_with("有效 1") and String(sigs[0]).contains("已出手 1"),
+			"%s：普攻一定要真的出手（不是空挥）" % u.name)
+	print("    指纹一致的角色 = %d / %d" % [fp_ok, reps.size()])
+	# 直升机必须消耗精力（曾被漏掉：只走拖拽那条时点目标/AI 不耗精力）
+	var heli_p: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0)
+	_chk(heli_p != null and AttackProfile.cost_of(heli_p) == 4, "直升机普攻 = 4 精力（模板给出的）")
+
+	# ── 38b. 精力不足：不许"先占回合再打不出来"（真实软锁过）──
+	print("\n[38b] 精力不足不许软锁")
+	var heli_b: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0)
+	var foe_b := _unit_by("Gerald", 1 - heli_b.side)
+	heli_b.cell = Vector2i(10, 10)
+	foe_b.cell = Vector2i(14, 10)
+	heli_b.energy = 0
+	heli_b.has_acted = false
+	heli_b.has_moved = false
+	_s.clear_projectiles()
+	_s.active = heli_b
+	_s.phase = _s.Phase.IDLE
+	_s._attack_target_unit(foe_b, false)
+	print("    点目标入口：火箭 %d 发 ｜ 已出手=%s ｜ 精力 %d" % [
+		_count_kind(Projectile.KIND_ROCKET), heli_b.has_acted, heli_b.energy_points()])
+	_chk(_count_kind(Projectile.KIND_ROCKET) == 0, "精力不足时不许出弹")
+	_chk(not heli_b.has_acted, "精力不足时不许占掉这一次行动（否则玩家白亏一回合）")
+	# AI 出手：打不出也必须自己收尾（不然 AI 回合卡死，以前靠 9 秒看门狗兜）
+	_s._turn_just_finished = null
+	_s.active = heli_b
+	_s._ai_attack(heli_b, {"target": foe_b, "aim": Vector2(14.5, 10.5)})
+	print("    AI 入口：火箭 %d 发 ｜ 回合已收尾=%s" % [
+		_count_kind(Projectile.KIND_ROCKET), _s.active != heli_b])
+	_chk(_count_kind(Projectile.KIND_ROCKET) == 0, "AI 精力不足时也不许出弹")
+	_chk(_s.active != heli_b, "AI 打不出来时必须自己结束回合（绝不允许软锁）")
+	# AI 决策层：付不起的普攻根本不该被选中
+	heli_b.energy = 0
+	heli_b.has_acted = false
+	heli_b.has_moved = false
+	heli_b.cell = Vector2i(10, 10)
+	foe_b.cell = Vector2i(12, 10)
+	foe_b.power_cur = foe_b.power_max
+	var broke_plan := Ai.plan(_s._ai_ctx(heli_b))
+	print("    精力 0 的直升机 AI 选择：%s（%s）" % [
+		broke_plan.get("action", "-"), broke_plan.get("note", "-")])
+	_chk(String(broke_plan.get("action", "")) != "attack",
+		"AI 不会选一个自己付不起的普攻（否则出手即空转）")
+	heli_b.energy = heli_b.energy_max
+
+	# ── 38c. 技能：玩家入口与 AI 入口同一条生产线 ──
+	print("\n[38c] 技能双路径（玩家 / AI）")
+	var casters := {
+		"sentry": _unit_by("Alette", 0),
+		"dive_bomb": _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0),
+		"grenade_launcher": _unit_by("萨尼铁塔", 0),
+		"carpet_bomb": _unit_by("Airburst mortar", 0),
+		"orbital_strike": _unit_by("Gerald", 0),
+	}
+	for sid in Skills.DEFS:
+		var sid_s := String(sid)
+		var caster: Unit = casters.get(sid_s, null)
+		if caster == null:
+			_chk(false, "技能 %s 找不到测试用施法者" % sid_s)
+			continue
+		caster.cell = Vector2i(10, 10)
+		if caster.visual != null:
+			caster.visual.position = Vector3(10.5, caster.hover, 10.5)
+		var aim := Vector2(14.5, 10.5)
+		var tcell := Vector2i(14, 10)
+		var cast_kind := Skills.cast_of(sid_s)
+		var aim_kind := Skills.aim_of(sid_s)
+		# ① 共享入口（玩家所有入口最终都调它）
+		# 注：把 _turn_just_finished 指成施法者自己，_finish_turn() 的幂等保护就会直接返回，
+		#     免得回合推进把刚放下的状态（俯冲准备 / 哨兵）当场消费掉，干扰效果计数。
+		_reset_skill_scene(caster)
+		_s.active = caster
+		_s._turn_just_finished = caster
+		var ok_shared: bool = _s._perform_skill(caster, sid_s, aim, tcell)
+		var eff_shared := _skill_effect(sid_s, caster)
+		# ② AI 入口
+		_reset_skill_scene(caster)
+		_s.active = caster
+		_s._turn_just_finished = caster
+		_s._ai_skill(caster, {"skill": sid_s, "aim": aim, "cell": tcell})
+		var eff_ai := _skill_effect(sid_s, caster)
+		# ③ 玩家真实入口：拖拽类走 _fire，点格子类走 _choose_skill + _confirm_cell_target，
+		#    点一下类（哨兵）走 _choose_skill
+		_reset_skill_scene(caster)
+		_s.active = caster
+		_s._turn_just_finished = caster
+		var eff_ui := -1
+		if aim_kind == Skills.AIM_DRAG:
+			_s.phase = _s.Phase.AIMING
+			_s._aim_active = true
+			_s._aim_valid = true
+			_s._aim_origin = Vector2.ZERO
+			_s._aim_now = Vector2(220, 0)
+			_s._aim_float_pos = aim
+			_s._planned_cell = tcell
+			_s._aim_skill_id = sid_s
+			_s._fire()
+			eff_ui = _skill_effect(sid_s, caster)
+		elif aim_kind == Skills.AIM_CELL:
+			_s._choose_skill(sid_s)
+			var targeting: bool = _s._cell_targeting
+			_s._confirm_cell_target(tcell)
+			eff_ui = _skill_effect(sid_s, caster)
+			_chk(targeting, "%s：点格子类技能会进入选格阶段（不拖拽、不投标记球）" % sid_s)
+		else:
+			_s._choose_skill(sid_s)
+			eff_ui = _skill_effect(sid_s, caster)
+		print("    %s（cast=%s aim=%s）：共享=%d ｜ AI=%d ｜ 玩家入口=%d" % [
+			sid_s, cast_kind, aim_kind, eff_shared, eff_ai, eff_ui])
+		_chk(ok_shared and eff_shared >= 1, "%s：统一入口真的产生了效果" % sid_s)
+		_chk(eff_ai == eff_shared, "%s：AI 入口与统一入口效果一致" % sid_s)
+		_chk(eff_ui == eff_shared, "%s：玩家入口与统一入口效果一致" % sid_s)
+		_reset_skill_scene(caster)
+	_s._turn_just_finished = null
+	# 精力不足用不出技能：不扣精力、不进状态
+	var sani_z: Unit = _unit_by("萨尼铁塔", 0)
+	sani_z.energy = 0
+	_s.active = sani_z
+	var ok_poor: bool = _s._perform_skill(sani_z, "grenade_launcher", Vector2(14.5, 10.5), Vector2i(14, 10))
+	print("    精力 0 用枪榴弹：成功=%s ｜ 精力 %d ｜ 弹道物 %d" % [
+		ok_poor, sani_z.energy_points(), _count_kind(Projectile.KIND_GRENADE)])
+	_chk(not ok_poor and sani_z.energy_points() == 0, "精力不足时技能不许施放、也不许扣成负数")
+	_chk(_count_kind(Projectile.KIND_GRENADE) == 0, "精力不足时不许真的扔出枪榴弹")
+	sani_z.energy = sani_z.energy_max
+
+	# ── 38d. 被动钩子表：被动表里声明的受伤被动都必须有实现 ──
+	print("\n[38d] 受伤被动钩子表")
+	var missing_hooks: Array = []
+	for u in _s.units:
+		for id in Passives.damaged_hooks(u):
+			if not _s._passive_hooks.has(String(id)):
+				missing_hooks.append(String(id))
+	print("    钩子表 = %s ｜ 直升机受伤被动 = %s" % [
+		_s._passive_hooks.keys(), Passives.damaged_hooks(heli_p)])
+	_chk(missing_hooks.is_empty(), "battle_scene 的钩子表覆盖所有 on_damaged 被动（漏了 %s）" % [missing_hooks])
+	_chk(not _s._passive_hooks.is_empty(), "钩子表不是空的（否则坠机这类被动会静默失效）")
+
+	# ── 39. 极端情况：双方英雄同时全灭（不进队列的国王/公主还活着）──
+	# 以前这里会 _next_turn -> _start_round -> _next_turn 无限递归，栈溢出（AI 演算里真实发生）
+	print("\n[39] 英雄全灭：不许无限递归（栈溢出）")
+	# 前面的小节可能已经分出过胜负 / 打死过国王：先把国王恢复、把胜负标记清掉，
+	# 否则 _begin_next_round 会因为"已经结束"直接返回，测不到要测的那条路径。
+	for u in _s.units:
+		if u.is_king:
+			u.power_cur = u.power_max
+			u.armor_cur = u.armor_max
+			if u.visual != null:
+				u.visual.visible = true
+	_s.game_over = false
+	var killed := 0
+	for u in _s.units:
+		if u.has_turn() and u.is_king == false and u.is_alive():
+			u.power_cur = 0
+			_s._on_unit_died(u)
+			killed += 1
+	_s.queue = TurnQueue.new(_s.rng)
+	_s.queue.rebuild(_s.units)
+	var round0: int = _s.round_no
+	var left_actors := TurnFlow.hero_counts(_s.units)
+	print("    打死 %d 人 ｜ 能进队列的还剩 %s ｜ 第 %d 轮" % [killed, left_actors, round0])
+	_chk(left_actors[0] == 0 and left_actors[1] == 0, "测试前提：场上已没有能进队列的单位")
+	_s.gm.ai_enabled = false
+	_s._turn_just_finished = null
+	_s.active = null
+	var tcb: int = _s.gm.turn_count
+	_s._next_turn()                       # 关键：这里以前会递归到栈溢出
+	await create_timer(1.2).timeout
+	var left2 := TurnFlow.hero_counts(_s.units)
+	print("    1.2 秒后：轮次 %d（+%d）｜ 能行动的 %s ｜ 推进边界 %d ｜ 胜负已分=%s" % [
+		_s.round_no, _s.round_no - round0, left2, _s.gm.turn_count - tcb, _s.game_over])
+	_chk(_s.round_no - round0 <= 3,
+		"没有可行动单位时不许无限递归重开（轮次暴涨 = 栈溢出）")
+	_chk(_s.gm.turn_count - tcb > 0, "等复活期间会推进回合边界（复活计时照常走）")
+	_chk(left2[0] > 0 or left2[1] > 0 or _s.game_over,
+		"推进回合边界后英雄会复活（或直接判结束），战斗不会卡死")
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():

@@ -717,6 +717,83 @@ func _initialize() -> void:
 	_expect(back.size() == 1 and back[0] == hero_r, "%d 个回合后该复活" % GameMaster.HERO_REVIVE_TURNS, fails)
 	_expect(gm_r.due_revives().is_empty(), "复活只发一次（不会重复）", fails)
 
+	# ── 普攻模板表（AttackProfile）：加角色只需加一行，三条入口自动同步 ──
+	print("\n── 普攻模板表 ──")
+	var want_basic := {
+		"Gerald": AttackProfile.BASIC_MELEE,
+		"Alette": AttackProfile.BASIC_ARROW,
+		"萨尼铁塔": AttackProfile.BASIC_BURST,
+		"老国王": AttackProfile.BASIC_ARROW,
+		"公主·左": AttackProfile.BASIC_ARROW,
+		"Airburst mortar": AttackProfile.BASIC_SHELL,
+		heli_name: AttackProfile.BASIC_SALVO,
+	}
+	var missing: Array[String] = []
+	var wrong: Array[String] = []
+	for d in UnitData.UNITS + UnitData.ENEMIES:
+		var u2 := Unit.from_data(d)
+		if AttackProfile.id_for(u2) == "":
+			missing.append(u2.name)
+		var want: String = String(want_basic.get(Unit.base_name(u2.name), ""))
+		if want != "" and AttackProfile.basic_of(u2) != want:
+			wrong.append("%s -> %s（应为 %s）" % [u2.name, AttackProfile.basic_of(u2), want])
+	_expect(missing.is_empty(), "每个角色都能查到普攻模板（漏了：%s）" % [missing], fails)
+	_expect(wrong.is_empty(), "每个角色的普攻种类正确（错的：%s）" % [wrong], fails)
+	_expect(AttackProfile.unused().is_empty(),
+		"表里没有没人用的模板（%s）" % [AttackProfile.unused()], fails)
+	# 敌人镜像与本体同模板（免得"敌方直升机只是画上去的"）
+	var mirror_bad: Array[String] = []
+	for d in UnitData.UNITS:
+		var me2 := Unit.from_data(d)
+		var d_dup: Dictionary = d.duplicate()
+		d_dup["name"] = me2.name + " (E)"
+		d_dup["side"] = 1 - int(me2.side)
+		var me_e := Unit.from_data(d_dup)
+		if AttackProfile.id_for(me_e) != AttackProfile.id_for(me2):
+			mirror_bad.append(me2.name)
+	_expect(mirror_bad.is_empty(), "敌方镜像与本体用同一套普攻模板（%s）" % [mirror_bad], fails)
+	# 直升机的普攻精力只有一处来源（关卡配置），不许两处各写 4
+	var heli_u2 := Unit.from_data(by_name[heli_name])
+	_expect(AttackProfile.cost_of(heli_u2) == int(Level.heli()["basic_cost"]),
+		"直升机的普攻精力 = 关卡配置 basic_cost = %d" % int(Level.heli()["basic_cost"]), fails)
+	_expect(AttackProfile.cost_of(Unit.from_data(by_name["Gerald"])) == 0, "近战普攻不花精力", fails)
+	_expect(AttackProfile.aim_of(heli_u2) == AttackProfile.AIM_DRAG,
+		"直升机普攻走拖拽瞄准（与投掷手同一手感）", fails)
+	print("    直升机普攻：%s" % AttackProfile.describe(heli_u2))
+	print("    Alette 普攻：%s" % AttackProfile.describe(Unit.from_data(by_name["Alette"])))
+
+	# ── 技能表：每个技能都必须声明"怎么施放 / 怎么瞄"──
+	print("\n── 技能施放方式 ──")
+	_expect(Skills.unknown_casts().is_empty(),
+		"每个技能的 cast/aim 都合法（%s）" % [Skills.unknown_casts()], fails)
+	var used_casts: Array = []
+	for sid in Skills.DEFS:
+		var c := Skills.cast_of(String(sid))
+		if not used_casts.has(c):
+			used_casts.append(c)
+	var unhandled: Array = []
+	for ck in Skills.CAST_ALL:
+		if not used_casts.has(ck):
+			unhandled.append(ck)
+	_expect(unhandled.is_empty(), "CAST_ALL 里没有空枚举（没技能用的：%s）" % [unhandled], fails)
+	_expect(Skills.cast_of("dive_bomb") == Skills.CAST_DIVE and Skills.aim_of("dive_bomb") == Skills.AIM_CELL,
+		"俯冲轰炸 = 点格子（不是拖拽）", fails)
+	_expect(Skills.aim_of("sentry") == Skills.AIM_SELF, "哨兵不需要瞄准（点一下就用）", fails)
+	_expect(Skills.aim_of("grenade_launcher") == Skills.AIM_DRAG, "枪榴弹与投掷手同款拖拽瞄准", fails)
+
+	# ── 被动表：受伤触发的被动必须有声明（实现挂在 battle_scene 的钩子表上）──
+	print("\n── 被动：受伤钩子 ──")
+	var heli_p := Unit.from_data(by_name[heli_name])
+	_expect(Passives.damaged_hooks(heli_p).has("heli_crash"), "直升机身上有【坠机】受伤被动", fails)
+	_expect(Passives.damaged_hooks(Unit.from_data(by_name["Gerald"])).is_empty(),
+		"杰拉尔德身上没有受伤触发的被动", fails)
+	var hook_bad: Array[String] = []
+	for d2 in UnitData.UNITS + UnitData.ENEMIES:
+		for id2 in Passives.damaged_hooks(Unit.from_data(d2)):
+			if not bool(Passives.def(String(id2)).get("on_damaged", false)):
+				hook_bad.append(String(id2))
+	_expect(hook_bad.is_empty(), "受伤钩子都声明了 on_damaged（%s）" % [hook_bad], fails)
+
 	# ── 汇总 ──
 	print("── 规则自检 ──")
 	if fails.is_empty():

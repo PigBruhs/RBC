@@ -197,6 +197,10 @@ static func plan(ctx: Ctx) -> Dictionary:
 				if s2 > best_s:
 					best_s = s2
 					best = {"placeable": pl, "from": from, "score": s2}
+	# 普攻不是免费的（直升机一次齐射 4 精力）：付不起就当"打不到"。
+	# 否则执行端（_perform_basic）会拒绝出手，AI 这一回合空转（真实软锁过）。
+	if not best.is_empty() and me.energy_points() < AttackProfile.cost_of(me):
+		best = {}
 	# 群体技能优先：如果有一团（≥2 人）敌人挤在范围技能里，先用技能（AoE 总收益更高）
 	if not best.is_empty():
 		var sk := _plan_skill(ctx)
