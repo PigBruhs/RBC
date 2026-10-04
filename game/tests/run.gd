@@ -1025,6 +1025,45 @@ func _initialize() -> void:
 	_expect(rf_dmg == Rules.points_to_milli(10),
 		"反弹伤害 = 40 × 25%% = 10（实际 %d 千分比）" % rf_dmg, fails)
 
+	# ── 身体高度按"它现在真的在哪"算（第 89 轮）──
+	print("\n── 身体高度（第 89 轮）──")
+	var hb := Unit.from_data(by_name[heli_name])
+	hb.hover = 2.0
+	hb.cell = Vector2i(5, 5)
+	hb.power_cur = hb.power_max
+	_expect(Targeting.body_span(hb) == Vector2(2.0, 3.0)
+		and absf(Targeting.aim_height(hb) - 2.5) < 0.001,
+		"没有临时高度时按悬停高度算（身体 [2,3]、瞄 2.5）", fails)
+	hb.body_y = 4.0
+	_expect(Targeting.body_span(hb) == Vector2(4.0, 5.0)
+		and absf(Targeting.aim_height(hb) - 4.5) < 0.001,
+		"爬到 4 格时身体区间跟到 [4,5]（瞄 4.5）", fails)
+	var bopts := Damage.blast_opts(hb, RngService.new(3))
+	var hi_hits: Array = Damage.air_burst(hb, Vector3(5.5, 0.15, 5.5), bopts, [hb] as Array[Unit],
+		null, 3.0)
+	_expect(hi_hits.is_empty(),
+		"爬到 4 格：贴地的 3 格球炸不到它（不会再被自己的炸弹炸成 21 血）", fails)
+	hb.body_y = -1.0
+	var lo_hits: Array = Damage.air_burst(hb, Vector3(5.5, 0.15, 5.5), bopts, [hb] as Array[Unit],
+		null, 3.0)
+	_expect(lo_hits.size() == 1, "悬停 2 格：同一个球仍然炸得到（旧行为没被改掉）", fails)
+
+	# ── 火箭的伤害快照（第 89 轮）──
+	print("\n── 火箭发射单快照（第 89 轮）──")
+	hb.power_cur = hb.power_max
+	hb.body_y = -1.0
+	var rk_snap := Ordnance.make_rocket(hb, Vector3(5.5, 2.0, 5.5), Vector2(9.5, 5.5), true,
+		RngService.new(5))
+	_expect(not rk_snap.shot.opts.is_empty()
+		and int(rk_snap.shot.opts["power"]) == hb.power_max,
+		"火箭发射单里带着开火那一刻的力量快照（落地不再现算）", fails)
+	hb.power_cur = 0
+	_expect(int(rk_snap.shot.opts["power"]) == hb.power_max,
+		"发射者之后阵亡，快照不变（落地照样有伤害）", fails)
+	hb.power_cur = hb.power_max
+	var rk_plain := Ordnance.make_rocket(hb, Vector3(5.5, 2.0, 5.5), Vector2(9.5, 5.5), true)
+	_expect(rk_plain.shot.opts.is_empty(), "不给 rng 的旧调用方式仍然可用（空 opts）", fails)
+
 	# ── 汇总 ──
 	print("── 规则自检 ──")
 	if fails.is_empty():

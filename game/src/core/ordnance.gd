@@ -78,8 +78,12 @@ static func rocket_speed_at(s: float) -> float:
 	return minf(ROCKET_VMAX, ROCKET_V0 + s * ROCKET_ACCEL_K)
 
 
-## 火箭：从 from 飞向 to；总时长 = 解析解 t(s)
-static func make_rocket(caster: Unit, from: Vector3, to: Vector2, ends_turn: bool = true) -> Projectile:
+## 火箭：从 from 飞向 to；总时长 = 解析解 t(s)。
+## rng：给了就把**发射那一刻的伤害参数快照**写进发射单（第 89 轮）——
+## 火箭是"落地才算威力"的弹种，中途发射者阵亡/坠机不该让已经出膛的这一发变成 0 伤害
+## （以前发射单里没有 opts，落地时按死者现算 -> 力量 0 -> 日志"力量打不动"）。
+static func make_rocket(caster: Unit, from: Vector3, to: Vector2, ends_turn: bool = true,
+		rng = null) -> Projectile:
 	var start := Vector2(from.x, from.z)
 	var dist: float = maxf(0.5, start.distance_to(to))
 	var p := Projectile.make(Projectile.KIND_ROCKET, start, to, 1.0)
@@ -97,7 +101,15 @@ static func make_rocket(caster: Unit, from: Vector3, to: Vector2, ends_turn: boo
 	var tpl := Ballistics.shell_like_defaults(Projectile.KIND_ROCKET)
 	p.hit_tags.assign(tpl["hit_tags"])
 	p.sentry_trigger = bool(tpl["sentry_trigger"])
-	p.shot = _shot(Projectile.KIND_ROCKET, caster, ends_turn, ROCKET_BLAST_R, {}, "")
+	var opts: Dictionary = {}
+	if rng != null:
+		opts = Combat.opts({
+			"power": caster.power_cur,
+			"armor_break": caster.armor_break,
+			"ignore_res": 0.5,
+			"rng": rng,
+		})
+	p.shot = _shot(Projectile.KIND_ROCKET, caster, ends_turn, ROCKET_BLAST_R, opts, "")
 	return p
 
 

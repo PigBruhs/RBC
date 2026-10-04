@@ -18,13 +18,15 @@ const BODY_H := 1.0
 ## 角色身体在【高度轴】上的区间 [下, 上]。
 ## 用户口径（第 83 轮）：悬空单位（直升机 hover = 2 格）整个身体抬高 ——
 ## 所以"瞄得对不对"必须考虑高度轴：瞄地面高度是打不到悬停的直升机的。
+## 第 89 轮：临时高度（爬升轰炸）由 Unit.body_h() 给出 —— 身体在哪就按哪算。
 static func body_span(u: Unit) -> Vector2:
-	return Vector2(u.hover, u.hover + BODY_H)
+	var y0 := u.body_h()
+	return Vector2(y0, y0 + BODY_H)
 
 
-## 瞄准一个角色时应该瞄的高度 = 身体中心
+## 瞄准一个角色时应该瞄的高度 = 身体中心（跟着临时高度走）
 static func aim_height(u: Unit) -> float:
-	return u.hover + BODY_H * 0.5
+	return u.body_h() + BODY_H * 0.5
 
 
 ## 当前位置能打到的所有格子。

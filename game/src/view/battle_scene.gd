@@ -202,6 +202,7 @@ var _skill_info_text: String = ""
 var _placeable_info_text: String = ""             # 瞄准时显示在属性栏的技能说明
 
 var _btn_skill: Button                        # 二级菜单里的「技能」按钮
+var _btn_attack: Button                       # 二级菜单里的「普攻」按钮（第 89 轮：精力不够置灰）
 
 var _skill_menu: PanelContainer               # 多技能时的选择列表
 
@@ -489,6 +490,7 @@ func _build_ui() -> void:
 	_status = ui.status
 	_btn_rest_menu = ui.btn_rest
 	_btn_skill = ui.btn_skill
+	_btn_attack = ui.btn_attack
 	_btn_power = ui.btn_power
 	_btn_break = ui.btn_break
 	_zoom_slider = ui.zoom_slider
@@ -1635,6 +1637,8 @@ func _confirm_cell_target(cell: Vector2i) -> bool:
 
 
 func _show_action_menu() -> void:
+	if active == null:
+		return                              # 没有当前行动者就没有菜单（以前会拿 null 去算可达格）
 	_cell_targeting = false
 	cell_targets = {}
 	if _ai_turn:
@@ -1665,6 +1669,16 @@ func _show_action_menu() -> void:
 				_btn_skill.disabled = active.energy_points() < int(d["cost"])
 				_btn_skill.text = "%s（%d 精力）" % [d["name"], d["cost"]]
 				_btn_skill.tooltip_text = "%s\n%s" % [d["name"], d["desc"]]
+	# 普攻按钮（用户口径第 89 轮）：普攻也可能花精力（直升机 4 点）——
+	# 精力不够就置灰，按钮上直接写清要几点，不许点进去才发现打不了。
+	if _btn_attack != null:
+		var b_cost: int = 0 if active == null else AttackProfile.cost_of(active)
+		var b_ok: bool = active != null and active.energy_points() >= b_cost
+		_btn_attack.disabled = not b_ok
+		_btn_attack.text = "普攻" if b_cost <= 0 else "普攻（%d 精力）" % b_cost
+		_btn_attack.tooltip_text = "" if b_ok else "精力 %d/%d 不够：普攻需要 %d 点" % [
+			active.energy_points() if active != null else 0,
+			active.energy_max_points() if active != null else 0, b_cost]
 	_refresh_all()
 
 func _hide_action_menu() -> void:
@@ -1687,6 +1701,9 @@ func _menu_move() -> void:
 
 func _menu_attack() -> void:
 	if active == null:
+		return
+	# 用户口径第 89 轮：精力不够时普攻按钮是灰的，这里再兜一道（防热键/脚本绕过）
+	if active.energy_points() < AttackProfile.cost_of(active):
 		return
 	# 选了普攻/技能后**二级菜单立即消失**（用户强调）
 	_action_menu.visible = false
@@ -2053,16 +2070,18 @@ func _after_projectile_gone(sh: Ordnance.Shot) -> void:
 
 ## 炮弹类【被箭击落】的统一收尾（用户口径第 83/84 轮）：
 ##   · 炮弹 / 火箭 -> 就地空爆（一格球三维判定，真的造成伤害）
-##   · 枪榴弹       -> 就地落地（立模型 + GM 4 回合计时）—— 它本来就"落地才炸"
+##   · 枪榴弹       -> 就地落地（和正常落地完全同一条路：见 _land_shell）
 ## 注意（第 87 轮）：**飞行中撞到角色不走这里**，那是"在命中处落地"（_land_shell）。
 func _shell_intercepted(p: Projectile, why: String) -> void:
 	if p == null:
 		return
 	if Ballistics.intercept_result(p.kind) == "drop":
+		# 用户口径第 89 轮：走 _land_shell —— 在**河面/空场上空**被打掉的枪榴弹
+		# 直接作废（不立模型、不登记 GM），以前会把模型立在河面上。
 		var gc := Vector2i(int(floor(p.pos().x)), int(floor(p.pos().y)))
-		_log("  🛑 %s的%s%s，就地落地（%d, %d）开始计时" % [
+		_log("  🛑 %s的%s%s，就地落地（%d, %d）" % [
 			p.owner_name, ProjectileField.kind_cn(p.kind), why, gc.x, gc.y])
-		_spawn_grenade_model(gc, p)
+		_land_shell(p, p.pos())
 		return
 	_flash_sphere(p.pos3(), 0.6, 0.25)
 	_air_burst(p, why)
@@ -2082,7 +2101,8 @@ func _air_burst(p: Projectile, why: String = "被打爆") -> void:
 	ring.position.y = maxf(0.05, ctr.y)
 	_flash_impact(ring)
 	var attacker: Unit = sh.caster if sh != null else null
-	# 火箭这类"落地才算威力"的弹种发射单里没有 opts：空爆时按发射者现算一份（口径与落地一致）
+	# 火箭这类"落地才算威力"的弹种也有 opts 了（第 89 轮：发射那一刻的快照）；
+	# 空爆时若发射单里没有（测试构造的），按发射者现算一份（口径与落地一致）。
 	var opts: Dictionary = sh.opts if sh != null else {}
 	if opts.is_empty() and attacker != null:
 		opts = Damage.blast_opts(attacker, rng)
@@ -2217,7 +2237,7 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 			var aim: Vector2 = rolled[k * per + i]
 			var lateral := -0.32 if i % 2 == 0 else 0.32    # 左 / 右
 			var from := Vector3(base.x + perp.x * lateral, u.hover + 0.25, base.y + perp.y * lateral)
-			var p := Ordnance.make_rocket(u, from, aim, false)   # 不等落地
+			var p := Ordnance.make_rocket(u, from, aim, false, rng)   # 不等落地；伤害快照在发射单里
 			p.shot.target = null
 			field.register(p)
 		_log("  🚁 %s 齐射 %d/%d：左右各一发（瞄准 (%.1f, %.1f)，散布半径 %.0f，出膛 (%.1f, %.1f)）" % [
@@ -2313,12 +2333,12 @@ func _explode_grenade(p: GameMaster.Pending) -> void:
 	var d: Dictionary = Skills.get_def("grenade_launcher")
 	var n: int = int(d.get("fragments", 8))
 	var from := Vector3(float(cell.x) + 0.5, Ordnance.FRAGMENT_HEIGHT, float(cell.y) + 0.5)
-	var base := rng.next_float() * TAU
 	_flash_sphere(Vector3(from.x, 0.55, from.z), 1.5, 0.38)      # 球状闪光（不要红圈）
 	_log("  💥 手榴弹爆炸 (%d, %d)：向 %d 个方向撒出破片（模型已回收=%s）" % [
 		cell.x, cell.y, n, "是" if m != null else "否"])
+	# 用户口径第 89 轮：破片方向**随机**（和火箭落地一样每片现掷），不再均匀分角度
 	for i in n:
-		var ang := base + float(i) * TAU / float(n)
+		var ang := rng.next_float() * TAU
 		var dir := Vector2(cos(ang), sin(ang))
 		var fp := Ordnance.make_fragment(caster, from, dir, false)
 		fp.hit_self = true               # 用户口径：破片有友伤与自伤
@@ -2568,8 +2588,11 @@ func _start_carpet_bomb(caster: Unit, center: Vector2) -> void:
 ## 角色挨打后的统一收尾：闪白、刷新指示器、判定阵亡
 
 ## 用户口径：直升机力量低于阈值 -> 坠机（加速下坠 -> 2.5 格炮击 -> 死亡）
+## 第 89 轮修正：**就算这一下直接把它打死，也要走坠机的死亡附加伤害**。
+## 以前这里要求 is_alive()，于是"被炮弹一发打空"的直升机直接阵亡、不炸 ——
+## 而"打到剩 20 血"的反而会炸，用户看到的就是"偶尔才有效果"。
 func _check_heli_crash(u: Unit) -> bool:
-	if u == null or not u.is_alive():
+	if u == null:
 		return false
 	if not Unit.base_name(u.name).begins_with(HELI_PREFIX):
 		return false
@@ -2587,6 +2610,7 @@ func _start_crash(u: Unit) -> void:
 	u.tags["crashing"] = true
 	u.tags.erase("diving")
 	u.tags.erase("dive_ready")
+	u.body_y = -1.0                 # 坠机 = 从悬停高度往下掉
 	_dive_clear(u)
 	_log("  💥 %s 力量低于 %d —— 坠机！" % [u.name, int(cfg["crash_threshold"])])
 	var from_h: float = u.visual.position.y if u.visual != null else u.hover
@@ -2715,6 +2739,7 @@ func _dive_begin(u: Unit) -> bool:
 		"t": 0.0, "speed": float(cfg["climb_speed"]), "hold": 0.0,
 		"hi": float(cfg["climb_h"]),
 	}
+	gm.on_move_begin(u)          # 哨兵：这次"技能移动"的已触发闩清零（用户口径第 89 轮）
 	if u.visual != null:
 		u.visual.position.y = u.hover
 	_log("  🚁 %s 开始爬升轰炸 -> (%d, %d)（升到 %.1f 格，%.1f 格/秒）" % [
@@ -2728,6 +2753,8 @@ func _dive_tick(delta: float) -> void:
 	var u: Unit = _dive["u"]
 	if u == null or not u.is_alive() or not u.tags.has("diving"):
 		_dive = {}
+		if u != null:
+			u.body_y = -1.0                  # 临时高度作废，回到悬停高度
 		return
 	var cfg := Level.heli()
 	var phase := String(_dive["phase"])
@@ -2749,9 +2776,17 @@ func _dive_tick(delta: float) -> void:
 	elif phase == "hold":
 		_dive["hold"] = float(_dive["hold"]) - delta
 		if float(_dive["hold"]) <= 0.0:
+			_dive["phase"] = "wait_bomb"
+			_dive["hold"] = float(_dive["hold"]) + float(cfg["bomb_fall_sec"])
+			_start_bomb_fall(u, to)                            # 投弹：弹下落 1 秒
+	elif phase == "wait_bomb":
+		# 用户口径（第 89 轮）：**投弹后先留在 4 格上等炸弹落地**再返航 ——
+		# 不然返航途中降到 3 格以下，炸弹会把自己炸到 21 血（41 - 20）。
+		_dive["hold"] = float(_dive["hold"]) - delta
+		_place_diving(u, to, hi)
+		if float(_dive["hold"]) <= 0.0:
 			_dive["phase"] = "back"
 			_dive["t"] = 1.0
-			_start_bomb_fall(u, to)                            # 投弹：弹下落 1 秒
 	elif phase == "back":
 		_dive["t"] = maxf(0.0, float(_dive["t"]) - speed * delta / total)
 		var k2: float = float(_dive["t"])
@@ -2759,6 +2794,7 @@ func _dive_tick(delta: float) -> void:
 		_place_diving(u, pos2, lerpf(u.hover, hi, k2))         # 返航时均匀降回
 		if k2 <= 0.0:
 			u.tags.erase("diving")
+			u.body_y = -1.0                                    # 回到悬停高度
 			_dive = {}
 			if u.visual != null:
 				u.visual.position.y = u.hover
@@ -2794,10 +2830,17 @@ func _start_bomb_fall(u: Unit, at: Vector2) -> void:
 ## 俯冲中的位置同步（格坐标 + 高度）
 func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
 	u.cell = _clamp_cell(Vector2i(int(floor(pos.x)), int(floor(pos.y))))
+	u.body_y = h                  # 第 89 轮：三维判定按"它现在真的在哪"算（否则会被自己的炸弹炸到）
 	if u.visual != null:
 		u.visual.position = Vector3(clampf(pos.x, float(PX) + 0.5, float(PX + PW) - 0.5), h,
 			clampf(pos.y, float(PY) + 0.5, float(PY + PH) - 0.5))
 	_check_heli_crash(u)          # 用户口径：俯冲期间会受伤、也会触发被动
+	# 哨兵（用户口径第 89 轮）：**技能移动和走路一样要触发哨兵** ——
+	# 以前只有 walk_path 的视觉位移会采样，技能飞行完全不惊动哨兵（一次移动最多入队一次）。
+	var sample := pos
+	if u.visual != null:
+		sample = Vector2(u.visual.position.x, u.visual.position.z)
+	_sentry_lock(u, sample)
 
 
 ## 投弹：投掷手普攻模型直径翻倍、半径 3 格、40 破甲 + 20 力量、不触发哨兵。
@@ -2892,10 +2935,14 @@ func _any_placeable_in_blast(center: Vector2i) -> bool:
 func _on_unit_died(u: Unit) -> void:
 	if u.visual == null:
 		return
+	# 幂等（第 89 轮）：一次阵亡只处理一次。
+	# 以前只有假人查 uid_dead，于是"坠机动画期间又挨了一发"会连报两次阵亡、
+	# 还会把复活计时重排一遍。复活时会 erase（_revive_hero / _on_revive_timeout）。
+	if uid_dead.has(u):
+		if not u.is_alive():
+			return
+		uid_dead.erase(u)          # 有人把他救回来了（调试/测试直接改力量也算）：重新记账
 	var dummy := u.name.begins_with("Dummy")
-	# 同一个单位重复播报没有意义（地毯式轰炸会一次性打死好几次）
-	if dummy and uid_dead.has(u):
-		return
 	if dummy:
 		uid_dead[u] = true
 		_log("  ☠ %s 阵亡" % u.name)
@@ -2909,6 +2956,7 @@ func _on_unit_died(u: Unit) -> void:
 		_revive_timers[u] = tm
 		tm.timeout.connect(_on_revive_timeout.bind(u))
 	else:
+		uid_dead[u] = true
 		_log("  ☠ %s 阵亡" % u.name)
 		u.visual.visible = false
 		# 用户口径第 87 轮：**阵亡 = 当场移出回合队列**（不是跳到队尾）。
@@ -3952,6 +4000,7 @@ func _revive_unit(u: Unit) -> void:
 	if u.visual != null:
 		u.visual.visible = true
 		u.visual.update_orb()
+	uid_dead.erase(u)                # 调试复活：把阵亡账目清掉
 	_queue_revive(u)                 # 调试复活也走同一条路：压回队列队头
 	_log("[调试] %s 力量 >0，已复活（力%s 甲%s）" % [u.name, _fmt(u.power_cur), _fmt(u.armor_cur)])
 

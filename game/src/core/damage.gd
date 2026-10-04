@@ -108,7 +108,8 @@ static func air_burst(attacker: Unit, ctr: Vector3, opts: Dictionary, units: Arr
 	for u in units:
 		if not u.is_alive() or u == skip:
 			continue
-		if not Targeting.sphere_hits_body(ctr, radius, u.cell, BODY_R, BODY_H, u.hover):
+		# 身体底面 = 它【现在】的高度（悬停 2 格 / 爬升到 4 格都按真实高度算，第 89 轮）
+		if not Targeting.sphere_hits_body(ctr, radius, u.cell, BODY_R, BODY_H, u.body_h()):
 			continue
 		var h := Hit.new()
 		h.unit = u

@@ -1544,7 +1544,7 @@ func _initialize() -> void:
 		_chk(refl.shot.caster == alette, "反弹箭绑定的发射者必须是【原射手】，不是杰拉尔德")
 		_chk(refl.shot.caster != gerald, "反弹箭不能记在杰拉尔德头上")
 		_chk(absf(refl.shot.power_mult - 0.25) < 0.0001,
-			"反弹箭只吃 25% 力量（第 87 轮，实际 %.2f）" % refl.shot.power_mult)
+			"反弹箭只吃 25%% 力量（第 87 轮，实际 %.2f）" % refl.shot.power_mult)
 		_chk(d_refl <= 8.0, "7 格距离的散步很小，落点应贴在射手附近")
 	# 让反弹箭飞完：应该打回射手身上
 	for i in 900:
@@ -2611,6 +2611,240 @@ func _initialize() -> void:
 		_s.queue.advance(_s.queue.current())
 	print("    复活 %s -> 最多等对面 1 个回合就轮到（结果=%s）" % [first_rev.name, got_turn])
 	_chk(got_turn, "复活的人立刻接上回合（旧实现里他排在队尾，永远轮不到）")
+
+	# ── 48. 火箭：发射者阵亡之后落地照样造伤（第 89 轮）──
+	print("\n[48] 火箭落地伤害快照（发射者阵亡也照打）")
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()
+	var p89_he: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0)
+	var p89_vic: Unit = _unit_by("Gerald", 1)
+	for p89_u in _s.units:
+		p89_u.cell = Vector2i(2, 44)
+		if p89_u.visual != null:
+			p89_u.visual.position = Vector3(2.5, p89_u.hover, 44.5)
+	p89_he.cell = Vector2i(10, 5)
+	p89_he.visual.position = Vector3(10.5, p89_he.hover, 5.5)
+	p89_he.power_cur = p89_he.power_max
+	p89_he.armor_cur = p89_he.armor_max
+	p89_he.tags.erase("crashing")
+	p89_he.visual.visible = true
+	p89_he.body_y = -1.0
+	p89_vic.cell = Vector2i(10, 12)
+	p89_vic.visual.position = Vector3(10.5, 0.0, 12.5)
+	p89_vic.power_cur = p89_vic.power_max
+	p89_vic.armor_cur = 0
+	p89_vic.pr = 0
+	var p89_hp: int = p89_vic.power_cur
+	var p89_rk := Ordnance.make_rocket(p89_he, Vector3(10.5, p89_he.hover + 0.25, 5.5),
+		Vector2(10.5, 12.5), false, _s.rng)
+	_s.field.register(p89_rk)
+	# 出膛之后立刻让发射者阵亡（用户报的"火箭落地不造伤"就是这个）
+	p89_he.power_cur = 0
+	_s._on_unit_died(p89_he)
+	for p89_i in 900:
+		_s.field.step(1.0 / 60.0)
+		if not p89_rk.alive:
+			break
+	print("    火箭 alive=%s 原因='%s' ｜ 目标力量 %d -> %d（发射者已阵亡）" % [
+		p89_rk.alive, p89_rk.removed_reason, p89_hp, p89_vic.power_cur])
+	_chk(not p89_rk.alive and p89_vic.power_cur < p89_hp,
+		"发射者阵亡后火箭落地照样造伤（发射单里是开火那一刻的快照）")
+	_s.clear_projectiles()
+	p89_he.power_cur = p89_he.power_max
+	_s._revive_hero(p89_he)
+
+	# ── 49. 技能移动也要触发哨兵（第 89 轮）──
+	print("\n[49] 技能移动触发哨兵")
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()
+	var p89_dive: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	var p89_watch: Unit = _unit_by("公主", 0)     # 「公主·左/·右」的基础名就是「公主」
+	for p89_u2 in _s.units:
+		p89_u2.cell = Vector2i(2, 44)
+		if p89_u2.visual != null:
+			p89_u2.visual.position = Vector3(2.5, p89_u2.hover, 44.5)
+	p89_watch.cell = Vector2i(10, 20)
+	p89_watch.visual.position = Vector3(10.5, 0.0, 20.5)
+	p89_watch.power_cur = p89_watch.power_max
+	p89_watch.visual.visible = true
+	_s.gm.add_sentry(p89_watch, p89_watch.rng_min, p89_watch.rng_max)   # 射界 1~12
+	p89_dive.cell = Vector2i(10, 34)          # 起点在射界外（14 格）
+	p89_dive.visual.position = Vector3(10.5, p89_dive.hover, 34.5)
+	p89_dive.power_cur = p89_dive.power_max
+	p89_dive.armor_cur = p89_dive.armor_max
+	p89_dive.tags.erase("crashing")
+	p89_dive.visual.visible = true
+	p89_dive.energy = p89_dive.energy_max
+	p89_dive.tags["dive_ready"] = Vector2i(10, 26)   # 目标在射界内（6 格）
+	_s._debug_log.clear()
+	_s.active = null
+	_s._turn_just_finished = p89_dive      # 收尾的 _finish_turn 变空操作（别把 AI 回合带起来）
+	var p89_began: bool = _s._dive_begin(p89_dive)
+	for p89_i2 in 1200:
+		_s._dive_tick(1.0 / 60.0)
+		if not p89_dive.tags.has("diving"):
+			break
+	var p89_locked := false
+	for p89_lg in _s._debug_log:
+		if String(p89_lg).contains("哨兵锁定"):
+			p89_locked = true
+	print("    开始=%s ｜ 哨兵队列=%d ｜ 日志有哨兵锁定=%s" % [
+		p89_began, _s.gm.sentry_queue_size(), p89_locked])
+	_chk(p89_began and p89_locked,
+		"技能飞行从射界外飞进射界 -> 触发哨兵（以前只有走路会触发）")
+	_chk(_s.gm.sentry_queue_size() >= 1, "直升机被排进哨兵队列")
+	_s.gm.clear_all_sentries()
+	_s.clear_projectiles()
+
+	# ── 50. 普攻按钮的精力检测（第 89 轮）──
+	print("\n[50] 普攻按钮精力检测")
+	var p89_btn: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0)
+	p89_btn.power_cur = p89_btn.power_max
+	p89_btn.energy = p89_btn.energy_max
+	p89_btn.has_acted = false
+	p89_btn.has_moved = false
+	p89_btn.tags.erase("diving")
+	p89_btn.body_y = -1.0
+	_s.active = p89_btn
+	var p89_ai0: bool = _s._ai_turn
+	_s._ai_turn = false
+	_s._show_action_menu()
+	var p89_cost: int = AttackProfile.cost_of(p89_btn)
+	var p89_ok_txt: String = _s._btn_attack.text
+	_chk(p89_cost > 0 and not _s._btn_attack.disabled, "精力够（%d 点）：普攻按钮可点" % p89_cost)
+	p89_btn.energy = 0
+	_s._show_action_menu()
+	print("    精力满：文本='%s' ｜ 精力 0：disabled=%s 提示='%s'" % [
+		p89_ok_txt, _s._btn_attack.disabled, _s._btn_attack.tooltip_text])
+	_chk(_s._btn_attack.disabled, "精力不足：普攻按钮置灰")
+	# 灰了之后硬调也不许进瞄准流程
+	_s._menu_attack()
+	_chk(_s.phase == _s.Phase.MENU, "精力不足时 _menu_attack 直接返回（不进入瞄准）")
+	p89_btn.energy = p89_btn.energy_max
+	_s._show_action_menu()
+	_chk(not _s._btn_attack.disabled, "精力恢复后按钮重新可点")
+	_s._ai_turn = p89_ai0                     # 还原：别把还在跑的 AI 回合保护关掉
+
+	# ── 51. 枪榴弹破片方向随机（第 89 轮）──
+	print("\n[51] 枪榴弹破片方向随机")
+	_s.clear_projectiles()
+	for p89_u3 in _s.units:
+		p89_u3.cell = Vector2i(2, 44)
+		if p89_u3.visual != null:
+			p89_u3.visual.position = Vector3(2.5, p89_u3.hover, 44.5)
+	var p89_x: GameMaster.Pending = _s.gm.schedule_grenade(Vector2i(20, 30), "萨尼铁塔", 0, 4)
+	_s._debug_log.clear()
+	_s._explode_grenade(p89_x)
+	var p89_dirs: Array[float] = []
+	for p89_it in _s.field.items:
+		var p89_pp: Projectile = p89_it["p"]
+		if p89_pp.kind == Projectile.KIND_FRAGMENT and p89_pp.alive:
+			p89_dirs.append(atan2(p89_pp.to.y - p89_pp.from.y, p89_pp.to.x - p89_pp.from.x))
+	p89_dirs.sort()
+	var p89_gaps: Array[float] = []
+	for p89_i3 in p89_dirs.size():
+		var p89_nxt: float = p89_dirs[(p89_i3 + 1) % p89_dirs.size()]
+		var p89_g: float = p89_nxt - p89_dirs[p89_i3]
+		if p89_i3 == p89_dirs.size() - 1:
+			p89_g = (p89_dirs[0] + TAU) - p89_dirs[p89_i3]
+		p89_gaps.append(p89_g)
+	var p89_uniform := true
+	var p89_want: float = TAU / float(maxi(1, p89_dirs.size()))
+	for p89_g2 in p89_gaps:
+		if absf(p89_g2 - p89_want) > 0.02:
+			p89_uniform = false
+	var p89_gap_txt: Array[String] = []
+	for p89_g3 in p89_gaps:
+		p89_gap_txt.append("%.0f°" % rad_to_deg(p89_g3))
+	print("    破片 %d 枚 ｜ 相邻夹角 %s ｜ 均匀=%s" % [p89_dirs.size(), p89_gap_txt, p89_uniform])
+	_chk(p89_dirs.size() == int(Skills.get_def("grenade_launcher")["fragments"]) and not p89_uniform,
+		"8 枚破片方向随机（不再是每 45° 一发）")
+	_s.clear_projectiles()
+
+	# ── 52. 爬升轰炸不自伤（真实时间，第 89 轮）──
+	print("\n[52] 爬升轰炸不自伤（真实时间跑完整套）")
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()
+	var p89_dv: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0)
+	var p89_tgt: Unit = _unit_by("Gerald", 1)
+	for p89_u4 in _s.units:
+		p89_u4.cell = Vector2i(2, 44)
+		if p89_u4.visual != null:
+			p89_u4.visual.position = Vector3(2.5, p89_u4.hover, 44.5)
+	p89_dv.cell = Vector2i(10, 6)
+	p89_dv.visual.position = Vector3(10.5, p89_dv.hover, 6.5)
+	p89_dv.power_cur = p89_dv.power_max
+	p89_dv.armor_cur = p89_dv.armor_max
+	p89_dv.tags.erase("crashing")
+	p89_dv.tags.erase("diving")
+	p89_dv.body_y = -1.0
+	p89_dv.visual.visible = true
+	p89_dv.energy = p89_dv.energy_max
+	p89_tgt.cell = Vector2i(10, 10)           # 4 格外的目标格（旧实现里这一发一定会自伤）
+	p89_tgt.visual.position = Vector3(10.5, 0.0, 10.5)
+	p89_tgt.power_cur = p89_tgt.power_max
+	p89_tgt.armor_cur = 0
+	p89_tgt.pr = 0
+	var p89_dv_hp: int = p89_dv.power_cur
+	var p89_tgt_hp: int = p89_tgt.power_cur
+	_s.active = p89_dv                      # 别设 null：可能还有 AI 协程在跑，它要用 active
+	_s._turn_just_finished = p89_dv          # 让收尾的 _finish_turn 变成空操作（别把 AI 回合带起来）
+	_s._cast_dive(p89_dv, Vector2i(10, 10))
+	_s._dive_begin(p89_dv)
+	await create_timer(7.0).timeout          # 爬升 1.6s + 停 0.5s + 弹落 1s + 返航 1.6s
+	print("    技能结束：diving=%s ｜ 直升机 %d -> %d ｜ 目标格 %d -> %d" % [
+		p89_dv.tags.has("diving"), p89_dv_hp / 1000, p89_dv.power_cur / 1000,
+		p89_tgt_hp / 1000, p89_tgt.power_cur / 1000])
+	_chk(not p89_dv.tags.has("diving"), "爬升轰炸走完（投弹 -> 在 4 格上等弹落地 -> 返航）")
+	_chk(p89_dv.power_cur == p89_dv_hp,
+		"投弹阶段不再自伤（身体高度按真实高度算，且等弹落地才返航）")
+	_chk(p89_tgt.power_cur < p89_tgt_hp, "目标格照常吃炸弹")
+	_chk(absf(p89_dv.body_y + 1.0) < 0.001, "返航结束后临时高度清掉（回到悬停）")
+
+	# ── 53. 被一发打空的直升机照样坠机（死亡附加伤害，第 89 轮）──
+	print("\n[53] 被一发打空的直升机照样坠机")
+	_s.clear_projectiles()
+	var p89_kill: Unit = _unit_by("Airburst mortar", 0)
+	var p89_cr: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	var p89_nb: Unit = _unit_by("Gerald", 0)
+	for p89_u5 in _s.units:
+		p89_u5.cell = Vector2i(2, 44)
+		if p89_u5.visual != null:
+			p89_u5.visual.position = Vector3(2.5, p89_u5.hover, 44.5)
+	p89_kill.cell = Vector2i(15, 20)
+	p89_kill.visual.position = Vector3(15.5, 0.0, 20.5)
+	p89_kill.power_cur = Rules.points_to_milli(60)      # 一发就能打空直升机（邻居还剩 20 血左右）
+	p89_cr.cell = Vector2i(20, 20)
+	p89_cr.visual.position = Vector3(20.5, p89_cr.hover, 20.5)
+	p89_cr.power_cur = p89_cr.power_max
+	p89_cr.armor_cur = 0
+	p89_cr.pr = 0
+	p89_cr.tags.erase("crashing")
+	p89_cr.body_y = -1.0
+	p89_cr.visual.visible = true
+	p89_nb.cell = Vector2i(21, 20)                      # 站在它旁边 1 格吃坠机炮击
+	p89_nb.visual.position = Vector3(21.5, 0.0, 20.5)
+	p89_nb.power_cur = p89_nb.power_max
+	p89_nb.armor_cur = 0
+	p89_nb.pr = 0
+	var p89_nb_hp: int = p89_nb.power_cur
+	_s._debug_log.clear()
+	var p89_shell: Projectile = _s._spawn_shell(p89_kill, Vector2(20.5, 20.5), false)
+	for p89_i4 in 900:
+		_s.field.step(1.0 / 60.0)
+		if not p89_shell.alive:
+			break
+	var p89_crashed := false
+	for p89_lg2 in _s._debug_log:
+		if String(p89_lg2).contains("坠机"):
+			p89_crashed = true
+	await create_timer(1.0).timeout                     # 等坠机动画（0.45 秒）与结算
+	print("    直升机 alive=%s ｜ 坠机日志=%s ｜ 邻居力量 %d -> %d" % [
+		p89_cr.is_alive(), p89_crashed, p89_nb_hp, p89_nb.power_cur])
+	_chk(not p89_cr.is_alive(), "一发打空 -> 直接阵亡")
+	_chk(p89_crashed, "被一发打空也要走坠机（死亡附加伤害不再偶尔丢失）")
+	_chk(p89_nb.power_cur < p89_nb_hp, "坠机炮击照常结算到旁边的角色身上")
+	_s.clear_projectiles()
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():

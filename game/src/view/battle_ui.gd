@@ -46,6 +46,7 @@ var attack_menu: PanelContainer = null
 var skill_menu: PanelContainer = null
 var btn_rest: Button = null
 var btn_skill: Button = null
+var btn_attack: Button = null
 var btn_power: Button = null
 var btn_break: Button = null
 var btn_next: Button = null
@@ -153,9 +154,9 @@ func _build_action_menu() -> void:
 	var b_move := Button.new(); b_move.text = "移动"
 	b_move.pressed.connect(func() -> void: host.ui_move())
 	vb.add_child(b_move)
-	var b_atk := Button.new(); b_atk.text = "普攻"
-	b_atk.pressed.connect(func() -> void: host.ui_attack())
-	vb.add_child(b_atk)
+	btn_attack = Button.new(); btn_attack.text = "普攻"
+	btn_attack.pressed.connect(func() -> void: host.ui_attack())
+	vb.add_child(btn_attack)
 	btn_skill = Button.new(); btn_skill.text = "技能"
 	btn_skill.pressed.connect(func() -> void: host.ui_skill())
 	vb.add_child(btn_skill)

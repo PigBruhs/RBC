@@ -51,6 +51,15 @@ var is_king: bool = false
 var home_cell: Vector2i = Vector2i(-1, -1)
 ## 悬浮高度（直升机 = 2 格，其它 = 0）：只影响表现与弹道起点
 var hover: float = 0.0
+## 当前身体底面高度（第 89 轮）：**-1 = 用 hover**。
+## 爬升轰炸这类"临时离开悬停高度"的动作由 view 每帧写进来 ——
+## 因为三维判定（投弹球 / 空爆 / 箭矢高度轴）必须按【它现在真的在哪】算：
+## 以前直升机爬到 4 格投弹，身体却还按 hover=2 判定，于是被自己的炸弹炸到（41 → 21）。
+var body_y: float = -1.0
+
+## 身体底面高度（格）：默认 hover；临时高度生效时用 body_y
+func body_h() -> float:
+	return hover if body_y < 0.0 else body_y
 
 # 表现层引用（由 battle_scene 注入）
 var visual: Node3D = null
