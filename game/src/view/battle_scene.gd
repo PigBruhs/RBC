@@ -2067,7 +2067,8 @@ func ui_result_win() -> bool:
 func ui_levels() -> Array:
 	var out: Array = []
 	for id in Level.ids():
-		out.append({"id": id, "name": Level.name_of(id), "current": id == Level.current})
+		out.append({"id": id, "name": Level.name_of(id), "desc": Level.desc_of(id),
+			"current": id == Level.current})
 	return out
 
 

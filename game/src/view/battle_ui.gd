@@ -770,17 +770,28 @@ func _build_debug() -> void:
 	var lv := Label.new()
 	lv.text = "关卡（点了立刻重载）"
 	vb.add_child(lv)
-	var lrow := HBoxContainer.new()
-	lrow.add_theme_constant_override("separation", 6)
-	vb.add_child(lrow)
+	# ⚠ 竖排，不要 HBox！调试面板只有 308px 宽（`offset_left = -320` / `offset_right = -12`），
+	# 而关卡名最长的是「Reaper 战 65×81（四周 100×100 空场）」——
+	# 横排时三个按钮会**一起被挤出面板右边缘**（面板不裁剪 → 直接看不见）。
+	# 第 100 轮用户就报过"找不到进 Reaper 场景的按钮"。
+	# 竖排 + `autowrap` 之后每个按钮各占一行，面板多高都装得下。
+	var lcol := VBoxContainer.new()
+	lcol.add_theme_constant_override("separation", 2)
+	lcol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_child(lcol)
 	for l in host.ui_levels():
 		var lb := Button.new()
 		lb.text = String(l["name"])
+		# tooltip = 一句话描述（名字故意短，详细尺寸放这儿）
+		var dsc := String(l.get("desc", ""))
+		lb.tooltip_text = String(l["name"]) + ("\n" + dsc if dsc != "" else "")
+		lb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		lb.toggle_mode = true
 		lb.set_pressed_no_signal(bool(l["current"]))
+		lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var lid: String = String(l["id"])
 		lb.pressed.connect(func() -> void: host.ui_set_level(lid))
-		lrow.add_child(lb)
+		lcol.add_child(lb)
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.custom_minimum_size = Vector2(0, 260)

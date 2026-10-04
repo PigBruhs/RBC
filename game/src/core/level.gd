@@ -25,6 +25,9 @@ static var current: String = "field"
 const DEFS := {
 	"field": {
 		"name": "测试场 48×48",
+		# 名字要**短**：它会直接做调试面板里的按钮文字，而面板只有 308px 宽。
+		# 详细尺寸放进 `desc`（按钮 tooltip 用），别把描述塞进 name。
+		"desc": "全图 48×48，双方满编 + 三个假人靶子",
 		"gw": 48, "gh": 48,
 		"play": [0, 0, 48, 48],                 # 可行动区域 = 整张图
 		"cam_yaw": 225.0,                       # 对角俯视：玩家那一方落在屏幕【左下方】
@@ -56,7 +59,8 @@ const DEFS := {
 		"victory": {"type": "king"},
 	},
 	"arena": {
-		"name": "皇室竞技场 21×41（四周 100×100 空场）",
+		"name": "皇室竞技场",
+		"desc": "可行动 21×41（四周 100×100 空场），中间一条 3 格宽的河 + 两座桥",
 		# 用户口径（第 83 轮）：物理边界扩到 100×100，所以炮弹不会再"飞出竞技场就消失"；
 		# 但**只有 play 这块矩形是有格子的**（能走、能放、能画地形），外面是空场：
 		# 没有格子划分，炮弹照飞、照常触发碰撞，枪榴弹/信标落进去则作废。
@@ -106,7 +110,8 @@ const DEFS := {
 	#   · 回合顺序：**一边所有角色行动完才轮到另一边**（`turn_mode = "by_side"`，只有本场景这样）
 	# ══════════════════════════════════════════════════════════════════════════
 	"reaper": {
-		"name": "Reaper 战 65×81（四周 100×100 空场）",
+		"name": "Reaper 战",
+		"desc": "可行动 65×81（四周 100×100 空场）。第一个 Boss 关：击毙 Reaper 通关，老国王阵亡即失败",
 		"gw": 100, "gh": 100,
 		"play": [0, 0, 65, 81],                 # 可到达格子：x 0~64、y 0~80
 		"cam_yaw": 225.0,                       # 与竞技场同一个角度（玩家在左下方）
@@ -170,6 +175,11 @@ static func def(id: String = "") -> Dictionary:
 
 static func name_of(id: String = "") -> String:
 	return String(def(id).get("name", id))
+
+
+## 一句话描述（调试面板的按钮 tooltip 用）。名字要短、详细尺寸放这儿。
+static func desc_of(id: String = "") -> String:
+	return String(def(id).get("desc", ""))
 
 
 static func gw(id: String = "") -> int:
