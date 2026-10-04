@@ -49,6 +49,8 @@ const DEFS := {
 		],
 		"river_rows": [],                       # 没有河
 		"bridge_cols": [],
+		# 胜负条件（各场景独立声明；这里是测试场）
+		"victory": {"type": "king"},
 	},
 	"arena": {
 		"name": "皇室竞技场 21×41（四周 100×100 空场）",
@@ -82,6 +84,13 @@ const DEFS := {
 		"respawn_turns": {"俯冲轰炸直升机（不要问那么多）": 25},
 		"river_rows": [19, 20, 21],             # 3 格宽、跨满 21 格
 		"bridge_cols": [[4, 5], [15, 16]],      # 左起 4 格 / 右起 4 格，各宽 2
+		# 胜负条件（各场景独立声明；这里与测试场同为"击毙对方老国王"）
+		# 换玩法只改这一行，例如：
+		#   {"type": "annihilate"}                                  一方全灭即分胜负
+		#   {"type": "king", "also": [{"type": "survive", "rounds": 20, "side": 1}]}
+		#                                                           我方 20 个回合内没被打死也算赢
+		#   {"type": "reach", "side": 0, "cells": [Vector2i(10, 20)]} 我方有人站到 (10,20) 即胜
+		"victory": {"type": "king"},
 	},
 }
 
@@ -115,6 +124,32 @@ static func gw(id: String = "") -> int:
 
 static func gh(id: String = "") -> int:
 	return int(def(id).get("gh", 48))
+
+
+## ── 胜负条件（用户口径第 97 轮：**写进场景元数据，各场景相互独立**）────────────
+## 每个场景在 DEFS 里写一行 `"victory": {...}`；不写则用缺省的「一方老国王阵亡」。
+## 可用的 type 与字段见 `core/turn_flow.gd` 顶部（king / annihilate / survive / reach），
+## 判定是纯函数 `TurnFlow.check()`，所以加场景不用改任何场景侧代码。
+const VICTORY_DEFAULT := {"type": "king"}
+
+
+static func victory(id: String = "") -> Dictionary:
+	var v: Dictionary = def(id).get("victory", {})
+	return VICTORY_DEFAULT.duplicate() if v.is_empty() else v
+
+
+## 这个场景的胜利条件用一句话怎么说（调试面板 / 胜者界面用）
+static func victory_text(id: String = "") -> String:
+	var v := victory(id)
+	match String(v.get("type", "king")):
+		"annihilate":
+			return "消灭对方全部可行动单位"
+		"survive":
+			return "守满 %d 个回合" % int(v.get("rounds", 0))
+		"reach":
+			return "抵达目标格"
+		_:
+			return "击毙对方老国王"
 
 
 ## ── 可行动区域（用户口径第 83 轮）────────────────────────────────────────────
@@ -228,7 +263,7 @@ const HELI_DEFAULTS := {
 	"salvo_gap": 0.5,        # 每次间隔 0.5 秒（第 83 轮 250ms -> 1s，第 95 轮 1s -> 0.5s）
 	"scatter_r": 4.0,        # 落点：半径 4 格圆内随机（第 83 轮 4 -> 8，第 92 轮改回 4）
 	"rockets": 16,           # 一共 16 发（8 波 × 左右各一发；第 93 轮随波次翻倍）
-	"crash_threshold": 21,   # 力量低于 21 坠机
+	"crash_threshold": 0,    # 坠机阈值：**力量池归零才坠机**（用户口径第 97 轮：原来的 21 = 半血自毁已删除）
 	"crash_r": 2.5,          # 坠机炮击半径
 	"crash_power": 20,
 	"crash_break": 40,

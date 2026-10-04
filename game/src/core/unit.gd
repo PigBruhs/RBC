@@ -123,7 +123,9 @@ func begin_turn() -> void:
 	has_acted = false
 	energy_used_this_turn = 0
 
-## 精力现在只有一个用途：付技能费（用户口径：不再能用精力加伤害）
+## 精力用来**支付行动费**：技能要精力，**普攻也可能要精力**（直升机火箭齐射 = 4）。
+## 用户口径（第 97 轮）：删掉"精力只用来付技能费"的说法 —— 那是自相矛盾的旧文案。
+## 仍然成立的是：**精力不能用来加伤害**（早期"投入精力加伤害"整套已删除，代码里没有任何入口）。
 func spend_energy(points: int) -> void:
 	var cost: int = points * 1000
 	energy -= cost

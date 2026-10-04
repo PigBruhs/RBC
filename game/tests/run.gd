@@ -81,7 +81,7 @@ func _initialize() -> void:
 	_expect(v.power_max == p1 + 1000, "重置【不会】影响 Alette", fails)
 	_expect(u.armor_max == Rules.points_to_milli(52), "重置后 Gerald 护甲还原", fails)
 
-	# ── 6. 精力池（只用于付技能费，不再能加伤害）──
+	# ── 6. 精力池（用来支付行动费：技能 + 普攻；不能加伤害）──
 	var w := Unit.from_data(by_name["Gerald"])   # 精力上限 5
 	w.spend_energy(3)
 	_expect(w.energy_points() == 2, "花 3 点后剩 2 点", fails)
@@ -1230,6 +1230,69 @@ func _initialize() -> void:
 	var ai_plan3 := Ai.plan(ai_ctx2)
 	print("    精力 0 + 没得打：%s" % [ai_plan3.get("note", "-")])
 	_expect(String(ai_plan3.get("action", "")) == "rest", "没精力时照旧选休息", fails)
+
+	# ── 场景胜负条件（第 97 轮：胜负条件写进场景元数据，各场景相互独立）──
+	print("\n── 场景胜负条件（第 97 轮）──")
+	var v_king := Unit.from_data(by_name["老国王"])
+	v_king.side = UnitData.Side.PLAYER
+	v_king.is_king = true
+	var v_king_e := _enemy_of(by_name, "老国王")
+	v_king_e.is_king = true
+	var v_hero := Unit.from_data(by_name["Gerald"])
+	v_hero.side = UnitData.Side.PLAYER
+	var v_hero_e := _enemy_of(by_name, "Gerald")
+	var v_units: Array[Unit] = [v_king, v_king_e, v_hero, v_hero_e]
+	_expect(TurnFlow.check(v_units, {}, 0) == TurnFlow.NONE,
+		"缺省（空配置 = 国王模式）两人都活着 -> 没结束", fails)
+	_expect(TurnFlow.check(v_units, Level.victory("arena"), 0) == TurnFlow.NONE,
+		"竞技场现状：双方国王都活着 -> 没结束", fails)
+	v_king_e.power_cur = 0
+	_expect(TurnFlow.check(v_units, Level.victory("arena"), 0) == TurnFlow.PLAYER,
+		"国王模式：敌方老国王阵亡 -> 我方胜", fails)
+	v_king_e.power_cur = v_king_e.power_max
+	# 全灭模式是独立玩法，假定该场景**没有国王**（有国王就该用 king 模式）
+	var v_no_king: Array[Unit] = [v_hero, v_hero_e]
+	_expect(TurnFlow.check(v_no_king, {"type": "annihilate"}, 0) == TurnFlow.NONE,
+		"全灭模式：双方都还有人 -> 没结束", fails)
+	v_hero_e.power_cur = 0
+	_expect(TurnFlow.check(v_no_king, {"type": "annihilate"}, 0) == TurnFlow.PLAYER,
+		"全灭模式：敌方可行动单位全灭 -> 我方胜", fails)
+	v_hero_e.power_cur = v_hero_e.power_max
+	# 两边同时全灭：不算分胜负（交给上层兜底，避免"同时赢"）
+	var v_double: Array[Unit] = [v_hero, v_hero_e]
+	for vd in v_double:
+		vd.power_cur = 0
+	_expect(TurnFlow.check(v_double, {"type": "annihilate"}, 0) == TurnFlow.NONE,
+		"全灭模式：双方同时全灭 -> 不算分胜负（上层兜底）", fails)
+	v_hero.power_cur = v_hero.power_max
+	v_hero_e.power_cur = v_hero_e.power_max
+	_expect(TurnFlow.check(v_units, {"type": "survive", "rounds": 10}, 9) == TurnFlow.NONE,
+		"存活模式：还没到回合数 -> 没结束", fails)
+	_expect(TurnFlow.check(v_units, {"type": "survive", "rounds": 10}, 10) == TurnFlow.PLAYER,
+		"存活模式：敌方守满 10 个回合边界 -> 我方胜（side 缺省 = 敌方守）", fails)
+	_expect(TurnFlow.check_one({"type": "survive", "rounds": 10, "side": 0}, v_units, 10)
+		== TurnFlow.ENEMY, "存活模式：side 显式指定时反转胜负方", fails)
+	v_hero.cell = Vector2i(4, 4)
+	_expect(TurnFlow.check(v_units,
+		{"type": "reach", "side": 0, "cells": [Vector2i(4, 4)]}, 0) == TurnFlow.PLAYER,
+		"抵达模式：我方站到目标格 -> 我方胜", fails)
+	v_hero.cell = Vector2i(9, 9)
+	_expect(TurnFlow.check(v_units,
+		{"type": "reach", "side": 0, "cells": [Vector2i(4, 4)]}, 0) == TurnFlow.NONE,
+		"抵达模式：没站到目标格 -> 没结束", fails)
+	_expect(TurnFlow.check(v_units, {"type": "king",
+		"also": [{"type": "survive", "rounds": 5}]}, 5) == TurnFlow.PLAYER,
+		"叠加条件：主条件没满足、附加条件满足也算分胜负", fails)
+	# 缺省值 & 各场景都显式声明（用户口径：各场景相互独立，不许靠隐式缺省）
+	_expect(String(Level.victory("__不存在的场景__").get("type", "")) == TurnFlow.TYPE_KING,
+		"未知场景取缺省 = 国王模式", fails)
+	var v_all_declared := true
+	for v_id in Level.ids():
+		var v_raw: Dictionary = Level.def(v_id)
+		if not v_raw.has("victory"):
+			v_all_declared = false
+			print("    场景 %s 没有声明 victory" % v_id)
+	_expect(v_all_declared, "每个场景都在元数据里显式声明了自己的 victory", fails)
 
 	# ── 汇总 ──
 	print("── 规则自检 ──")

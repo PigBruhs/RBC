@@ -70,6 +70,7 @@ tools\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path game --scrip
 | [`docs/规格.md`](docs/规格.md) | **记忆文档**，当前全部口径 |
 | [`bc_stat.md`](bc_stat.md) | 数值唯一来源（三张表：我方角色 / 敌方镜像+假人 / 可放置物） |
 | [`docs/baseline.md`](docs/baseline.md) | 验证基线（7 个入口的实测结果与命令） |
+| [`docs/level_campaign.md`](docs/level_campaign.md) | **场景元数据与胜负条件契约**：加场景 / 加胜负玩法的扩展指南 |
 | [`docs/heli_design.md`](docs/heli_design.md) | 俯冲轰炸直升机的可施工设计稿（已实现，保留作口径依据） |
 | [`docs/harness_godot_interaction.md`](docs/harness_godot_interaction.md) | AI × Godot 交互程度实测：我能独立做到哪、哪些必须你来 |
 
@@ -89,16 +90,29 @@ tools\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path game --scrip
 
 ## 代码现状与已知问题
 
-**核心层是健康的**：`game/src/core/` 21 个文件全部 `RefCounted`，零 `get_node()` / `get_parent()`，
+**核心层是健康的**：`game/src/core/` 全部 `RefCounted`，零 `get_node()` / `get_parent()`，
 `view → ai → core` 单向依赖成立，每个文件顶部都写了职责。三层伤害（`Rules` 公式 → `Combat` 唯一造伤入口 → `Damage` 范围结算）
 与三张行为表（`AttackProfile` 普攻 / `Skills` 技能 / `Passives` 被动）都是数据驱动 + 单一入口。
 
-**膨胀集中在视图层**：`game/src/view/battle_scene.gd` 一个类 **4587 行 / 239 个函数**
-（状态 + 搭场景 + UI + 输入 + 回合机 + 弹道结算 + 直升机 + 巡飞弹 + 哨兵）。
-`game/tools/playtest.gd`（3172 行）访问它的 **120 个私有成员**（1019 处引用），
-所以拆分必须先把这套耦合面收口 —— 方案见 [`docs/refactor_plan.md`](docs/refactor_plan.md)。
+**膨胀集中在视图层**，正在按 [`docs/refactor_plan.md`](docs/refactor_plan.md) 逐阶段拆。
+已完成的提取（都是"行为零变化"的纯搬迁，靠 565 项试玩链路 + 5 个探针守着）：
 
-其余已知项（死变量、重复实现、`_smoke` 旧原型残留等）也在那份方案里逐条分级。
+| 模块 | 行数 | 职责 | 状态 |
+|---|---|---|---|
+| `view/sentry_runner.gd` | 57 | 哨兵的**编排与表现**（数据与规则仍在 `core/game_master.gd`） | ✅ 已提取 |
+| `view/view_fx.gd` | 362 | 格子高亮 / 待确认标记 / 黄勾 / 落点环 / 闪光 | ✅ 已提取 |
+| `core/grid_math.gd` | 27 | 格中心与"单位现在在哪"的**唯一实现**（原来有两份逐字复制品） | ✅ 已提取 |
+| `view/battle_scene.gd` | **4316**（原 4587） | 其余全部（回合机 / 普攻 / 技能 / 弹道结算 / 直升机 / 巡飞弹 / UI / 输入） | ⏳ 还有 ~4 个模块待拆 |
+
+**给新克隆的第一个提醒**：新增了 `class_name` 之后，`.godot/global_script_class_cache.cfg` 需要重建，
+否则 `--script` 直跑会报 `Identifier "Xxx" not declared`。跑一次即可：
+
+```powershell
+tools\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path game --editor --quit-after 3000
+```
+
+其余已知项（死变量、`_fmt` 三份、身体半径常量 6 处、`tools/godot/_smoke/` 旧原型残留等）
+也在那份重构方案里逐条分级；**测试耦合面**（`playtest.gd` 上千处 `_s.xxx` 私有访问）是下一步要先收口的。
 
 ---
 

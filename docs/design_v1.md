@@ -169,7 +169,7 @@
 
 | 代价 | 缓解 |
 |---|---|
-| 本机环境**已完成** | Godot **4.7.2 绿色版** + Web 导出模板已装好；headless 测试、2.5D 截图、Web 导出**三步都已跑通**。环境不需要你再做任何事，你只要会用编辑器按 F5（见 `docs/godot_handbook.md`） |
+| 本机环境**已完成** | Godot **4.7.2 绿色版** + Web 导出模板已装好；headless 测试、2.5D 截图、Web 导出**三步都已跑通**。环境不需要你再做任何事，你只要会用编辑器按 F5 |
 | **Web 上只能用 Compatibility 渲染器**（Forward+ 与 Mobile 在 Web 均不可用，因为只支持 WebGL 2.0 且 Godot 无 WebGPU） | 画质方案按 Compatibility 能力表设计（见 ADR-3），不依赖 TAA/SSAO/贴花/体积雾等不可用特性 |
 | **iOS Safari OOM**：Godot 默认 `WASM_MEM_MAX=2048MB`，iOS 16.2 直接 OOM（官方 issue #70621 至今 open） | 编译降低 `WASM_MEM_MAX`（官方报告 256MB 可解），或 v1 明确"iOS 请用 Chrome/Firefox"；移动端列为"尽力支持"而非验收目标 |
 | GDScript 是动态类型，重构手感弱于 TypeScript | 关键数据用 `class_name` + 强类型标注 + `RefCounted` 资源类；规则层写单元测试兜底；GUT / gdUnit4 均为活跃框架可选 |

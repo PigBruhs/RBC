@@ -321,8 +321,9 @@ static func make_arrow(attacker: Unit, from: Vector3, to: Vector3, target: Unit,
 
 
 # ── 内部 ──────────────────────────────────────────────────────────────────────
+## 格中心换算：与 battle_scene._cc 是同一个式子，实现收敛到 core/grid_math.gd
 static func _cell_center(u: Unit) -> Vector2:
-	return Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
+	return GridMath.cell_center(u.cell)
 
 
 ## 加农炮弹（老国王）：箭矢类，直线快弹，不会被击落、不惊动哨兵，只吃 50% 力量。

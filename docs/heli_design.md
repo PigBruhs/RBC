@@ -275,19 +275,25 @@ const DIVE_RANGE := 20.0      # 选格上限（格）
 
 ### 2.4 分支：俯冲中受伤 → 触发被动「坠机」
 
-**触发判定（唯一入口，纯函数）**：
+> ⚠️ **第 97 轮口径变更**：阈值 **21（半血自毁）已删除**。现行实现是
+> `Level.HELI_DEFAULTS["crash_threshold"] = 0` —— **只有力量池归零（= 阵亡）才坠机**；
+> 实际判定在 `battle_scene._check_heli_crash(u)`，只在 `not u.is_alive()` 时为真
+> （**被一发打空也照样坠机**，第 89 轮）。下面这段是设计稿建议的纯函数形态，语义与上面一致。
+
+**触发判定（唯一入口）**：
 
 ```gdscript
+## 第 97 轮：0 = 力量池归零才坠机（不再有半血自毁）
 static func crash_threshold_milli() -> int:
-	return Rules.points_to_milli(21)               # 力量 < 21 → 坠机
+	return 0
 
 static func should_crash(u: Unit) -> bool:
-	return u != null and u.is_alive() and u.power_cur < crash_threshold_milli()
+	return u != null and not u.is_alive()          # 力量池归零（= 阵亡）
 ```
 
 **每一处会改到直升机力量的代码路径之后都要调它**（`take_power_damage` 之后、AOE 之后、
 被箭射中之后、被击落之后）——最省事的做法是在 `Unit.take_power_damage()` 里加一个
-`if heli != null and power_cur > 0 and power_cur < 21000: heli.mark_crashing(...)` 的钩子，
+`if heli != null and not u.is_alive(): heli.mark_crashing(...)` 的钩子，
 **但更推荐**由 `HeliState` 自己每帧检查：`if phase in (DIVING, DROPPING, RETURNING) and should_crash(u): enter_crashing()`。
 逐帧检查天然覆盖所有伤害来源，不会漏；代价是"触发到生效"最多晚 1 帧（16ms，肉眼不可见）。
 
@@ -532,7 +538,7 @@ static func respawn_turns(unit_name: String, id: String = "") -> int:
 		"crash_power": 20,          # 坠机力量
 		"crash_break": 40,          # 坠机破甲
 		"crash_res": 0.5,           # 坠机无视物抗比例（与现有炮弹同款）
-		"crash_threshold": 21,      # 力量 < 21 → 坠机
+		"crash_threshold": 0,       # 第 97 轮：0 = 力量池归零才坠机（旧值 21「半血自毁」已删除）
 		"fragments": 2,             # 火箭落地生成的破片数
 		"rockets": 8,               # 普攻一次投下的火箭数
 		"salvo_pairs": 4,           # 动画：一次两枚 ×4 次
@@ -557,7 +563,7 @@ const HELI_DEFAULTS := {
 	"move_mult": 2.0, "move_tiles": 40,
 	"dive_blast_r": 3.0, "dive_break": 40, "dive_power": 20,
 	"crash_r": 2.5, "crash_power": 20, "crash_break": 40,
-	"crash_res": 0.5, "crash_threshold": 21,
+	"crash_res": 0.5, "crash_threshold": 0,          # 0 = 力量池归零才坠机（第 97 轮）
 	"fragments": 2, "rockets": 8, "salvo_pairs": 4, "salvo_gap": 0.25,
 }
 
@@ -682,8 +688,8 @@ var o := Combat.opts({
 
 ### 5.3 普攻：吊射 37mm 火箭
 
-- **消耗 4 精力**；出不起就不能开火（`Unit.spend_energy(4)`；注意这推翻了
-  "精力只用于技能"的 UI 文案，左上角那行字要删）。
+- **消耗 4 精力**；出不起就不能开火（`Unit.spend_energy(4)`；注意这推翻了左上角那行
+  "精力只能用于技能"的旧文案，**那行字已删**）。
 - **瞄准同投掷手，结果翻倍**：`_aim_range(t) = 6 + (40 − 6)·t²`
   （即 `2 × (3 + 17·t²)`），同样的拖拽力度 → 落点距离翻倍。
   落点解算沿用 `_planned_cell` / `_aim_float_pos` 的同一套代码，只换曲线常量。
@@ -774,7 +780,7 @@ for k in 2:
 | 2 | `Unit.heli` + `HeliState`（Phase 枚举 + 每帧 `tick(u, dt, cfg)`） | 状态迁移表逐条断言；`dived_leg = 0` 不除零；到位判定不过冲 |
 | 3 | `Projectile.KIND_ROCKET` + `Ordnance.make_rocket` | 匀速弹种行为逐位不变（回归）；火箭 `dur == t_of_s(dist)`；`speed_profile` 分支 |
 | 4 | 普攻 8 发 + 4 波 ×250ms + 2 枚破片 | 8 个落点全在半径 4 内、两两 ≥ 0.6 格；`pre` 序列 = 0/0.25/0.5/0.75；扣 4 精力；`group` 全清才结束回合 |
-| 5 | 坠机被动 + AOE | 力量 20 阈值边界（21000 → 20000 触发、21000 不触发）；AOE `power=20000`/`armor_break=40000`/`ignore_res=0.5`；先造伤后死亡；直线撞地 |
+| 5 | 坠机被动 + AOE | 触发边界（0 → 触发、21000 → 不触发；第 97 轮已删除 21 点阈值）；AOE `power=20000`/`armor_break=40000`/`ignore_res=0.5`；先造伤后死亡；直线撞地 |
 | 6 | 俯冲主动技 + `Level.heli` 元数据 | 选 21 格外被拒；`ready` 持续一个回合；投弹 40/20、半径 3、`sentry_trigger=false`；`returning` 回原格 |
 | 7 | AI 接口 + 弓箭手哨兵 | §3.4 的三条断言；无直升机时 `Ai.plan()` 结果与改动前逐字段一致（回归） |
 | 8 | 重生 25 回合 | `Level.respawn_turns`（含 `(E)` 全名兜底）== 25；`field` 关卡缺省 == 10；`gm.turn_count` 走满 25 才 `due_revives()` |

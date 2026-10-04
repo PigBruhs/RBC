@@ -1847,7 +1847,7 @@ func _initialize() -> void:
 	var y1: float = heli.visual.position.y
 	print("    悬浮高度：起始 %.3f -> 1.4 秒后 %.3f" % [y0, y1])
 	_chk(absf(y0 - 2.0) < 0.01 and absf(y1 - 2.0) < 0.01, "悬浮高度必须稳定在 2 格（不受重力影响）")
-	# 坠机：把力量压到阈值以下，打它一下 -> 触发坠机 + 2.5 格炮击 + 死亡
+	# 坠机：把力量打空（第 97 轮：只有力量归零才坠机，不再有"半血自毁"）
 	_s.clear_projectiles()
 	var victim_near: Unit = null
 	for u in _s.units:
@@ -1856,10 +1856,14 @@ func _initialize() -> void:
 	victim_near.power_cur = victim_near.power_max
 	victim_near.armor_cur = victim_near.armor_max
 	heli.power_cur = 15 * 1000
+	# 先确认"还剩 15 点力量"不坠机（第 97 轮删掉的那条半血自毁规则）
+	_s._check_heli_crash(heli)
+	_chk(not heli.tags.has("crashing"), "力量还剩 15 点【不】坠机（第 97 轮：删掉半血自毁）")
+	heli.power_cur = 0
 	var hp_crash: int = victim_near.power_cur
 	_s._check_heli_crash(heli)
 	print("    坠机触发：crashing=%s" % heli.tags.has("crashing"))
-	_chk(heli.tags.has("crashing"), "力量低于 21 应进入坠机")
+	_chk(heli.tags.has("crashing"), "力量归零应进入坠机")
 	await create_timer(0.7).timeout
 	print("    坠机后：直升机 alive=%s ｜ 邻居力量 %d -> %d" % [
 		heli.is_alive(), hp_crash / 1000, victim_near.power_cur / 1000])
@@ -1957,7 +1961,7 @@ func _initialize() -> void:
 	_chk((_s._salvo_dbg.get("spawns", []) as Array).size() == int(Level.heli()["salvo_pairs"]),
 		"8 次齐射全部出膛（第 93 轮：4 -> 8）")
 	_chk(_s.active != he2, "发射完即进入下一回合（无需等待落地）")
-	# 坠机：走"受伤"这条真实路径
+	# 坠机：走"受伤"这条真实路径（第 97 轮：力量归零才坠机）
 	_s.clear_projectiles()
 	he2.power_cur = 15 * 1000
 	he2.tags.erase("crashing")
@@ -1968,8 +1972,11 @@ func _initialize() -> void:
 	nb.power_cur = nb.power_max
 	var nb0: int = nb.power_cur
 	_s._after_damage_to_unit(he2)
+	_chk(not he2.tags.has("crashing"), "还剩 15 点力量：受伤路径也【不】坠机（第 97 轮）")
+	he2.power_cur = 0
+	_s._after_damage_to_unit(he2)
 	print("    受伤路径：crashing=%s" % he2.tags.has("crashing"))
-	_chk(he2.tags.has("crashing"), "力量低于 21 后【受伤】必须触发坠机（真实路径）")
+	_chk(he2.tags.has("crashing"), "力量归零后【受伤】必须触发坠机（真实路径）")
 	await create_timer(0.7).timeout
 	print("    坠机结果：alive=%s ｜ 邻居力量 %d -> %d ｜ 重生倒计时 %d" % [
 		he2.is_alive(), nb0 / 1000, nb.power_cur / 1000, _s.gm.revive_countdown(he2)])
@@ -2326,12 +2333,12 @@ func _initialize() -> void:
 	bud_p.visual.position = Vector3(13.5, 0.0, 13.5)
 	bud_e.cell = Vector2i(11, 10)          # 敌方友军：也要吃（不分敌我）
 	bud_e.visual.position = Vector3(11.5, 0.0, 11.5)
-	he_c.power_cur = 15 * 1000             # 低于阈值 21
+	he_c.power_cur = 0                     # 力量归零（第 97 轮：只有归零才坠机）
 	var hp_p0: int = bud_p.power_cur
 	var hp_e0: int = bud_e.power_cur
 	_s._after_damage_to_unit(he_c)          # 真实受伤路径 -> 坠机
 	print("    触发坠机：crashing=%s" % he_c.tags.has("crashing"))
-	_chk(he_c.tags.has("crashing"), "敌方直升机力量低于阈值 -> 坠机（走受伤主路径）")
+	_chk(he_c.tags.has("crashing"), "敌方直升机力量归零 -> 坠机（走受伤主路径）")
 	await create_timer(0.8).timeout
 	print("    落地后：直升机 alive=%s ｜ 我方 %d -> %d ｜ 敌方 %d -> %d" % [
 		he_c.is_alive(), hp_p0 / 1000, bud_p.power_cur / 1000, hp_e0 / 1000, bud_e.power_cur / 1000])

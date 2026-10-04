@@ -75,6 +75,10 @@ var _camera: Camera3D
 
 var _hint_layer: Node3D
 
+## 表现层模块（格子高亮 / 待确认标记 / 落点红圈 / 闪光，见 view/view_fx.gd）。
+## 节点由它创建、宿主只持有引用；下面这些 _xxx 在 playtest / probe 里被直接读，名字不能改。
+var fx: ViewFx = null
+
 var _zoom: float = 15.0
 
 var _cam_focus: Vector3 = Vector3.ZERO      # 相机注视的地面点（WASD 平移）
@@ -102,8 +106,6 @@ var _head: MeshInstance3D
 var _projectile: MeshInstance3D
 
 var _impact_ring: MeshInstance3D
-
-var _impact_tw: Tween = null                  # 红圈淡出动画（重开时必须 kill 掉旧的）
 
 var _planned_cell := Vector2i(-1, -1)
 
@@ -137,15 +139,7 @@ const DEBUG_LOG_MAX := 300
 
 var _debug_log: Array[String] = []
 
-# 彩色流动（待确认可视化）
-
-var _cycle_time: float = 0.0
-
-var _pending_marks: Array = []            # [PendingMark]
-
-var _pending_actor: Unit = null           # 待确认时被染色的角色
-
-var _pending_actor_on: bool = false
+# 待确认状态机（可视化在 ViewFx：_pending_root / _pending_mats / 黄勾）
 
 var _pending_kind: String = ""            # 待确认操作类型
 
@@ -192,6 +186,9 @@ var _result_sub: Label = null
 ## 哨兵射界高亮（蓝色描边），一个哨兵一个节点
 var sentry_range: SentryRange = null
 
+## 哨兵编排模块（组合而非继承）：队列 tick / 放箭 / 进界锁定都转发给它
+var sentry: SentryRunner = null
+
 var _revive_timers: Dictionary = {}           # Unit -> SceneTreeTimer（同一单位只保留一个）
 
 var uid_dead: Dictionary = {}                 # Unit -> true（已经播报过阵亡，防止重复）
@@ -213,8 +210,6 @@ var _pending_root: Node3D = null
 
 var _pending_mats: Array = []
 
-var _pulse_t: float = 0.0
-
 ## 待确认的黄勾（3D，永远正对摄像机；只画描边不填充格子）
 var _check_root: Node3D = null
 
@@ -229,7 +224,7 @@ var arrow_qte: ArrowQTE = null
 var _pending_turn_end := false            # QTE 期间攒下的"该结束回合了"
 var _ai_turn := false                     # 正在跑 AI 回合（不弹菜单、不锁操作）
 const KING_FIRE_TURNS := 5                # 老国王每 5 个回合边界开一炮（GM 计时）
-const SENTRY_AIM_BALL_R := 2.0           # 哨兵瞄准球半径（用户口径第 93 轮：1 格 -> 2 格）
+const SENTRY_AIM_BALL_R := SentryRunner.AIM_BALL_R   # 真值在 SentryRunner（避免两份半径）
 const HELI_PREFIX := AttackProfile.HELI_PREFIX   # 悬浮 + 火箭齐射 + 坠机/俯冲都按这个名字前缀识别
 # 三连发的发数与间隔、谁用近战/弓箭/投掷，全部来自 AttackProfile（见 core/attack_profile.gd）
 var game_over := false                    # 分出胜负了（自动演算用）
@@ -246,15 +241,6 @@ const CARPET_BLAST_R := 1.0          # 地毯式轰炸的爆炸半径 = 轨道�
 
 ## 相机相关：WASD 平移 / 滚轮缩放 / QE 高度
 ## 处理相机输入，同时把日志刷进 Debug 面板（每帧最多刷一次）
-
-class PendingMark extends RefCounted:
-	var fill: MeshInstance3D
-	var edge: MeshInstance3D
-	var phase: float = 0.0
-
-
-## 造一个"彩色流动"的格子高亮：里面半透明填充 + 一圈亮描边。
-## 用户要求：等待确认时不用图标，改用颜色连续渐变，并且**高亮边缘**。
 
 const DBG_FIELDS := [
 ["power_max", "力量", 0, 99999, false],
@@ -396,24 +382,12 @@ func _build_aim_helpers() -> void:
 	_projectile.visible = false
 	add_child(_projectile)
 
-	# 落点范围圈（落地后才出现，表示 impact 范围）
-	_impact_ring = MeshInstance3D.new()
-	var disc := CylinderMesh.new()
+	# 落点范围圈（落地后才出现，表示 impact 范围）：节点由表现层 ViewFx 造，宿主挂上并持有引用
 	# 半径与命中判定完全一致（BLAST_RADIUS），所以"红圈沾到格子 = 命中"是真的
-	disc.top_radius = BLAST_RADIUS
-	disc.bottom_radius = BLAST_RADIUS
-	disc.height = 0.04
-	_impact_ring.mesh = disc
-	var im := StandardMaterial3D.new()
-	im.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	im.albedo_color = Color(1.0, 0.22, 0.20, 0.45)
-	im.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_impact_ring.material_override = im
-	_impact_ring.visible = false
+	_impact_ring = fx.make_impact_ring_node(BLAST_RADIUS)
 	add_child(_impact_ring)
 
-	_hint_layer = Node3D.new()
-	_hint_layer.name = "Hints"
+	_hint_layer = fx.make_hint_layer_node()
 	add_child(_hint_layer)
 
 ## 二级菜单绑定到角色：放在该角色屏幕位置的右下方。
@@ -721,6 +695,8 @@ func _ready() -> void:
 	sentry_range.grid_h = PH
 	sentry_range.grid_x0 = PX
 	sentry_range.grid_y0 = PY
+	sentry = SentryRunner.new(self)      # 哨兵编排模块（宿主 = 本场景）
+	fx = ViewFx.new(self)                # 表现层模块（高亮/待确认标记/落点环/闪光）
 	_build_env()
 	_build_terrain()
 	_build_camera()
@@ -1198,31 +1174,13 @@ func _orbital_shell_incoming(pos: Vector2) -> void:
 		_flash_impact(ring)
 		)
 
+## ↓ 实现已搬到 view/view_fx.gd（保留同名薄包装：playtest / probe / 反射仍从本类调它）
 func _make_impact_ring(pos: Vector2, radius: float) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var disc := CylinderMesh.new()
-	disc.top_radius = radius
-	disc.bottom_radius = radius
-	disc.height = 0.04
-	mi.mesh = disc
-	mi.position = Vector3(pos.x, 0.05, pos.y)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(1.0, 0.20, 0.18, 0.5)
-	mi.material_override = m
-	add_child(mi)
-	return mi
+	return fx.make_impact_ring(pos, radius)
+
 
 func _flash_impact(ring: MeshInstance3D) -> void:
-	if not is_instance_valid(ring):
-		return
-	var m := ring.material_override as StandardMaterial3D
-	var tw := create_tween()
-	tw.tween_property(m, "albedo_color:a", 0.0, 1.1)
-	tw.tween_callback(func() -> void:
-		if is_instance_valid(ring):
-			ring.queue_free())
+	fx.flash_impact(ring)
 
 
 ## 场上现有的"落点红圈"数量（自检/试玩用）。
@@ -1756,10 +1714,15 @@ func _queue_alternation_ok() -> bool:
 	return true
 
 func _check_over() -> bool:
-	# 胜负判定在 TurnFlow（只统计英雄，假人不算战力）
-	var w := TurnFlow.winner(units)
+	# 胜负判定是纯函数，规则**来自本场景的元数据** `Level.victory()`（用户口径第 97 轮：
+	# 不同场景的胜负条件相互独立）。缺省 = 一方老国王阵亡。
+	# 判定细节见 `core/turn_flow.gd` 顶部与 `docs/level_campaign.md`；加场景/加玩法都不用改这里。
+	var cfg := Level.victory()
+	var w := TurnFlow.check(units, cfg, gm.turn_count)
 	if w == TurnFlow.NONE:
 		return false
+	_log("  ⚑ 战斗结束：%s（%s）" % [
+		"我方胜" if w == TurnFlow.PLAYER else "敌方胜", TurnFlow.reason_text(cfg, w)])
 	_show_result(w == TurnFlow.PLAYER)
 	return true
 
@@ -2487,41 +2450,13 @@ func _spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
 
 
 ## 球状闪光（用户口径：只要球状闪光，不要红圈）
-## 一次性的发光球体：迅速膨胀 + 淡出，播完自己销毁。
+## ★ 实现在 view/view_fx.gd；_last_flash 留在本类（playtest 直接读它，见 playtest.gd:1816）
 var _last_flash: Node3D = null
 
 
+## ↓ 实现已搬到 view/view_fx.gd（保留同名薄包装）
 func _flash_sphere(center: Vector3, radius: float = 1.5, life: float = 0.38) -> void:
-	var mi := MeshInstance3D.new()
-	var sp := SphereMesh.new()
-	sp.radius = 1.0
-	sp.height = 2.0
-	sp.radial_segments = 20
-	sp.rings = 12
-	mi.mesh = sp
-	mi.position = center
-	mi.scale = Vector3.ONE * (radius * 0.28)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD          # 叠加发光，不是红圈那种贴地圆盘
-	m.albedo_color = Color(1.0, 0.86, 0.45, 0.85)
-	m.emission_enabled = true
-	m.emission = Color(1.0, 0.80, 0.35)
-	m.emission_energy_multiplier = 3.0
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.material_override = m
-	add_child(mi)
-	_last_flash = mi
-	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(mi, "scale", Vector3.ONE * radius, life * 0.45)
-	tw.tween_property(m, "albedo_color", Color(1.0, 0.9, 0.6, 0.0), life)
-	tw.tween_property(m, "emission_energy_multiplier", 0.0, life)
-	tw.set_parallel(false)
-	tw.tween_callback(func() -> void:
-		if is_instance_valid(mi):
-			mi.queue_free())
+	fx.flash_sphere(center, radius, life)
 
 
 ## 爆炸：向 8 个方向各射出一枚破片（不分敌我，会伤到自己人）
@@ -2695,26 +2630,15 @@ func _on_arrow_qte_done(ok: bool, victim: Unit, sh: Ordnance.Shot, bonus_milli: 
 ##
 ## 一次一支、轮流瞄准：队头是谁就打谁此刻的位置，打完轮到队尾；
 ## 队头已经消失或飞出射界就剔除，接着看下一个。规则全在 GameMaster.sentry_tick 里。
+## 实现已搬到 src/view/sentry_runner.gd；下面两个是**同名薄包装**（测试直接调它们）。
 
 func _tick_sentry_queue(delta: float) -> void:
-	for sh in gm.sentry_tick(delta):
-		_sentry_fire(sh)
+	sentry.tick(delta)
 
 
 ## 放出一支哨兵箭（GM 的队列决定什么时候、打哪里）
 func _sentry_fire(sh: GameMaster.Shot) -> void:
-	var a: Unit = sh.sentry.owner
-	if a == null or not a.is_alive():
-		return
-	# 用户口径：不再瞄准对象当前位置，而是【以它当前位置为球心、半径 1 格的球内随机一点】
-	# 用户口径：拦弹道物也吃同一套散布 —— 炮弹有速度，随机性正好允许"提前量"出现，多抽几次总有一次是对的
-	var j := Spread.ball_offset(SENTRY_AIM_BALL_R, rng)
-	# 高度轴（第 83 轮）：瞄悬空单位要抬到它的身体中心；拦弹道物则瞄它当前飞行高度
-	var aim := Vector3(sh.at.x + j.x, sh.y + j.y * 0.5, sh.at.y + j.z)
-	_log("  🎯 哨兵射击（%s）：%s 实际位置 (%.2f, %.2f) → 瞄准 (%.2f, %.2f)｜队列剩余 %d" %
-		[sh.reason, sh.target_name, sh.at.x, sh.at.y, aim.x, aim.z, gm.sentry_queue_size()])
-	_spawn_arrow(a, Vector3(float(a.cell.x) + 0.5, 0.75, float(a.cell.y) + 0.5),
-		aim, null, false, false, true)
+	sentry.fire(sh)
 
 
 ## ── 箭矢（远程普攻 / 哨兵共用）──────────────────────────────────────────────
@@ -2800,10 +2724,12 @@ func _start_carpet_bomb(caster: Unit, center: Vector2) -> void:
 
 ## 角色挨打后的统一收尾：闪白、刷新指示器、判定阵亡
 
-## 用户口径：直升机力量低于阈值 -> 坠机（加速下坠 -> 2.5 格炮击 -> 死亡）
-## 第 89 轮修正：**就算这一下直接把它打死，也要走坠机的死亡附加伤害**。
-## 以前这里要求 is_alive()，于是"被炮弹一发打空"的直升机直接阵亡、不炸 ——
-## 而"打到剩 20 血"的反而会炸，用户看到的就是"偶尔才有效果"。
+## 【坠机】被动：直升机的力量池**归零**时才坠机（加速下坠 -> 2.5 格炮击 -> 死亡）。
+##
+## 用户口径（第 97 轮）：**删掉"半血自毁"** —— 以前 `crash_threshold = 21`（力量低于 21 就坠机），
+## 于是直升机还剩 20 点力量时就会自己炸掉。现在阈值 = 0：只有力量池真的被打空（= 阵亡）才坠机。
+## 第 89 轮的口径不变：**就算这一下直接把它打空，也要走坠机的死亡附加伤害**。
+## 所以这里只看 `is_alive()`（= `power_cur > 0`），不能像以前那样要求"还活着"再另判阈值。
 func _check_heli_crash(u: Unit) -> bool:
 	if u == null:
 		return false
@@ -2811,21 +2737,19 @@ func _check_heli_crash(u: Unit) -> bool:
 		return false
 	if u.tags.has("crashing"):
 		return false
-	var cfg := Level.heli()
-	if u.power_cur >= int(cfg["crash_threshold"]) * 1000:
-		return false
+	if u.is_alive():
+		return false                      # 力量池还有剩 -> 不坠机
 	_start_crash(u)
 	return true
 
 
 func _start_crash(u: Unit) -> void:
-	var cfg := Level.heli()
 	u.tags["crashing"] = true
 	u.tags.erase("diving")
 	u.tags.erase("dive_ready")
 	u.body_y = -1.0                 # 坠机 = 从悬停高度往下掉
 	_dive_clear(u)
-	_log("  💥 %s 力量低于 %d —— 坠机！" % [u.name, int(cfg["crash_threshold"])])
+	_log("  💥 %s 力量归零 —— 坠机！" % u.name)
 	var from_h: float = u.visual.position.y if u.visual != null else u.hover
 	var tw := create_tween()
 	tw.tween_property(u.visual, "position:y", 0.0, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -3307,19 +3231,9 @@ func _sync_unit_visibility() -> void:
 
 
 ## 落地后的 red circle：标出 impact 范围（浮点落点，用户口径）
-
+## ↓ 实现已搬到 view/view_fx.gd（_impact_tw 这个淡出动画的句柄也一并搬过去了）
 func _show_impact(center: Vector2, y: float = 0.05) -> void:
-	_impact_ring.position = Vector3(center.x, y, center.y)
-	_impact_ring.visible = true
-	var im := _impact_ring.material_override as StandardMaterial3D
-	im.albedo_color = Color(1.0, 0.22, 0.20, 0.45)
-	# 关键：先把上一次没跑完的淡出动画杀掉，否则它会在这一帧把红圈又藏起来
-	if _impact_tw != null and _impact_tw.is_valid():
-		_impact_tw.kill()
-	var t := create_tween()
-	_impact_tw = t
-	t.tween_property(im, "albedo_color:a", 0.0, 1.2)
-	t.tween_callback(func() -> void: _impact_ring.visible = false)
+	fx.show_impact(center, y)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3335,19 +3249,16 @@ func _show_impact(center: Vector2, y: float = 0.05) -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 
 ## 格子中心（浮点）：落点统一用它，避免各入口各写一份 +0.5
+## 实现唯一一份在 core/grid_math.gd（Ordnance._cell_center 也曾是它的复制品）
 static func _cc(c: Vector2i) -> Vector2:
-	return Vector2(float(c.x) + 0.5, float(c.y) + 0.5)
+	return GridMath.cell_center(c)
 
 
 ## 单位"现在在哪"（浮点格坐标）。**走路中的角色要用视觉位置** ——
 ## 逻辑格子（u.cell）在移动发起时就瞬移到终点了，视觉位置才是它当下真正所在的地方
 ## （用户口径第 83 轮：直升机边走边打时，火箭必须从"当前位置"出膛）。
 static func _unit_pos(u: Unit) -> Vector2:
-	if u == null:
-		return Vector2.ZERO
-	if u.visual != null:
-		return Vector2(u.visual.position.x, u.visual.position.z)
-	return _cc(u.cell)
+	return GridMath.unit_pos(u)
 
 
 ## 【唯一】普攻入口。返回 false = 这一击没打出去（精力不够 / 目标非法）。
@@ -3805,7 +3716,7 @@ func _do_move(u: Unit, cell: Vector2i) -> void:
 	u.has_moved = true
 	if u.visual == null or path.size() <= 1:
 		# 没有走路动画（无头测试 / 原地）：直接按终点判定哨兵
-		_sentry_lock(u, Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5))
+		sentry.lock(u, Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5))
 	reachable = _compute_reachable(u)      # 已移动 -> 空集合，不能再动
 	# 移动后重开菜单：此时"休息"会被禁用（移动过不能休息）
 	_show_action_menu()
@@ -3826,13 +3737,13 @@ func _tick_unit_walk(_delta: float) -> void:
 		var vis := u.visual as UnitVisual
 		if vis == null or not vis.is_walking():
 			continue
-		_sentry_lock(u, Vector2(vis.position.x, vis.position.z))
+		sentry.lock(u, Vector2(vis.position.x, vis.position.z))
 
 
 ## 角色进入射界 -> 入队尾（真的射箭由 150ms 节奏的队列决定，不再"立刻一发"）
+## 薄包装：实现已搬到 src/view/sentry_runner.gd（测试直接调它）
 func _sentry_lock(u: Unit, pos: Vector2) -> void:
-	if gm.check_unit(u, pos):
-		_log("  🎯 哨兵锁定：%s 进入射界（队列 %d）" % [u.name, gm.sentry_queue_size()])
+	sentry.lock(u, pos)
 
 
 ## BFS 求一条从当前格到目标格的路径（4 邻格，避开其他单位与阻挡移动的道具）
@@ -3938,152 +3849,38 @@ func _compute_reachable(u: Unit) -> Dictionary:
 # 高亮
 # ══════════════════════════════════════════════════════════════════════════════
 
+## ↓ 以下高亮相关实现全部搬到 view/view_fx.gd，这里只保留同名薄包装
+##   （playtest / probe_v14 有上千处 _s.xxx 私有访问，名字必须保留）
 func _clear_hints() -> void:
-	if _hint_layer == null:
-		return
-	for c in _hint_layer.get_children():
-		c.queue_free()
-	# 高亮重建后，旧的 PendingMark 引用就失效了，必须一起清掉
-	# （否则下一帧 _tick_color_cycle 会去改已释放节点的材质）
-	_pending_marks.clear()
+	fx.clear_hints()
 
 
-## 待确认高亮的一个格子：填充 + 更显眼的描边（都用流动彩色）
-
-func _pending_cell_mark(cell: Vector2i, phase: float) -> void:
-	var mk := PendingMark.new()
-	mk.phase = phase
-	var cx := float(cell.x) + 0.5
-	var cz := float(cell.y) + 0.5
-
-	# ① 填充（半透明，别挡住底下的东西）
-	var fm := MeshInstance3D.new()
-	var fq := BoxMesh.new()
-	fq.size = Vector3(0.84, 0.02, 0.84)
-	fm.mesh = fq
-	fm.position = Vector3(cx, 0.03, cz)
-	fm.material_override = _cycle_mat()
-	_hint_layer.add_child(fm)
-	mk.fill = fm
-
-	# ② 边缘：四条亮线（用 ImmediateMesh 画线框，比一块板子更像"描边"）
-	var em := MeshInstance3D.new()
-	var emesh := ImmediateMesh.new()
-	emesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	var y := 0.07
-	var h := 0.45
-	var pts := [
-		Vector3(cx - h, y, cz - h), Vector3(cx + h, y, cz - h),
-		Vector3(cx + h, y, cz - h), Vector3(cx + h, y, cz + h),
-		Vector3(cx + h, y, cz + h), Vector3(cx - h, y, cz + h),
-		Vector3(cx - h, y, cz + h), Vector3(cx - h, y, cz - h),
-	]
-	for i in range(0, pts.size(), 2):
-		emesh.surface_add_vertex(pts[i])
-		emesh.surface_add_vertex(pts[i + 1])
-	emesh.surface_end()
-	em.mesh = emesh
-	em.material_override = _cycle_mat()
-	_hint_layer.add_child(em)
-	mk.edge = em
-	_pending_marks.append(mk)
-
+## 注：原 _pending_cell_mark() 全仓零引用（死代码），随本次搬迁一并删除；
+## 它用到的 PendingMark / _cycle_mat 仍留在 ViewFx（彩色流动机制的备用件）。
 func _cycle_mat() -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(1, 1, 1, 0.5)
-	return m
+	return fx.cycle_mat()
 
 
 ## 每帧推进所有"待确认"高亮的颜色：hue 随时间匀速增长 -> 连续渐变
 
 func _tick_color_cycle(delta: float) -> void:
-	_cycle_time += delta
-	for mk in _pending_marks:
-		(mk.fill.material_override as StandardMaterial3D).albedo_color = \
-			ColorCycle.fill_at(_cycle_time, mk.phase, 0.40)
-		(mk.edge.material_override as StandardMaterial3D).albedo_color = \
-			ColorCycle.edge_at(_cycle_time, mk.phase, 1.0)
-	# 被操作的角色（正在移动的人 / 待确认攻击的目标）：脚下环同步变色
-	if _pending_actor_on and _pending_actor != null and _pending_actor.visual != null:
-		var v := _pending_actor.visual as UnitVisual
-		v.set_cycle_ring(ColorCycle.edge_at(_cycle_time, 0.0, 0.95))
+	fx.tick_color_cycle(delta)
 
 
 ## 设定"待确认"时要染色的角色（可为 null 取消）
 
 func _set_pending_actor(u: Unit) -> void:
-	if _pending_actor != null and _pending_actor.visual != null \
-			and _pending_actor != u:
-		(_pending_actor.visual as UnitVisual).set_cycle_ring(null)
-	_pending_actor = u
-	_pending_actor_on = u != null
-	if u != null and u.visual != null:
-		(u.visual as UnitVisual).set_cycle_ring(ColorCycle.edge_at(_cycle_time, 0.0, 0.95))
+	fx.set_pending_actor(u)
 
 func _draw_hints() -> void:
-	_clear_hints()
-	# 放置阶段：鼠标悬停格显示绿色/红色占位框
-	if phase == Phase.PLACE and _place_kind != "":
-		var hc: Variant = _hover_cell()
-		if hc != null:
-			var hcv: Vector2i = hc
-			_hint_cell(hcv, Color(0.30, 1.00, 0.45, 0.42) if _can_place_at(hcv)
-				else Color(1.00, 0.25, 0.25, 0.42))
-	# 可移动格：只有在"有单位被选定"且处于菜单阶段才显示（蜘蛛绿）
-	if (phase == Phase.MENU or phase == Phase.MOVE_CONFIRM) \
-			and selected != null and selected == active:
-		for cell in reachable.keys():
-			_hint_cell(cell, Color(0.22, 0.62, 0.20, 0.34))
-	# 可攻击范围（紫色）
-	for cell in attackable.keys():
-		_hint_cell(cell, Color(0.62, 0.28, 0.92, 0.38))
-	# 点格子类技能的可选格（粉色，用户口径第 84 轮）
-	for cell in cell_targets.keys():
-		_hint_cell(cell, Color(1.00, 0.36, 0.82, 0.40))
-	# ── 待确认：用"常驻的一根脉冲灯柱 + 橙色描边格"表示 ──
-	# 之前的彩色流动方案依赖每帧重建 mesh，实测看不见；改成常驻节点 + 直接改材质色。
-	_update_pending_visual()
+	fx.draw_hints()
 
 
 ## 待确认可视化：一个常驻的橙色方框 + 一根上下脉动的光柱。
 ## 只创建一次，之后每帧只改颜色/缩放，避免"重建导致看不见"。
 
 func _update_pending_visual() -> void:
-	var on: bool = _pending_kind != "" and _pending_cell.x >= 0
-	if _pending_root == null:
-		_pending_root = Node3D.new()
-		_pending_root.name = "PendingMark"
-		add_child(_pending_root)
-		# 方框：四根细柱围成一圈
-		_pending_mats.clear()
-		for seg in [
-			[Vector3(-0.45, 0, -0.45), Vector3(0.45, 0, -0.45)],
-			[Vector3(0.45, 0, -0.45), Vector3(0.45, 0, 0.45)],
-			[Vector3(0.45, 0, 0.45), Vector3(-0.45, 0, 0.45)],
-			[Vector3(-0.45, 0, 0.45), Vector3(-0.45, 0, -0.45)],
-		]:
-			var mi := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			var a: Vector3 = seg[0]
-			var b: Vector3 = seg[1]
-			bm.size = Vector3(0.10, 0.10, a.distance_to(b) + 0.10)
-			mi.mesh = bm
-			mi.position = (a + b) * 0.5 + Vector3(0, 0.07, 0)
-			mi.rotation.y = atan2(b.x - a.x, b.z - a.z)
-			var m := StandardMaterial3D.new()
-			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			mi.material_override = m
-			_pending_root.add_child(mi)
-			_pending_mats.append(m)
-		# 黄勾取代了旧的光柱：两根竖线叠在一起会看成"叉"，用户要的就是一个勾
-		_build_check_mark()
-	if not on or _pending_cell.x < 0:
-		_pending_root.visible = false
-		return
-	_pending_root.visible = true
-	_pending_root.position = Vector3(float(_pending_cell.x) + 0.5, 0.0, float(_pending_cell.y) + 0.5)
+	fx.update_pending_visual()
 
 
 ## 待确认的【黄勾】：两段笔画（短 + 长）组成的 ✓，外加一圈加法混合的柔光。
@@ -4091,69 +3888,18 @@ func _update_pending_visual() -> void:
 ## 只画勾，不填充格子；格子本身的橙框仍然由 _pending_mats 负责。
 
 func _build_check_mark() -> void:
-	_check_root = Node3D.new()
-	_check_root.name = "CheckMark"
-	_pending_root.add_child(_check_root)
-	_check_mats.clear()
-	var strokes := [
-		[Vector2(-0.22, 0.05), Vector2(-0.06, -0.13)],     # 短笔画
-		[Vector2(-0.06, -0.13), Vector2(0.27, 0.25)],      # 长笔画
-	]
-	# wide = 柔光层（加法混合、更粗更淡）；否则是亮芯
-	for wide in [true, false]:
-		for st in strokes:
-			var a: Vector2 = st[0]
-			var b: Vector2 = st[1]
-			var th: float = 0.17 if wide else 0.075
-			var mi := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			bm.size = Vector3(a.distance_to(b) + th * 0.8, th, 0.05)
-			mi.mesh = bm
-			mi.position = Vector3((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, 0.0)
-			mi.rotation.z = atan2(b.y - a.y, b.x - a.x)
-			var m := StandardMaterial3D.new()
-			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			m.cull_mode = BaseMaterial3D.CULL_DISABLED
-			m.no_depth_test = true                    # 别被格子/单位挡掉
-			if wide:
-				m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-				m.albedo_color = Color(1.0, 0.82, 0.18, 0.28)
-			else:
-				m.albedo_color = Color(1.0, 0.92, 0.30, 1.0)
-			mi.material_override = m
-			_check_root.add_child(mi)
-			_check_mats.append(m)
+	fx.build_check_mark()
 
 
 ## 黄勾朝向：永远和屏幕平行（正对摄像机），并且轻轻呼吸
 func _face_check_mark() -> void:
-	if _check_root == null or _camera == null or _pending_root == null:
-		return
-	var k: float = 0.5 + 0.5 * sin(_pulse_t * 6.0)
-	var t := _check_root.global_transform
-	t.basis = _camera.global_transform.basis.scaled(Vector3.ONE * (1.35 + 0.14 * k))
-	t.origin = _pending_root.global_position + Vector3(0.0, 1.05 + 0.07 * k, 0.0)
-	_check_root.global_transform = t
+	fx.face_check_mark()
 
 
 ## 每帧让待确认标记呼吸：格子橙框在橙<->黄之间脉动，黄勾同步呼吸并保持正对摄像机
 
 func _tick_pending_pulse(delta: float) -> void:
-	if _pending_root == null or not _pending_root.visible:
-		return
-	_pulse_t += delta
-	var k: float = 0.5 + 0.5 * sin(_pulse_t * 6.0)
-	var col := Color(1.0, 0.45 + 0.45 * k, 0.10, 0.85 + 0.15 * k)
-	for m in _pending_mats:
-		m.albedo_color = col
-	for m in _check_mats:
-		var mc: StandardMaterial3D = m
-		if mc.blend_mode == BaseMaterial3D.BLEND_MODE_ADD:
-			mc.albedo_color = Color(1.0, 0.82, 0.18, 0.20 + 0.18 * k)
-		else:
-			mc.albedo_color = Color(1.0, 0.88 + 0.10 * k, 0.24 + 0.18 * k, 1.0)
-	_face_check_mark()
+	fx.tick_pending_pulse(delta)
 
 
 ## 鼠标当前指向的格子（无有效指向返回 null）
@@ -4174,23 +3920,11 @@ func _hover_cell() -> Variant:
 	return c
 
 func _hint_cell(cell: Vector2i, col: Color) -> void:
-	var mi := MeshInstance3D.new()
-	var q := BoxMesh.new()
-	q.size = Vector3(0.86, 0.02, 0.86)
-	mi.mesh = q
-	mi.position = Vector3(float(cell.x) + 0.5, 0.02, float(cell.y) + 0.5)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = col
-	mi.material_override = m
-	_hint_layer.add_child(mi)
+	fx.hint_cell(cell, col)
 
+## 角色被击中时的白闪（实现在 view/view_fx.gd）
 func _flash(u: Unit) -> void:
-	if u.visual == null:
-		return
-	# 白闪逻辑搬到 UnitVisual：基准色只记一次，否则连吃几发就永久变白
-	(u.visual as UnitVisual).flash_hit()
+	fx.flash(u)
 
 static func _fmt(milli: int) -> String:
 	if milli % 1000 == 0:
