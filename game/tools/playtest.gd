@@ -1150,15 +1150,16 @@ func _initialize() -> void:
 	foe25.visual.position = Vector3(5.5, 0.0, 11.5)   # 队列按视觉位置判定，这里让它站定
 	_s.gm.on_move_begin(foe25)                        # 新的一次移动：闩清零
 	_chk(_s.gm.check_unit(foe25, Vector2(5.5, 11.5)), "新的一次移动应能再次入队")
-	# 用户口径①：进入射界后先等 500ms 才射第一支
-	_chk(_s.gm.sentry_tick(0.2).is_empty(), "进入射界 200ms 内还不该开火（要等 500ms）")
+	# 用户口径①：进入射界后先等 SENTRY_TRIGGER_DELAY（第 92 轮：500 -> 800ms）才射第一支
+	_chk(_s.gm.sentry_tick(0.2).is_empty(), "进入射界 200ms 内还不该开火")
 	_chk(_s.gm.sentry_tick(0.2).is_empty(), "400ms 仍不该开火")
+	_chk(_s.gm.sentry_tick(0.2).is_empty(), "600ms 仍不该开火（第 92 轮把反应时间改成 800ms）")
 	foe25.visual.position = Vector3(5.5, 0.0, 11.0)   # 目标在动（否则按"静止不追击"剔除）
-	var f1: Array = _s.gm.sentry_tick(0.2)
+	var f1: Array = _s.gm.sentry_tick(0.3)            # 累计 900ms > 800ms
 	var f1_at := "(%.2f, %.2f)" % [f1[0].at.x, f1[0].at.y] if f1.size() > 0 else "-"
-	print("    延迟 500ms 之后：射出 %d 支，队列 %d ｜ 瞄准 %s" % [
-		f1.size(), _s.gm.sentry_queue_size(), f1_at])
-	_chk(f1.size() == 1, "等满 500ms 应射出一支")
+	print("    延迟 %.0fms 之后：射出 %d 支，队列 %d ｜ 瞄准 %s" % [
+		GameMaster.SENTRY_TRIGGER_DELAY * 1000.0, f1.size(), _s.gm.sentry_queue_size(), f1_at])
+	_chk(f1.size() == 1, "等满 %.0fms 应射出一支" % (GameMaster.SENTRY_TRIGGER_DELAY * 1000.0))
 	_chk(f1.size() == 1 and absf(f1[0].at.x - 5.5) < 0.001 and absf(f1[0].at.y - 11.0) < 0.001,
 		"瞄准的是它此时的位置")
 	_chk(_s.gm.sentry_queue_size() == 1, "打完的队头应轮转到队尾（不饿死、不消失）")
@@ -1173,7 +1174,7 @@ func _initialize() -> void:
 	_s.gm.on_move_begin(foe25)
 	_s.gm.check_unit(foe25, Vector2(5.5, 11.5))
 	foe25.visual.position = Vector3(25.5, 0.0, 25.5)
-	_s.gm.sentry_tick(0.6)
+	_s.gm.sentry_tick(GameMaster.SENTRY_TRIGGER_DELAY + 0.1)   # 触发延迟走完才轮到"出界剔除"
 	_chk(_s.gm.sentry_queue_size() == 0, "队头出界应被踢出队列")
 
 	# 多个目标：一帧只射一支，按 FIFO 轮流
@@ -1191,7 +1192,7 @@ func _initialize() -> void:
 	_chk(_s.gm.check_projectile(sh_e), "敌军炮弹进入射界应入队")
 	_chk(not _s.gm.check_projectile(ar_x), "箭矢不应惊动哨兵（用户明确）")
 	s25.cooldown = 0.0
-	var g1: Array = _s.gm.sentry_tick(0.6)          # 先等满 500ms 触发延迟
+	var g1: Array = _s.gm.sentry_tick(GameMaster.SENTRY_TRIGGER_DELAY + 0.02)   # 先等满触发延迟
 	var g2: Array = _s.gm.sentry_tick(0.11)         # 再等满 100ms 射击间隔
 	var g1_at := "(%.1f, %.1f)" % [g1[0].at.x, g1[0].at.y] if g1.size() > 0 else "-"
 	var g2_at := "(%.1f, %.1f)" % [g2[0].at.x, g2[0].at.y] if g2.size() > 0 else "-"
@@ -1214,7 +1215,8 @@ func _initialize() -> void:
 	s25.cooldown = 0.0
 	_chk(_s.gm.check_projectile(mk), "召唤球进入射界应入队")
 	s25.cooldown = 0.0
-	_chk(_s.gm.sentry_tick(0.6).size() == 1, "召唤球应被哨兵瞄准射出一支箭（弹道物不受'静止'限制）")
+	_chk(_s.gm.sentry_tick(GameMaster.SENTRY_TRIGGER_DELAY + 0.02).size() == 1,
+		"召唤球应被哨兵瞄准射出一支箭（弹道物不受'静止'限制）")
 	s25.queue.clear()
 	_s.clear_projectiles()
 
@@ -2922,7 +2924,6 @@ func _initialize() -> void:
 	_chk(_count_kind(Projectile.KIND_LOITER) == 1, "冷却没到 -> 不许再发射（每 5 个回合一枚）")
 	# ── Q/E 制导：越按越快 + 有上下限 + 松手带惯性 ──
 	if p90_mun != null:
-		_s._loiter_first = p90_mun              # 本局第一发（发射时自动记下，这里写明）
 		var p90_h0: float = p90_mun.heading
 		_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)          # 刚按下
 		var p90_d1: float = absf(wrapf(p90_mun.heading - p90_h0, -PI, PI))
@@ -2943,21 +2944,36 @@ func _initialize() -> void:
 		_chk(p90_w <= Loiter.TURN_MAX + 0.001, "角速度有上限（%.1f <= %.0f）" % [p90_w, Loiter.TURN_MAX])
 		_chk(p90_w_off > 0.0 and p90_d_off > 0.0, "松手带惯性：角速度还在，继续转一点再停")
 		_chk(absf(p90_w_off) < absf(p90_w), "松手后角速度在衰减（%.1f -> %.1f）" % [p90_w, p90_w_off])
-		# ── 第 91 轮：只有最先发射的那一发受控，多余的永远不受控 ──
-		var p91_b := Ordnance.make_loiter(-1, "巡飞弹发射器", Vector2(3.5, 40.5), 0.0, _s.rng)
-		_s.field.register(p91_b)
-		print("    场上两发：受控的是%s ｜ 第二发受控=%s" % [
+		# ── 第 91/92 轮：场上有多发时只有"最先那发"受控，多余的永远不受控 ──
+		_s._fire_loiter(p90_lp, Vector2(10.5, 10.5), p90_tgt)     # 真实发射路径 -> 被标记为多余
+		var p91_b: Projectile = null
+		for p91_it in _s.field.items:
+			var p91_pp: Projectile = p91_it["p"]
+			if p91_pp.kind == Projectile.KIND_LOITER and p91_pp.alive and p91_pp != p90_mun:
+				p91_b = p91_pp
+		print("    场上两发：受控的是%s ｜ 第二发 no_control=%s" % [
 			"最先那发" if _s._loiter_pick_control() == p90_mun else "？",
-			_s._loiter_pick_control() == p91_b])
+			p91_b.no_control if p91_b != null else "-"])
+		_chk(p91_b != null and p91_b.no_control, "后来发射的那一发被标记成多余（不受控）")
 		_chk(_s._loiter_pick_control() == p90_mun, "只有最先发射的那一发受 Q/E 控制")
-		_chk(_s._loiter_pick_control() != p91_b, "多余的那发不受控（沿直线飞）")
 		p90_mun.kill("test_kill")               # 第一发爆炸
 		_chk(_s._loiter_pick_control() == null and p91_b.alive,
 			"第一发爆炸后不再接管：多余的那发还在飞，但永远不受控")
-		# ── 近炸引信：把一个角色挪到第二发的造伤范围里 ──
+		# ── 近炸引信：把敌方角色挪到感应范围里（第 92 轮：只认敌方、直径 1.5 格）──
 		var p90_vic: Unit = _unit_by("Alette", 1)
 		p90_vic.power_cur = p90_vic.power_max
 		p90_vic.armor_cur = 0
+		p90_vic.cell = Vector2i(2, 44)                         # 敌方先待在场外
+		p90_vic.visual.position = Vector3(2.5, 0.0, 44.5)
+		# 先塞一个"友军"进感应范围：不许炸
+		var p92_friend: Unit = _unit_by("Gerald", 0)
+		p92_friend.power_cur = p92_friend.power_max
+		p92_friend.cell = Vector2i(int(floor(p91_b.pos().x)), int(floor(p91_b.pos().y)))
+		p92_friend.visual.position = Vector3(p91_b.pos().x, 0.0, p91_b.pos().y)
+		_s._tick_loiter_fuse()
+		_chk(p91_b.alive, "感应范围里只有友军 -> 不引爆（第 92 轮：只认敌方）")
+		p92_friend.cell = Vector2i(2, 44)                      # 友军走开
+		p92_friend.visual.position = Vector3(2.5, 0.0, 44.5)
 		p90_vic.cell = Vector2i(int(floor(p91_b.pos().x)), int(floor(p91_b.pos().y)))
 		p90_vic.visual.position = Vector3(p91_b.pos().x, 0.0, p91_b.pos().y)
 		var p90_vhp: int = p90_vic.power_cur
@@ -2969,7 +2985,7 @@ func _initialize() -> void:
 				p90_fuse = true
 		print("    近炸引信：触发=%s ｜ 目标力量 %d -> %d ｜ 巡飞弹还在=%s" % [
 			p90_fuse, p90_vhp / 1000, p90_vic.power_cur / 1000, p91_b.alive])
-		_chk(p90_fuse and not p91_b.alive, "造伤范围内出现角色 -> 近炸引信引爆")
+		_chk(p90_fuse and not p91_b.alive, "敌方角色在感应范围内 -> 近炸引信引爆")
 		_chk(p90_vic.power_cur < p90_vhp, "巡飞弹造伤落到范围里的角色身上（40 破甲 + 40 力量）")
 	# ── 飞满 32 格自动引爆 ──
 	_s.clear_projectiles()

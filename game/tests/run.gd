@@ -583,21 +583,23 @@ func _initialize() -> void:
 		"火箭 直径 0.185 / 长 0.7（长度不变直径减半）", fails)
 	_expect(absf(Ordnance.ROCKET_DIAMETER - 0.37 * 0.5) < 0.0005,
 		"直径正好是原来 0.37 的一半（截面积 = 原来的四分之一）", fails)
-	# 速度函数：v(0)=1、v(12)=8、之后封顶 8
-	var sp_vals := [[0.0, 1.0], [3.0, 2.75], [6.0, 4.5], [12.0, 8.0], [16.0, 8.0], [32.0, 8.0]]
+	# 速度函数（第 92 轮：初始 4、上限 12）：v(0)=4、v(12)=12、之后封顶 12
+	_expect(absf(Ordnance.ROCKET_V0 - 4.0) < 0.001 and absf(Ordnance.ROCKET_VMAX - 12.0) < 0.001,
+		"火箭初始速度 4、最大速度 12（第 92 轮）", fails)
+	var sp_vals := [[0.0, 4.0], [3.0, 6.0], [6.0, 8.0], [12.0, 12.0], [16.0, 12.0], [32.0, 12.0]]
 	for row3 in sp_vals:
 		var sv := Ordnance.rocket_speed_at(float(row3[0]))
 		_expect(absf(sv - float(row3[1])) < 0.0001, "火箭 %.0f 格处速度 %.4f" % [float(row3[0]), float(row3[1])], fails)
-	var t_ramp := log(8.0) * 12.0 / 7.0
+	var t_ramp := log(Ordnance.ROCKET_VMAX / Ordnance.ROCKET_V0) / Ordnance.ROCKET_ACCEL_K
 	_expect(absf(Ordnance.rocket_t_of_s(12.0) - t_ramp) < 0.0001,
-		"飞满 12 格耗时 (12/7)·ln8 ≈ %.4f 秒" % t_ramp, fails)
+		"飞满 12 格耗时 (1/k)·ln(vmax/v0) ≈ %.4f 秒（v0=4、上限 12）" % t_ramp, fails)
 	_expect(absf(Ordnance.rocket_s_of_t(Ordnance.rocket_t_of_s(12.0)) - 12.0) < 0.001,
 		"反解与闭式解自洽（s(t(12)) = 12）", fails)
-	# 单调性：距离越远总时长越长，且平均速度介于 2~6 之间
+	# 单调性：距离越远总时长越长，且平均速度介于 4~12 之间
 	var t4 := Ordnance.rocket_t_of_s(4.0)
 	var t40 := Ordnance.rocket_t_of_s(40.0)
 	_expect(t40 > t4 and t4 > 0.0, "总时长随距离单调增加", fails)
-	_expect(4.0 / t4 > 1.0 and 4.0 / t4 < 8.0, "前 4 格平均速度在 1~8 之间", fails)
+	_expect(4.0 / t4 > 4.0 and 4.0 / t4 < 12.0, "前 4 格平均速度在 4~12 之间", fails)
 	# 工厂：半径/剖面/惊动哨兵/落地半径 1 格
 	var heli_u := Unit.from_data(heli_d)
 	var rk := Ordnance.make_rocket(heli_u, Vector3(5.5, 2.0, 5.5), Vector2(25.5, 5.5), true)
@@ -1066,10 +1068,10 @@ func _initialize() -> void:
 
 	# ── 巡飞弹 + 发射器（第 90 轮）──
 	print("\n── 巡飞弹（第 90 轮）──")
-	_expect(absf(Loiter.SPEED - 3.0) < 0.001 and absf(Loiter.HEIGHT - 1.5) < 0.001
+	_expect(absf(Loiter.SPEED - 4.0) < 0.001 and absf(Loiter.HEIGHT - 1.5) < 0.001
 		and absf(Loiter.MAX_DIST - 32.0) < 0.001 and absf(Loiter.BODY_R - 0.5) < 0.001
-		and absf(Loiter.BLAST_R - 1.0) < 0.001,
-		"巡飞弹：速度 3 格/秒、定高 1.5、飞 32 格、直径 1 格的球、造伤直径 2 格", fails)
+		and absf(Loiter.BLAST_R - 1.0) < 0.001 and absf(Loiter.FUSE_R - 0.75) < 0.001,
+		"巡飞弹：速度 4 格/秒（第 92 轮）、定高 1.5、飞 32 格、直径 1 格球、造伤直径 2 格、近炸直径 1.5 格", fails)
 	_expect(absf(Loiter.POWER - 40.0) < 0.001 and absf(Loiter.BREAK - 40.0) < 0.001
 		and absf(Loiter.IGNORE_RES - 0.5) < 0.001,
 		"巡飞弹伤害 = 40 破甲 + 40 力量（炮击：无视 50% 物抗）", fails)
@@ -1082,17 +1084,17 @@ func _initialize() -> void:
 	_expect(lp != null and lp.steering and absf(lp.hit_r - 0.5) < 0.001,
 		"巡飞弹：可制导 + 碰撞半径 0.5（直径一格）", fails)
 	lp.step(1.0)
-	_expect(absf(lp.pos().x - 8.5) < 0.001 and absf(lp.pos().y - 5.5) < 0.001
+	_expect(absf(lp.pos().x - 9.5) < 0.001 and absf(lp.pos().y - 5.5) < 0.001
 		and absf(lp.height() - 1.5) < 0.001,
-		"朝 +x 飞 1 秒 -> 水平走 3 格、高度恒 1.5（不受重力）", fails)
-	_expect(not lp.finished(), "才飞 3 格，不该到引爆距离", fails)
+		"朝 +x 飞 1 秒 -> 水平走 4 格、高度恒 1.5（不受重力）", fails)
+	_expect(not lp.finished(), "才飞 4 格，不该到引爆距离", fails)
 	lp.flown = Loiter.MAX_DIST - 0.01
 	lp.step(0.5)
 	_expect(lp.finished(), "飞满 %d 格就 finished（自动引爆）" % int(Loiter.MAX_DIST), fails)
 	_expect(lp.shot != null and not lp.shot.opts.is_empty()
 		and int(lp.shot.opts["power"]) == int(Loiter.POWER * 1000),
 		"发射单里带着战斗部参数（40 力量快照）", fails)
-	# 近炸引信 / 造伤范围用的是同一个球
+	# 造伤范围 = 直径两格；近炸引信 = 直径 1.5 格且只认敌方（第 92 轮）
 	var lu := Unit.from_data(by_name["Gerald"])
 	lu.cell = Vector2i(5, 5)
 	lu.hover = 0.0
@@ -1103,6 +1105,19 @@ func _initialize() -> void:
 	lu2.cell = Vector2i(7, 5)
 	_expect(not Loiter.ball_touches_unit(Vector3(5.5, 1.5, 5.5), lu2),
 		"隔壁 2 格够不到（直径两格的球）", fails)
+	_expect(not Loiter.fuse_touches_unit(Vector3(5.5, 1.5, 5.5), lu),
+		"近炸引信不认友军（我方角色贴脸飞过也不炸）", fails)
+	var lu3 := _enemy_of(by_name, "Gerald")
+	lu3.cell = Vector2i(5, 5)
+	lu3.hover = 0.0
+	lu3.body_y = -1.0
+	_expect(Loiter.fuse_touches_unit(Vector3(5.5, 1.5, 5.5), lu3),
+		"敌方角色在感应范围内 -> 近炸触发", fails)
+	var lu4 := _enemy_of(by_name, "Gerald")
+	lu4.cell = Vector2i(5, 5)
+	lu4.body_y = 3.0                          # 站得很高（比如爬到 3 格）
+	_expect(not Loiter.fuse_touches_unit(Vector3(5.5, 1.5, 5.5), lu4),
+		"近炸半径 0.75：身体离得远就不触发（贴得更近才炸）", fails)
 	# ── 制导手感（Q/E）──
 	print("\n── 巡飞弹制导（Q/E）──")
 	_expect(absf(Loiter.want_rate(0.0) - Loiter.TURN_MIN) < 0.001,

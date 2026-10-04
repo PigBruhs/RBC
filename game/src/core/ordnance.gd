@@ -37,32 +37,35 @@ const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
 
 ## ── 37mm 火箭（炮弹类）──────────────────────────────────────────────────────
 ## 用户口径（第 83 轮）：直径 0.185（原来是 0.37 的一半）、长 0.7（不变）；
-## **飞行速度与飞行距离正相关**：初始 1 格/秒，飞满 12 格后达到上限 8 格/秒；
+## **飞行速度与飞行距离正相关**：初始速度 -> 飞满 12 格后达到上限；
 ## 落地范围直径 2 格；落点同时随机两个方向生成 2 枚破片。
-##   ds/dt = v(s) = min(8, 1 + 7s/12)
-##   · 闭式解 t(s) = (12/7)·ln(1 + 7s/12)      （飞满 12 格 ≈ 3.5648 秒）
-##   · 反解   s(t) = (12/7)·(e^(7t/12) − 1)
-##   · 平台段 s = 12 + 8·(t − 3.5648)
+## 第 92 轮：初始 1 -> **4 格/秒**，上限 8 -> **12 格/秒**（公式不变，只改这两个数）。
+##   ds/dt = v(s) = min(12, 4 + 8s/12)
+##   · 闭式解 t(s) = (12/8)·ln(1 + 8s/12)
+##   · 反解   s(t) = (12/8)·(e^(8t/12) − 1)
+##   · 平台段 s = 12 + 12·(t − t_ramp)
 const ROCKET_DIAMETER := 0.185
 const ROCKET_LEN := 0.7
 const ROCKET_R := ROCKET_DIAMETER * 0.5
-const ROCKET_V0 := 1.0
-const ROCKET_VMAX := 8.0
+const ROCKET_V0 := 4.0
+const ROCKET_VMAX := 12.0
 const ROCKET_RAMP_DIST := 12.0
-const ROCKET_ACCEL_K := 7.0 / 12.0     # v = 1 + k·s（爬坡段）
+const ROCKET_ACCEL_K := (ROCKET_VMAX - ROCKET_V0) / ROCKET_RAMP_DIST   # v = v0 + k·s（爬坡段）
 const ROCKET_BLAST_R := 1.0          # 落地范围直径 2 格
 const ROCKET_FRAGMENTS := 2
 
 
-## 爬坡段结束的时刻（飞满 12 格）
+## 爬坡段结束的时刻（速度达到上限那一刻）
 static func rocket_t_ramp() -> float:
-	return log(1.0 + ROCKET_ACCEL_K * ROCKET_RAMP_DIST) / ROCKET_ACCEL_K
+	return log(ROCKET_VMAX / ROCKET_V0) / ROCKET_ACCEL_K
 
 
+## t(s)：注意闭式解里带 v0 —— dt = ds/(v0 + k·s)，所以 t = (1/k)·ln(1 + k·s/v0)。
+## （第 92 轮把 v0 从 1 提到 4 时这里必须带上 /v0，否则时间会被算长一倍多）
 static func rocket_t_of_s(s: float) -> float:
 	var d: float = maxf(0.0, s)
 	if d <= ROCKET_RAMP_DIST:
-		return log(1.0 + ROCKET_ACCEL_K * d) / ROCKET_ACCEL_K
+		return log(1.0 + ROCKET_ACCEL_K * d / ROCKET_V0) / ROCKET_ACCEL_K
 	return rocket_t_ramp() + (d - ROCKET_RAMP_DIST) / ROCKET_VMAX
 
 
@@ -70,7 +73,7 @@ static func rocket_s_of_t(t: float) -> float:
 	var tt: float = maxf(0.0, t)
 	var t_ramp: float = rocket_t_ramp()
 	if tt <= t_ramp:
-		return (exp(tt * ROCKET_ACCEL_K) - 1.0) / ROCKET_ACCEL_K
+		return ROCKET_V0 * (exp(tt * ROCKET_ACCEL_K) - 1.0) / ROCKET_ACCEL_K
 	return ROCKET_RAMP_DIST + ROCKET_VMAX * (tt - t_ramp)
 
 

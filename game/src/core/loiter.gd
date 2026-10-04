@@ -22,11 +22,13 @@ class_name Loiter
 extends RefCounted
 
 # ── 弹体 ──
-const SPEED := 3.0                 # 格/秒（恒定，只改方向）
+const SPEED := 4.0                 # 格/秒（恒定，只改方向；第 92 轮 3 -> 4）
 const HEIGHT := 1.5                # 定高（不受重力）
 const MAX_DIST := 32.0             # 飞满这么远自动引爆
 const BODY_R := 0.5                # 模型/碰撞：直径一格的球
 const BLAST_R := 1.0               # 造伤：直径两格的球
+## 近炸引信的感应范围（第 92 轮：从"造伤范围"独立出来，直径 2 -> **1.5 格**，贴得更近才引爆）
+const FUSE_R := 0.75
 const BREAK := 40.0                # 破甲
 const POWER := 40.0                # 力量
 const IGNORE_RES := 0.5            # 炮击：无视 50% 物抗
@@ -105,9 +107,17 @@ static func opts(rng) -> Dictionary:
 	})
 
 
-## 巡飞弹会不会打到这个位置（近炸引信 / 造伤范围用的是同一个球）
+## 巡飞弹会不会打到这个位置（**造伤**范围：直径两格的球）
 static func ball_touches_unit(ctr: Vector3, u: Unit) -> bool:
 	return Targeting.sphere_hits_body(ctr, BLAST_R, u.cell, Damage.BODY_R, Damage.BODY_H, u.body_h())
+
+
+## 近炸引信：只在**敌方角色**进入 FUSE_R（直径 1.5 格）时触发（第 92 轮）。
+## 友军从旁边飞过不炸、沙盒元素也不炸（造伤时仍然会打到范围内的沙盒元素）。
+static func fuse_touches_unit(ctr: Vector3, u: Unit) -> bool:
+	if not is_target(u):
+		return false
+	return Targeting.sphere_hits_body(ctr, FUSE_R, u.cell, Damage.BODY_R, Damage.BODY_H, u.body_h())
 
 
 ## 沙盒元素：只按"沾到格子"判定（道具没有高度轴）

@@ -226,7 +226,7 @@ const HELI_DEFAULTS := {
 	"aim_mult": 2.0,         # 瞄准结果翻倍：先前飞 x 格，现在 2x
 	"salvo_pairs": 4,        # 一共四次
 	"salvo_gap": 1.0,        # 每次间隔 1 秒（用户口径第 83 轮：250ms -> 1s）
-	"scatter_r": 8.0,        # 落点：半径 8 格圆内随机（用户口径第 83 轮：4 -> 8，散布翻倍）
+	"scatter_r": 4.0,        # 落点：半径 4 格圆内随机（第 83 轮 4 -> 8，第 92 轮改回 4）
 	"rockets": 8,            # 一共 8 发
 	"crash_threshold": 21,   # 力量低于 21 坠机
 	"crash_r": 2.5,          # 坠机炮击半径

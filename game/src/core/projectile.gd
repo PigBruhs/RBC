@@ -87,6 +87,8 @@ var hold_l: float = 0.0              # 左转键已按住多久（秒）
 var hold_r: float = 0.0              # 右转键已按住多久（秒）
 ## 近炸引信要忽略的沙盒元素（发射它的那台发射器，否则一出生就自爆）
 var ignore_placeable: Placeable = null
+## 这一发不受玩家制导（第 91 轮：场上已经有别的巡飞弹时，新发射的那一发就是"多余的"）
+var no_control: bool = false
 
 static var _next_id: int = 1
 

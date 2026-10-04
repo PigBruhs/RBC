@@ -61,7 +61,7 @@ class Target extends RefCounted:
 	var unit: Unit = null
 	var proj: Projectile = null
 	var label: String = ""
-	var wait: float = 0.5                    # 进入射界后的开火延迟（用户口径 500ms）
+	var wait: float = SENTRY_TRIGGER_DELAY       # 进入射界后的开火延迟（第 92 轮：800ms）
 	var last_pos := Vector2.ZERO             # 上一次被射击时的位置（判定"静止目标"）
 
 	func alive() -> bool:
@@ -378,8 +378,8 @@ func forget_projectile(id: int) -> void:
 
 ## 每两支箭之间至少间隔 100ms（用户口径：500 -> 100）
 const SENTRY_FIRE_INTERVAL := 0.1
-## 进入射界后先等 500ms 才射第一支（用户口径：触发延迟 0 -> 500ms）
-const SENTRY_TRIGGER_DELAY := 0.5
+## 进入射界后先等这么久才射第一支（用户口径：触发延迟 0 -> 500ms -> **第 92 轮 800ms**）
+const SENTRY_TRIGGER_DELAY := 0.8
 
 
 ## 哨兵队列的每帧推进（view 每帧调用）。返回本次要发射的箭：每个哨兵最多 1 支。

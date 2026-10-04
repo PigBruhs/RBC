@@ -448,8 +448,7 @@ func _tick_queue_anim(delta: float) -> void:
 #   · 巡飞弹：定高 1.5、恒速 3 格/秒、直径一格的球；玩家用 Q/E 制导；
 #     造伤范围直径两格的球（40 破甲 + 40 力量）；近炸引信 / 飞满 32 格自动引爆。
 # ══════════════════════════════════════════════════════════════════════════════
-var _loiter_first: Projectile = null       # 本局第一发（**只有它受 Q/E 控制**）
-var _loiter_first_done: bool = false       # 第一发已经没了：之后谁都不再受控（第 91 轮）
+var _loiter_control: Projectile = null     # 玩家正在制导的那一发（见 _loiter_pick_control）
 var _loiter_sample: float = 0.0            # 发射器采样计时
 var _unit_seen: Dictionary = {}            # Unit -> 上次采样到的浮点位置（判"在动"）
 
@@ -507,15 +506,26 @@ func _fire_loiter(pl: Placeable, ctr: Vector2, tgt: Unit) -> void:
 	p.ignore_placeable = pl                    # 别一出膛就被自己的发射器触发了引信
 	field.register(p)
 	pl.tags["loiter_next"] = gm.turn_count + Loiter.LAUNCH_COOLDOWN_TURNS
-	if _loiter_first == null and not _loiter_first_done:
-		_loiter_first = p                         # 本局第一发：只有它受 Q/E 控制
+	# 制导权（第 91/92 轮）：**场上已经有别的巡飞弹 -> 这一发是"多余的一发"，永远不受控**；
+	# 场上没有别的 -> 这一发就是玩家能控的那一发（哪怕之前那发已经爆炸，新的一发照样能控）。
+	var others := 0
+	for it2 in field.items:
+		var q2: Projectile = it2["p"]
+		if q2 != p and q2.kind == Projectile.KIND_LOITER and q2.alive:
+			others += 1
+	if others > 0:
+		p.no_control = true
+	if _loiter_control == null or not _loiter_control.alive:
+		_loiter_control = p if not p.no_control else null
 	var d: float = ctr.distance_to(_unit_pos(tgt))
-	_log("  🚀 %s 发射【巡飞弹】→ 目标 %s（%.1f 格，初始方向 %.0f°，中心线偏 %+.0f°）｜ Q/E 制导" % [
+	_log("  🚀 %s 发射【巡飞弹】→ 目标 %s（%.1f 格，初始方向 %.0f°，中心线偏 %+.0f°）%s" % [
 		pl.name, tgt.name, d, rad_to_deg(heading),
-		rad_to_deg(heading) - rad_to_deg((_unit_pos(tgt) - ctr).angle())])
+		rad_to_deg(heading) - rad_to_deg((_unit_pos(tgt) - ctr).angle()),
+		"｜ Q/E 制导" if not p.no_control else "｜ 场上已有巡飞弹：这一发不受控（沿直线飞）"])
 
 
-## 近炸引信（每帧）：造伤范围内出现任意角色 / 沙盒元素就引爆。
+## 近炸引信（每帧）：**只在敌方角色**进入感应范围（直径 1.5 格）时引爆 —— 第 92 轮口径。
+## 友军从旁边飞过不炸、沙盒元素也不炸（但引爆时的造伤仍然会打到范围内的沙盒元素）。
 ## 飞满 32 格自动引爆不在这里 —— 那走弹道的落地事件（_land_shell）。
 func _tick_loiter_fuse() -> void:
 	if field == null:
@@ -527,17 +537,12 @@ func _tick_loiter_fuse() -> void:
 		var ctr := p.pos3()
 		var why := ""
 		for u in units:
-			if u.is_alive() and Loiter.ball_touches_unit(ctr, u):
+			if Loiter.fuse_touches_unit(ctr, u):
 				why = u.name
 				break
 		if why == "":
-			for pl in placeables:
-				if pl.is_alive() and pl != p.ignore_placeable and Loiter.ball_touches_placeable(ctr, pl):
-					why = pl.name
-					break
-		if why == "":
 			continue
-		_log("  💥 巡飞弹近炸引信：造伤范围内出现 %s → 引爆" % why)
+		_log("  💥 巡飞弹近炸引信：感应范围内出现 %s → 引爆" % why)
 		p.kill("fuse")
 		_loiter_burst(p, ctr)
 
@@ -608,19 +613,21 @@ func _loiter_steer_apply(p: Projectile, dir: float, delta: float) -> void:
 		p.heading = Loiter.steer(p.heading, axes[0], axes[1], p.turn_w, delta)
 
 
-## 玩家当前制导的那一发 = **本局最先发射的那一发**（用户口径第 91 轮）。
-## 场上多出来的巡飞弹一律沿直线飞、永远不受控；第一发爆炸/被打掉之后
-## 也不再接管任何一发（`_loiter_first_done` 一旦置位就不再受控）。
+## 玩家当前制导的那一发（第 91/92 轮口径）：
+##   · 场上"非多余"且**最早发射**的那一发受控（多余 = 发射时场上已经有别的巡飞弹，永远不受控）
+##   · 受控那发爆炸后：之前那些"多余的"仍然不受控，但**之后新发射的一发会重新受控**
 func _loiter_pick_control() -> Projectile:
-	if _loiter_first_done:
+	if _loiter_control != null and _loiter_control.alive:
+		return _loiter_control
+	_loiter_control = null
+	if field == null:
 		return null
-	if _loiter_first == null:
-		return null
-	if not _loiter_first.alive:
-		_loiter_first_done = true
-		_loiter_first = null
-		return null
-	return _loiter_first
+	for it in field.items:
+		var p: Projectile = it["p"]
+		if p.kind == Projectile.KIND_LOITER and p.alive and not p.no_control:
+			_loiter_control = p
+			break
+	return _loiter_control
 
 
 func _camera_process(delta: float) -> void:
