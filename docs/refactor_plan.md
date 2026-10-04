@@ -184,29 +184,56 @@ _s._rocket_salvo / _s._loiter_pick_control / _s._dive_tick / _s._pending_root / 
 | 阶段 | 内容 | 交付判据 |
 |---|---|---|
 | **P0** | ① 写 `battle_scene` 测试门面（`for_test_*`）；② 把 `playtest.gd` 的 1019 处 `_s.xxx` 逐步换成门面；③ 删 §3.1 零引用函数、§3.2 死变量（逐个确认）、§3.3 死信号 | playtest 项数不减少且失败 0；run.gd、5 个探针、sim_ai 全绿 |
-| **P1** ✅ | **已完成（第 97 轮第一期）**：`view/sentry_runner.gd`(57) 哨兵编排 ｜ `view/view_fx.gd`(362) 表现层 15 个函数 ｜ `core/grid_math.gd`(27) 格中心去重（`_cc` 与 `Ordnance._cell_center` 原本是逐字复制品，现唯一实现）。死代码 `_pending_cell_mark` 已删 | ✅ run 全过 ｜ playtest **565/0** ｜ arena 0 ｜ r89 3 项 ｜ r92 11 项 ｜ sim_ai 2/2 |
-| **P2** | 提取中等耦合块：弹道与爆炸结算（`projectile_sink.gd`）、普攻（`basic_attack.gd`）、技能、回合机、移动寻路、放置沙盒、巡飞弹、相机 | 同 P1 |
+| **P1** ✅ | **已完成（第 97 轮第一期）**：`view/sentry_runner.gd`(57) 哨兵编排 ｜ `view/view_fx.gd`(364) 表现层 15 个函数 ｜ `core/grid_math.gd`(27) 格中心去重（`_cc` 与 `Ordnance._cell_center` 原本是逐字复制品，现唯一实现）。死代码 `_pending_cell_mark` 已删 | ✅ run 全过 ｜ playtest **565/0** ｜ arena 0 ｜ r89 3 项 ｜ r92 11 项 ｜ sim_ai 2/2 |
+| **P2** ⏳ | **已完成两块（第 97 轮第二期）**：`view/projectile_sink.gd`(486) 弹道与爆炸结算（19 函数）｜ `view/basic_attack.gd`(258) 普攻唯一入口（14 函数）。**还剩**：技能（24 函数/576 行）、回合机、移动寻路、放置沙盒、巡飞弹 | ✅ 同上全绿 |
+| **P3** | 提取最难的两块：UI 菜单与刷新（406 行 / 33 个成员）、瞄准与输入（366 行 / 29 个成员）；顺手把 `battle_ui.gd` 直接读宿主字段的 6 处改成走 `ui_*`（含把魔数 `phase == 0 + 4` 换成枚举比较） | 同上 + 手动开一次编辑器确认菜单/瞄准/队列条肉眼正常 |
+| **P0** | **清账期**（务必做，别忘）：① 立测试门面（`for_test_*`），把 `playtest.gd` 的上千处 `_s.xxx` 换成门面调用；② 然后**批量删掉宿主的薄包装**（约 350 行过渡成本）；③ 删 §3.1 零引用函数、§3.2 死变量、§3.3 死信号 | playtest 项数不减少且失败 0；run.gd、5 个探针、sim_ai 全绿 |
 | **P3** | 提取最难的两块：UI 菜单与刷新（406 行 / 33 个成员）、瞄准与输入（366 行 / 29 个成员）；顺手把 `battle_ui.gd` 直接读宿主字段的 6 处改成走 `ui_*`（含把魔数 `phase == 0 + 4` 换成枚举比较） | 同上 + 手动开一次编辑器确认菜单/瞄准/队列条肉眼正常 |
 | **P4** | 拆 `GameMaster` 四合一（§3.4）；合并重复实现（§3.5）；`battle_scene.gd` 目标 **≤ 800 行** | 同上 |
 | **P5** | 清理仓库：删 `tools/godot/_smoke/`（旧原型，未跟踪，39.8 MB build + 29 KB 源码）；把 §3.6 的"数值多源"单独开一轮 | `git status` 干净；`docs/规格.md` 更新 |
 
-### 第一期实测效果（第 97 轮）
+### 第一期 + 第二期实测效果（第 97 轮）
 
 | 文件 | 行数 | 说明 |
 |---|---|---|
-| `game/src/view/battle_scene.gd` | **4587 → 4316** | −271 行 |
-| `game/src/view/sentry_runner.gd` | 57 | 新建 |
-| `game/src/view/view_fx.gd` | 362 | 新建 |
-| `game/src/core/grid_math.gd` | 27 | 新建 |
+| `game/src/view/battle_scene.gd` | **4587 → 3913** | **−674 行** |
+| `game/src/view/projectile_sink.gd` | 486 | 第二期新建：弹道事件 / 落地 / 空爆 / 击落 / 爆炸结算 / 破片 / 齐射 / 枪榴弹模型（19 个函数） |
+| `game/src/view/view_fx.gd` | 364 | 第一期新建：高亮 / 待确认标记 / 黄勾 / 落点环 / 闪光（15 个函数） |
+| `game/src/view/basic_attack.gd` | 258 | 第二期新建：普攻唯一入口 + 5 种 basic 实现 + 三条路径分派（14 个函数） |
+| `game/src/view/sentry_runner.gd` | 57 | 第一期新建：哨兵编排与表现 |
+| `game/src/core/grid_math.gd` | 27 | 第一期新建：格中心与"单位现在在哪"的唯一实现 |
 
-**这一期定下来的两条做法（后续每个模块都照抄，别再重新发明）：**
+> ⚠️ **诚实记一笔**：宿主的"薄包装 + 字段声明保留"是**过渡期的临时成本**。
+> 单看总行数：5 个新模块 1192 行，其中约 350 行是薄包装与转发；
+> 所以全仓**代码总量是上升的**（约 +330 行），换来的是"单文件 4587 行 → 单文件 3913 行 + 5 个职责单一模块"。
+> 这些包装的**清理时机是 P0**（测试门面立好、playtest 改走门面之后），届时可以批量删掉。
+
+**这两期定下来的四条做法（后续每个模块都照抄，别再重新发明）：**
 
 1. **模块 = `RefCounted` 子对象 + `_init(host)` 注入 + `var _st = null` 动态类型。**
    不能写 `var _st: Node3D` —— 宿主 battle_scene 没有 `class_name`，访问 `_st.gm` / `_st._log` 会在分析期报
    `Cannot find member ... in base 'Node3D'`。这与既有约定一致（`battle_ui.gd` 的 `host` 也是动态类型）。
 2. **测试直读的名字一律不断**：被搬走的函数在宿主保留**同名薄包装**转发；被测试直读的**字段声明留在宿主**，
-   模块通过 `_st._xxx` 读写。这样 playtest 的 1019 处 `_s.xxx` 一行都不用动。
-   （代价：宿主的"薄包装 + 字段声明"是过渡期噪声，等 P0 测试门面立好之后再统一清理。）
+   模块通过 `_st._xxx` 读写。这样 playtest 的上千处 `_s.xxx` 一行都不用动。
+3. **包装的"协程性"必须与被包装的模块函数逐字一致（第二期两边都踩过）**：
+   - 模块函数是协程且**有返回值** → `return await mod.fn(...)`；
+   - 模块函数是协程且 **`-> void`** → `await mod.fn(...)`（void 里 `return await` 会被 GDScript 拒绝）；
+   - 模块函数是**同步**的 → `return mod.fn(...)`，**不要加 `await`** —— 加了会把同步函数变协程，
+     调用方"调用即完成"的时序语义被悄悄改掉（比漏 `await` 更隐蔽）。
+   - 判定方法：先 `grep -n 'await' <模块文件>` 列出全部协程，再逐个包装对照。
+     （第二期实测：`projectile_sink.gd` 19 个函数里只有 `rocket_salvo` 一个是协程，薄包装漏了 `await`。）
+4. **纯函数走全局类，不绕宿主**：`GridMath.cell_center(...)` 直接用，不必经 `_st._cc(...)`。
+
+**机械核对手法（这两期的质量保证，建议沿用）**：从 `git show HEAD:<file>` 抽出原函数体，
+只允许事先写明的几类改写（去 `_st.` 前缀 / 去前导下划线 / 纯函数改走全局类 / 显式类型标注），
+然后**逐行 diff**。两期结果：第一期 15/15 一致，第二期 14/14 + 19/19 一致（少数差异全部在事先写明的白名单里）。
+
+**改 view 层必须先过编译门禁**（见 [`baseline.md`](baseline.md)）：`tests/run.gd` **不加载 `battle_scene.gd`**，
+它绿不能证明视图层编译得过。第二期就因为这个漏掉了 8 处 `:=`-on-dynamic 类型推断错误，
+直到跑 playtest 才炸（而且场景建不起来时进程不退出，会被 `--quit-after` 吊死十几分钟）：
+```powershell
+& $exe --headless --path game --check-only --script res://src/view/battle_scene.gd --quit-after 200
+```
 
 **新增 `class_name` 的副作用（新克隆必看）**：`.godot/global_script_class_cache.cfg` 需要重建，
 否则 `--script` 直跑会报 `Identifier "Xxx" not declared`。跑一次即可：
