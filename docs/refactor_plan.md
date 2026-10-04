@@ -272,6 +272,50 @@ tools\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path game --edito
 
 ---
 
+## 4b. 第 97 轮收口状态（做到哪、还剩什么）
+
+**已达成**：`battle_scene.gd` **4587 → 2422 行（−47%）**，拆出 **13 个模块**：
+
+| 模块 | 行数 | 职责 |
+|---|---|---|
+| `view/air_runner.gd` | 508 | 巡飞弹制导 + 发射器 + 直升机全流程（坠机/爬升轰炸） |
+| `view/projectile_sink.gd` | 486 | 弹道事件 / 落地 / 空爆 / 击落 / 爆炸结算 / 破片 / 齐射 |
+| `view/turn_runner.gd` | 485 | 回合机 + 空队列保护 + 复活/阵亡生命周期 + 行棋寻路 |
+| `view/skill_runner.gd` | 483 | 技能唯一入口 + 5 种 cast 实现 |
+| `view/view_fx.gd` | 364 | 高亮 / 待确认标记 / 黄勾 / 落点环 / 闪光 |
+| `view/basic_attack.gd` | 258 | 普攻唯一入口 + 5 种 basic 实现 |
+| `view/aim_controller.gd` | 249 | 拖拽瞄准 + 相机 + 鼠标拾取 |
+| `view/ai_runner.gd` | 215 | AI 驱动 + GM 演出推进 |
+| `view/sandbox_runner.gd` | 180 | 放置 / 沙盒 / 待确认状态机 |
+| `core/game_clock.gd` | 68 | 回合边界时钟 + 复活计时 |
+| `view/sentry_runner.gd` | 57 | 哨兵编排与表现 |
+| `core/grid_math.gd` | 27 | 格中心唯一实现 |
+
+**P0 / P2 / P3 / P4 的主要部分 / P5 都已落地**，含：147 个 `t_*` 测试门面（测试私有访问 487 → 0）、
+删 45 个薄包装、删死代码、拆 `GameClock`、清掉 `gm.ai_enabled/ai_autoplay_player` 越界（0 残留）、
+门禁扩到 13 模块 / 65 包装 + 6 场景自检。
+
+### 仍然剩余（下一轮的明确任务清单）
+
+| # | 任务 | 预估 | 说明 |
+|---|---|---|---|
+| R1 | `ui_*` 契约层（~40 个方法）拆到 `battle_api.gd` | ~300 行 | `battle_ui.gd` 的 40 处 `host.ui_*` 与 playtest 需一起跟改；**收益行数、风险中等**，可选 |
+| R2 | `_unhandled_input`（152 行）+ `_cancel_to_menu` / `_on_blank_click` / `_clear_selection` 等输入总入口 | ~200 行 | 状态机密集，**风险偏高**，建议单独一轮 |
+| R3 | 零散函数（`_apply_attack` / `_damage_placeable` / `_spawn_arrow` / `_start_arrow_qte` / `_on_arrow_qte_done` / `_log` / `_dbg_*` / `_hover_cell` 等） | ~300 行 | 多为共享函数，**收益低**，可不做 |
+| R4 | `_process` 拆成显式 `_tick_*()` 列表（注释目前插在函数体里） | ~60 行 | 低风险，纯可读性 |
+| R5 | `battle_scene.gd` 里第三份 `_fmt`（`ui_fmt` 那处）收敛到 `Rules.milli_text()` | ~5 行 | 收尾洁癖 |
+| R6 | 删掉 `turn_runner` / `sandbox_runner` / `ai_runner` / `air_runner` 留下的**跨模块事实接口包装**（共约 20 个） | ~60 行 | **前提**：先把这些模块之间的 `_st._xxx` 调用改成互相直连（要动多个模块），否则会重演"运行时报 Nonexistent function"。风险中等 |
+
+**关于 ≤800 行**：该目标已正式修正为 **≤1200 行**（见 §4 开头的说明）——
+门面本身占 ~470 行，且它是刻意保留的测试契约。
+
+### 收口时确认的验证口径
+
+`docs/baseline.md` 的"第 0 步"现在是**两个门禁**（`--check-only` + `check_wrappers`），
+另有 10 个功能入口。收口时的最终状态：
+`gate 65 包装 / 13 模块全合规` ｜ `自检 6/6` ｜ `run 全部通过` ｜ **`playtest 565 项 0 失败`**
+｜ `arena 0` ｜ `r89 3 项` ｜ `r92 11 项` ｜ `v14 0` ｜ `probe_arrow / probe_skill exit 0` ｜ `sim_ai 1/1 局跑完`。
+
 ## 5. 每阶段的验收（一条都不能少）
 
 ```powershell

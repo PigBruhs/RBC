@@ -469,16 +469,9 @@ func sentry_queue_size() -> int:
 # ══════════════════════════════════════════════════════════════════════════════
 var passive_used: Dictionary = {}         # "单位名:被动id" -> true（本回合机会已用掉）
 
-## AI 开关：默认敌方整队交给 AI；ai_autoplay_player 是"自动演算"（两边都交给 AI，用来跑测试）
-##
-## TODO(P4)：**职责越界，待迁出** —— GameMaster 是 core 层的"场上状态裁判"，
-##   不该知道 AI 的存在。这两个开关属于**驱动层**决策（"谁的操作交给 AI"），
-##   唯一读者是 view 侧 battle_scene 的 `_is_ai_unit()` / 受击演出，应搬到那里。
-##   本轮**故意不删**：删了 battle_scene 立刻断（那个文件正在别人的写区里重构）。
-##   迁出时要改的点（P4a 报告已列）：battle_scene.gd:1409 / 1410 / 2293 三处读，
-##   playtest.gd ×7、probe_v14.gd ×1、sim_ai.gd ×2 的写。
-var ai_enabled: bool = true
-var ai_autoplay_player: bool = false
+# AI 开关（ai_enabled / ai_autoplay_player）已于 P4 迁出本类 —— 见
+# battle_scene 的 `var ai_enabled` / `var ai_autoplay_player`（驱动层才是它的家）
+# 与 `t_ai_enabled()` / `t_set_ai_enabled()` 测试门面。GameMaster 不再知道 AI。
 
 
 ## 轮到某个角色【自己的回合】了：把他身上 per = "own_turn" 的被动重新置 1。

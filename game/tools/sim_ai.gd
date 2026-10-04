@@ -31,8 +31,8 @@ func _start() -> void:
 	_s = (load("res://src/view/battle_scene.tscn") as PackedScene).instantiate()
 	root.add_child(_s)
 	Engine.time_scale = 6.0                       # 加速：动画/计时器一起快 6 倍
-	_s.gm.ai_enabled = true
-	_s.gm.ai_autoplay_player = true               # 我方也交给 AI（自动演算）
+	_s.t_set_ai_enabled(true)
+	_s.t_set_autoplay_player(true)               # 我方也交给 AI（自动演算）
 	_s.rng = RngService.new(_seed + _done)
 	_s.t_set_ai_turn(false)
 	_need_start = true                            # 摆放阶段等第一帧再结束（场景初始化有先后）

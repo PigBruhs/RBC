@@ -177,7 +177,7 @@ func _initialize() -> void:
 	# 新角色（老国王 / 公主）会自己开炮、开哨兵，会打扰后面的确定性检查。
 	# 全部先挪到地图角落（各自阵营的那一侧），要测它们时再单独摆位。
 	# 通用 AI 也先关掉（试玩要复现"敌方站着不动"的老行为），第 30 节单独测 AI。
-	_s.gm.ai_enabled = false
+	_s.t_set_ai_enabled(false)
 	_clear_ai_corner()
 
 	# ── 0. 放置阶段（战斗开始前）──
@@ -1655,7 +1655,7 @@ func _initialize() -> void:
 
 	# ── 30. AI 决策（索敌打分 / 技能规避 / 休息与靠拢）──
 	print("\n[30] AI 决策")
-	_s.gm.ai_enabled = true
+	_s.t_set_ai_enabled(true)
 	var ctx := Ai.Ctx.new()
 	ctx.rng = RngService.new(9)
 	var ai_me: Unit = null
@@ -1762,7 +1762,7 @@ func _initialize() -> void:
 	print("    残血够不着：%s" % Ai.plan(far_ctx).get("note", "-"))
 	_chk(String(Ai.plan(far_ctx).get("action", "")) == "rest", "够不着又残血 -> 休息")
 	ai_me.power_cur = ai_me.power_max
-	_s.gm.ai_enabled = false
+	_s.t_set_ai_enabled(false)
 
 	# ── 32. 日志只允许"既定事实"（谁打谁 / 伤害 / 谁触发了什么）──
 	print("\n[32] 日志体检")
@@ -2028,7 +2028,7 @@ func _initialize() -> void:
 	#       （直升机火箭只接了拖拽、坠机只挂了俯冲、枪榴弹 AI 分支被冲掉）。
 	# 现在：入口只算"打哪里"，全部调 _perform_basic / _perform_skill。
 	print("\n[38] 统一入口：三条普攻入口必须产出同一击")
-	_s.gm.ai_enabled = false
+	_s.t_set_ai_enabled(false)
 	_clear_ai_corner()          # 国王/公主挪到角落：免得他们的加农炮在探测期间打死参战者
 	_s.clear_projectiles()
 	_s.gm.pending.clear()
@@ -2239,7 +2239,7 @@ func _initialize() -> void:
 	var left_actors := TurnFlow.hero_counts(_s.units)
 	print("    打死 %d 人 ｜ 能进队列的还剩 %s ｜ 第 %d 轮" % [killed, left_actors, round0])
 	_chk(left_actors[0] == 0 and left_actors[1] == 0, "测试前提：场上已没有能进队列的单位")
-	_s.gm.ai_enabled = false
+	_s.t_set_ai_enabled(false)
 	_s.t_set_turn_just_finished(null)
 	_s.active = null
 	var tcb: int = _s.gm.turn_count
@@ -2264,7 +2264,7 @@ func _initialize() -> void:
 	he_e.controllable = false              # 这一节要测"AI 操作的直升机"，所以先摘掉可控标记
 	he_e.cell = Vector2i(10, 10)
 	he_e.visual.position = Vector3(10.5, he_e.hover, 10.5)
-	_s.gm.ai_enabled = false
+	_s.t_set_ai_enabled(false)
 	_s.t_set_turn_just_finished(null)
 	_s.active = he_e
 	# 发起一次移动：AI 走位函数必须等它走完才返回（摇杆期间不许开火）
@@ -2398,7 +2398,7 @@ func _initialize() -> void:
 	he_p.visual.position = Vector3(10.5, he_p.hover, 10.5)
 	he_p.tags.erase("dive_ready")
 	_s.t_dive_clear(he_p)
-	_s.gm.ai_enabled = false
+	_s.t_set_ai_enabled(false)
 	_s.t_set_turn_just_finished(he_p) # 让 _finish_turn() 的幂等保护生效：别让回合机马上把准备状态消费掉
 	_s.t_clear_pending()
 	_s.active = he_p

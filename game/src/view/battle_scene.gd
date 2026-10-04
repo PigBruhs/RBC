@@ -96,6 +96,17 @@ var skills_mod: SkillRunner = null
 ## 下面的同名薄包装转发到它；_process / _ready / 回调 Callable / 别人的调用点都照旧。
 var turn: TurnRunner = null
 
+## AI 开关（P4 从 GameMaster 迁出：GM 是 core 的场上状态裁判，不该知道 AI）。
+## 驱动层（本场景）才是它的家；测试走 t_ai_enabled() / t_set_ai_enabled() 门面读写。
+var ai_enabled := true                       # 敌方整队交给 AI
+var ai_autoplay_player := false              # 自动演算：我方也交给 AI（跑测试用）
+
+## AI 驱动 + GM 演出推进模块（P2e 拆出，见 view/ai_runner.gd）。
+## 它负责 _ai_ctx / _ai_take_turn / _ai_move / _ai_attack / _ai_skill / _is_ai_unit
+## 与老国王加农炮（_fire_cannon_ai）以及 GM 回合边界演出（_gm_step）。
+## 上面的 ai_enabled / ai_autoplay_player 是**驱动层状态**，模块经 _st. 读。
+var ai: AiRunner = null
+
 ## 放置/沙盒/待确认状态机模块（P2c 拆出，见 view/sandbox_runner.gd）。
 ## place_left / _place_kind / placeables / _pending_kind / _pending_cell 的**声明留在本类**
 ## （ViewFx 的黄勾可视化要读 _st._pending_cell），模块经 _st. 读写。
@@ -108,6 +119,10 @@ var action_menu: ActionMenu = null
 ## 瞄准 / 拖拽输入 / 相机 / 鼠标拾取（见 view/aim_controller.gd）。
 ## _arrow_root / _cam_focus / _zoom 等被测试直读的字段声明仍留在本类。
 var aim: AimController = null
+
+## 空中单位：巡飞弹（发射器 + Q/E 制导）+ 直升机全流程（见 view/air_runner.gd）。
+## _dive / _dive_markers / _loiter_control / _heli_shadows / _salvo_u 等字段声明仍留在本类。
+var air: AirRunner = null
 
 var _zoom: float = 15.0
 
@@ -439,183 +454,6 @@ var _loiter_sample: float = 0.0            # 发射器采样计时
 var _unit_seen: Dictionary = {}            # Unit -> 上次采样到的浮点位置（判"在动"）
 
 
-## 发射器（沙盒元素）采样：只挑"正在移动且在 12 格内"的角色，最近优先
-func _tick_loiter_launchers(delta: float) -> void:
-	if phase == Phase.PLACE or game_over:
-		return
-	_loiter_sample += delta
-	if _loiter_sample < 1.0 / Loiter.SAMPLE_HZ:
-		return
-	_loiter_sample = 0.0
-	var moving := _moving_units()
-	for pl in placeables:
-		if not pl.is_alive() or not Loiter.is_launcher(pl):
-			continue
-		if gm.turn_count < int(pl.tags.get("loiter_next", 0)):
-			continue                                     # 5 个回合边界冷却
-		var ctr := Vector2(float(pl.cell.x) + 0.5, float(pl.cell.y) + 0.5)
-		var best: Unit = null
-		var best_d := 1e9
-		for u in moving:
-			if not Loiter.is_target(u):
-				continue                                 # 区分敌我：只打敌方角色（第 91 轮）
-			var d: float = ctr.distance_to(_unit_pos(u))
-			if d > Loiter.LAUNCH_RANGE:
-				continue
-			if d < best_d:
-				best_d = d
-				best = u
-		if best == null:
-			continue
-		_fire_loiter(pl, ctr, best)
-
-
-## 这一帧哪些角色"在动"：走路 Tween 在跑，或者浮点位置和上次采样差了 MOVE_EPS
-func _moving_units() -> Array[Unit]:
-	var out: Array[Unit] = []
-	for u in units:
-		if not u.is_alive():
-			continue
-		var pos := _unit_pos(u)
-		var last = _unit_seen.get(u, pos)
-		_unit_seen[u] = pos
-		var vis := u.visual as UnitVisual
-		var walked := vis != null and vis.is_walking()
-		if walked or pos.distance_to(last) > Loiter.MOVE_EPS:
-			out.append(u)
-	return out
-
-
-func _fire_loiter(pl: Placeable, ctr: Vector2, tgt: Unit) -> void:
-	var heading := Loiter.launch_heading(ctr, _unit_pos(tgt), rng)
-	var p := Ordnance.make_loiter(-1, pl.name, ctr, heading, rng)
-	p.ignore_placeable = pl                    # 别一出膛就被自己的发射器触发了引信
-	field.register(p)
-	pl.tags["loiter_next"] = gm.turn_count + Loiter.LAUNCH_COOLDOWN_TURNS
-	# 制导权（第 91/92 轮）：**场上已经有别的巡飞弹 -> 这一发是"多余的一发"，永远不受控**；
-	# 场上没有别的 -> 这一发就是玩家能控的那一发（哪怕之前那发已经爆炸，新的一发照样能控）。
-	var others := 0
-	for it2 in field.items:
-		var q2: Projectile = it2["p"]
-		if q2 != p and q2.kind == Projectile.KIND_LOITER and q2.alive:
-			others += 1
-	if others > 0:
-		p.no_control = true
-	if _loiter_control == null or not _loiter_control.alive:
-		_loiter_control = p if not p.no_control else null
-	var d: float = ctr.distance_to(_unit_pos(tgt))
-	_log("  🚀 %s 发射【巡飞弹】→ 目标 %s（%.1f 格，初始方向 %.0f°，中心线偏 %+.0f°）%s" % [
-		pl.name, tgt.name, d, rad_to_deg(heading),
-		rad_to_deg(heading) - rad_to_deg((_unit_pos(tgt) - ctr).angle()),
-		"｜ Q/E 制导" if not p.no_control else "｜ 场上已有巡飞弹：这一发不受控（沿直线飞）"])
-
-
-## 近炸引信（每帧）：**只在敌方角色**进入感应范围（直径 1.5 格）时引爆 —— 第 92 轮口径。
-## 友军从旁边飞过不炸、沙盒元素也不炸（但引爆时的造伤仍然会打到范围内的沙盒元素）。
-## 飞满 32 格自动引爆不在这里 —— 那走弹道的落地事件（_land_shell）。
-func _tick_loiter_fuse() -> void:
-	if field == null:
-		return
-	for it in field.items.duplicate():
-		var p: Projectile = it["p"]
-		if p.kind != Projectile.KIND_LOITER or not p.alive:
-			continue
-		var ctr := p.pos3()
-		var why := ""
-		for u in units:
-			if Loiter.fuse_touches_unit(ctr, u):
-				why = u.name
-				break
-		if why == "":
-			continue
-		_log("  💥 巡飞弹近炸引信：感应范围内出现 %s → 引爆" % why)
-		p.kill("fuse")
-		_loiter_burst(p, ctr)
-
-
-## 巡飞弹引爆：**直径两格的三维球**（角色按"现在真的在哪"的高度判）+ 沙盒元素按沾格判。
-## 不分敌我（沙盒武器），40 破甲 + 40 力量，无视 50% 物抗。
-func _loiter_burst(p: Projectile, ctr: Vector3) -> void:
-	var sh: Ordnance.Shot = p.shot
-	var opts: Dictionary = sh.opts if sh != null else {}
-	if opts.is_empty():
-		opts = Loiter.opts(rng)
-	fx.flash_sphere(ctr, Loiter.BLAST_R * 1.7, 0.42)
-	_log("  💥 巡飞弹引爆 (%.1f, %.1f) 高度 %.2f：直径 %.0f 格的球，%d 破甲 + %d 力量（不分敌我）" % [
-		ctr.x, ctr.z, ctr.y, Loiter.BLAST_R * 2.0, int(Loiter.BREAK), int(Loiter.POWER)])
-	var hits: Array = Damage.air_burst(null, ctr, opts, units, null, Loiter.BLAST_R)
-	hits.append_array(Damage.blast(null, Vector2(ctr.x, ctr.z), Loiter.BLAST_R, opts,
-		[] as Array[Unit], placeables, null, -1, true))
-	if hits.is_empty():
-		_log("  （造伤范围内没有目标）")
-	for h in hits:
-		_log(h.text)
-		if h.unit != null:
-			_after_damage_to_unit(h.unit)
-		else:
-			_after_damage_to_placeable(h.placeable)
-
-
-## Q/E 制导（用户口径第 90 轮）：Q = 左转、E = 右转。
-## 按得越久转得越快（Loiter.want_rate 有上下限），松手带惯性滑回 0（Loiter.step_rate）。
-## **Q/E 在这之外没有别的用途**（只有弹反 QTE 内部会用，那时整棵树是暂停的）。
-func _tick_loiter_steer(delta: float) -> void:
-	var p := _loiter_pick_control()
-	if p == null:
-		return
-	var left := Input.is_key_pressed(KEY_Q)
-	var right := Input.is_key_pressed(KEY_E)
-	var dir := 0.0
-	if left and not right:
-		dir = -1.0
-	elif right and not left:
-		dir = 1.0
-	_loiter_steer_apply(p, dir, delta)
-
-
-## 真正施加转向：dir = -1 左转（Q）/ +1 右转（E）/ 0 松手。
-## 单独抽出来是为了让无头测试能"按住 Q/E"（headless 里造不出真实按键）。
-func _loiter_steer_apply(p: Projectile, dir: float, delta: float) -> void:
-	if p == null or not p.alive:
-		return
-	if dir < 0.0:
-		p.hold_l += delta
-		p.hold_r = 0.0
-	elif dir > 0.0:
-		p.hold_r += delta
-		p.hold_l = 0.0
-	else:
-		p.hold_l = 0.0
-		p.hold_r = 0.0
-	var hold := 0.0
-	if dir < 0.0:
-		hold = p.hold_l
-	elif dir > 0.0:
-		hold = p.hold_r
-	var want := dir * Loiter.want_rate(hold)
-	p.turn_w = Loiter.step_rate(p.turn_w, want, delta)
-	if absf(p.turn_w) > 0.01:
-		var axes := Loiter.screen_axes(_cam_yaw)
-		p.heading = Loiter.steer(p.heading, axes[0], axes[1], p.turn_w, delta)
-
-
-## 玩家当前制导的那一发（第 91/92 轮口径）：
-##   · 场上"非多余"且**最早发射**的那一发受控（多余 = 发射时场上已经有别的巡飞弹，永远不受控）
-##   · 受控那发爆炸后：之前那些"多余的"仍然不受控，但**之后新发射的一发会重新受控**
-func _loiter_pick_control() -> Projectile:
-	if _loiter_control != null and _loiter_control.alive:
-		return _loiter_control
-	_loiter_control = null
-	if field == null:
-		return null
-	for it in field.items:
-		var p: Projectile = it["p"]
-		if p.kind == Projectile.KIND_LOITER and p.alive and not p.no_control:
-			_loiter_control = p
-			break
-	return _loiter_control
-
-
 ## 阵营显示名：敌方阵营里"玩家可控"的角色要标出来，否则玩家分不清谁能操作
 
 static func _faction_cn(u: Unit) -> String:
@@ -658,6 +496,19 @@ func _refresh_upgrades() -> void:
 	if ui != null:
 		ui.refresh_upgrades(selected)
 
+
+
+
+# ── ⚠️ 跨模块事实接口（别删）：别的模块正在通过 _st._xxx 调这两个 ──
+#   projectile_sink.gd -> _st._loiter_burst(p, ...)  （被击落 / 落地都按就地引爆）
+#   turn_runner.gd     -> _st._dive_begin(u)         （AI/回合机发起俯冲）
+# 实现在 view/air_runner.gd。删了会在运行时炸，编译期查不出来。
+func _loiter_burst(p: Projectile, ctr: Vector3) -> void:
+	air.loiter_burst(p, ctr)
+
+
+func _dive_begin(u: Unit) -> bool:
+	return air.dive_begin(u)
 
 
 # ── 跨模块事实接口：这三个别的模块会用 `_st.` 调，宿主必须留公开入口 ──
@@ -717,9 +568,11 @@ func _ready() -> void:
 	attack = BasicAttack.new(self)       # 普攻唯一入口模块
 	skills_mod = SkillRunner.new(self)   # 技能编排模块（唯一入口 perform_skill）
 	turn = TurnRunner.new(self)         # 回合机 / 寻路 / 单位生命周期模块
+	ai = AiRunner.new(self)             # AI 驱动 + GM 演出推进模块
 	sandbox = SandboxRunner.new(self)   # 放置 / 沙盒 / 待确认状态机模块
 	action_menu = ActionMenu.new(self)   # 行动菜单状态机
 	aim = AimController.new(self)        # 瞄准/拖拽 + 相机 + 鼠标拾取
+	air = AirRunner.new(self)            # 巡飞弹（含发射器）+ 直升机全流程
 	# 弹道物场：只做物理与上报，后果由 ProjectileSink 处理
 	# ⚠️ 这里传的是**模块方法**（Callable 事实接口）：改名即断，两处都在本函数里
 	field = ProjectileField.new()
@@ -924,179 +777,56 @@ func _next_turn() -> void:
 ## ── 通用 AI（用户口径：给每个 AI 索敌优先级与规则，全图视野）────────────────
 ## 决策在 core/ai.gd（纯函数），这里只负责组装世界快照 + 执行计划。
 
+## ⚠️ 跨模块事实接口（**别删**）：turn_runner.gd 正在通过 `_st._is_ai_unit` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _is_ai_unit(u: Unit) -> bool:
-	if u == null or not u.has_turn():
-		return false
-	if u.side == UnitData.Side.ENEMY:
-		return gm.ai_enabled or not u.controllable
-	return gm.ai_autoplay_player
+	return ai.is_ai_unit(u)
 
 
 func _ai_ctx(u: Unit) -> Ai.Ctx:
-	var c := Ai.Ctx.new()
-	c.me = u
-	c.rng = rng
-	for o in units:
-		if not o.is_alive():
-			continue
-		if o.side != u.side:
-			c.foes.append(o)
-			if o.is_king:
-				c.foe_king = o
-	c.reachable = _compute_reachable(u)
-	c.placeables = placeables
-	c.me_has_sentry = gm.has_sentry(u)
-	# 敌方哨兵覆盖的格子（全图视野，投掷手要靠它避开技能落点）
-	for s in gm.sentries:
-		if s.side == u.side or s.owner == null or not s.owner.is_alive():
-			continue
-		var ctr := gm.sentry_center(s)
-		var r := float(s.rng_max)
-		var x0: int = maxi(PX, int(ctr.x - r) - 1)
-		var x1: int = mini(PX + PW - 1, int(ctr.x + r) + 1)
-		var y0: int = maxi(PY, int(ctr.y - r) - 1)
-		var y1: int = mini(PY + PH - 1, int(ctr.y + r) + 1)
-		for y in range(y0, y1 + 1):
-			for x in range(x0, x1 + 1):
-				if s.in_range(ctr, Vector2(float(x) + 0.5, float(y) + 0.5)):
-					c.sentry_cells[Vector2i(x, y)] = true
-	return c
+	return ai.ai_ctx(u)
 
 
+## ⚠️ 跨模块事实接口（**别删**）：turn_runner.gd 正在通过 `_st._ai_take_turn` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _ai_take_turn(u: Unit) -> void:
-	_ai_turn = true
-	await get_tree().create_timer(UnitData.DUMMY_SKIP_DELAY * 0.5).timeout
-	if not u.is_alive():
-		_ai_turn = false
-		_finish_turn()
-		return
-	var plan := Ai.plan(_ai_ctx(u))
-	_log("  🤖 %s：%s" % [u.name, plan.get("note", "-")])
-	var mv = plan.get("move_to", null)
-	if mv != null:
-		# 用户口径（第 86 轮）：**移动结束后才能释放技能或普攻** ——
-		# 所以这里一律等它走完（直升机也一样：看上去"边走边打"做不到，就不做）。
-		await _ai_move(u, mv)
-		if not u.is_alive():
-			_ai_turn = false
-			_finish_turn()
-			return
-		plan = Ai.plan(_ai_ctx(u))          # 位置变了，重新决策
-		_log("  🤖 %s：%s" % [u.name, plan.get("note", "-")])
-	match String(plan.get("action", "end")):
-		"attack":
-			_ai_attack(u, plan)
-		"skill":
-			_ai_skill(u, plan)
-		"rest":
-			action_menu.menu_rest()
-		"move":
-			var mv2 = plan.get("move_to", null)
-			if mv2 != null:
-				await _ai_move(u, mv2)
-			_ai_turn = false
-			_finish_turn()
-			return
-		_:
-			_finish_turn()
-	# 兜底：AI 回合如果既没结束也没在等弹道物，就强制收尾，绝不允许卡住
-	if _ai_turn and active == u and not u.has_acted and _pending_turn_end == false \
-			and field.items.is_empty():
-		_log("  ⚠ AI 回合没有产生任何动作，强制结束")
-		_finish_turn()
-	_ai_turn = false
+	await ai.ai_take_turn(u)
 
 
 ## AI 走位。wait = false 时只发起移动、不等走完（保留参数：现在所有 AI 都等走完）
 func _ai_move(u: Unit, cell: Vector2i, wait: bool = true) -> void:
-	if u == null or cell == u.cell:
-		return
-	_do_move(u, cell)
-	if not wait:
-		return
-	var guard := 0.0
-	while u.visual != null and u.visual.is_walking() and guard < 4.0:
-		guard += 0.05
-		await get_tree().create_timer(0.05).timeout
+	await ai.ai_move(u, cell, wait)
 
 
 ## AI 出手：和玩家点目标走的是同一条生产线（_perform_basic）。
 ## 差别只有两点：不弹菜单、打不出也必须自己收尾（绝不允许 AI 回合卡住）。
 func _ai_attack(u: Unit, plan: Dictionary) -> void:
-	var aim: Vector2 = plan.get("aim", _cc(u.cell))
-	var t: Unit = plan.get("target", null)
-	var pl: Placeable = plan.get("placeable", null)
-	if t != null and not t.is_alive():
-		t = null
-	if pl != null and not pl.is_alive():
-		pl = null
-	if t == null and pl == null:
-		_finish_turn()
-		return
-	if not attack.perform_basic(u, aim, t, pl, bool(plan.get("break_armor", false))):
-		_finish_turn()          # 精力不足/目标非法：也必须结束回合，否则软锁
+	ai.ai_attack(u, plan)
 
 
 ## AI 用技能：和玩家走同一条生产线（_perform_skill）。
 ## 差别只有两点：不弹菜单、用不出也必须自己收尾（绝不允许 AI 回合卡住）。
 func _ai_skill(u: Unit, plan: Dictionary) -> void:
-	var sid := String(plan.get("skill", ""))
-	var aim: Vector2 = plan.get("aim", _cc(u.cell))
-	var cell: Vector2i = plan.get("cell", Vector2i(int(floor(aim.x)), int(floor(aim.y))))
-	if not skills_mod.perform_skill(u, sid, aim, cell):
-		_finish_turn()
+	ai.ai_skill(u, plan)
 
 
 ## ── 老国王的加农炮 AI ────────────────────────────────────────────────────────
 ## 用户口径：朝【距离最近的敌对单位】发射一发加农炮弹；
 ## 不管对方是否在射程内、路径上有没有障碍物或友军；并列最近时随机选一个。
 
+## ⚠️ 跨模块事实接口（**别删**）：turn_runner.gd 正在通过 `_st._fire_cannon_ai` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _fire_cannon_ai(u: Unit, ends_turn: bool = true) -> void:
-	var foes: Array[Unit] = []
-	for o in units:
-		if o.is_alive() and o.side != u.side:
-			foes.append(o)
-	if foes.is_empty():
-		if ends_turn:
-			_finish_turn()
-		return
-	var from := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
-	var best := 1e9
-	for o in foes:
-		best = minf(best, from.distance_to(Vector2(o.cell)))
-	var picks: Array[Unit] = []
-	for o in foes:
-		if absf(from.distance_to(Vector2(o.cell)) - best) < 0.001:
-			picks.append(o)
-	var t: Unit = picks[rng.next_int(picks.size())]      # 并列最近 -> 随机
-	var to := Vector2(float(t.cell.x) + 0.5, float(t.cell.y) + 0.5)
-	var dir := to - from
-	dir = dir.normalized() if dir.length() > 0.001 else Vector2.RIGHT
-	# 射程 15：超出就只飞 15 格（打不到人，但照打 —— 用户口径"无论是否在射程内"）
-	var reach: float = minf(from.distance_to(to), Ordnance.CANNON_RANGE)
-	var land := from + dir * reach
-	if u.visual != null:
-		u.visual.rotation.y = atan2(dir.x, dir.y)        # 炮口转向目标（炮在身前 +Z）
-	var muzzle := from + dir * 0.55
-	_spawn_cannon(u, Vector3(muzzle.x, 0.80, muzzle.y),
-		Vector3(land.x, Targeting.aim_height(t), land.y), ends_turn)
-	_log("  💣 %s 的加农炮瞄准最近的 %s（%.1f 格，射程 %.0f）：出膛" %
-		[u.name, t.name, from.distance_to(to), reach])
+	ai.fire_cannon_ai(u, ends_turn)
 
 
 ## 这位老国王是不是已经有一发炮弹在飞（GM 定时空袭时避免叠炮）
 func _king_ball_in_flight(u: Unit) -> bool:
-	for it in field.items:
-		var p: Projectile = it["p"]
-		if p.kind == Projectile.KIND_CANNON and p.alive and p.owner_unit == u:
-			return true
-	return false
+	return ai.king_ball_in_flight(u)
 
 
 func _spawn_cannon(caster: Unit, from: Vector3, to: Vector3, ends_turn: bool) -> Projectile:
-	var p := Ordnance.make_cannon(caster, from, to, ends_turn)
-	field.register(p)
-	return p
+	return ai.spawn_cannon(caster, from, to, ends_turn)
 
 func _finish_turn() -> void:
 	# QTE（箭矢弹反）期间全局暂停：回合也不许推进，等判定出结果再补上
@@ -1140,27 +870,10 @@ func _finish_turn() -> void:
 
 ## 点沙盒道具：把它的描述与数据写进下方属性栏（用户要求）
 
+## ⚠️ 跨模块事实接口（**别删**）：turn_runner.gd 正在通过 `_st._gm_step` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _gm_step() -> void:
-	var due := gm.dispatch_turn_boundary()
-	if not gm.pending.is_empty():
-		_log("  [GM] 第 %d 次回合边界：%s" % [gm.turn_count, gm.pending_desc()])
-	# 英雄重生：到点的满血放回"两公主之间"的固定格（用户口径：等 10 个回合）
-	for u in gm.due_revives():
-		_revive_hero(u)
-	# 老国王不进队列：由 GM 每 5 个回合边界替他打一炮（用户口径）
-	if gm.turn_count > 0 and gm.turn_count % KING_FIRE_TURNS == 0:
-		for u in units:
-			if u.is_king and u.is_alive() and not _king_ball_in_flight(u):
-				_log("  [GM] 第 %d 次回合边界：老国王的加农炮到点" % gm.turn_count)
-				_fire_cannon_ai(u, false)
-	for p in due:
-		if p.skill_id == "grenade":
-			sink.explode_grenade(p)
-		if p.skill_id == "orbital_strike":
-			_log("  [GM] ☄ %s 的轨道火力到点，暂停回合开始覆盖" % p.caster_name)
-			_set_gm_busy(true)
-			await skills_mod.run_orbital_barrage(p)
-			_set_gm_busy(false)
+	await ai.gm_step()
 
 
 ## GameMaster 演出开关：锁住所有角色操作与 >> 按钮
@@ -1313,7 +1026,7 @@ func _holy_sani_check(u: Unit) -> void:
 func _start_arrow_qte(victim: Unit, sh: Ordnance.Shot, bonus_milli: int = 0) -> void:
 	# AI 接管的一方不弹 QTE：直接按概率判定。
 	# （否则自动演算/AI 对射会永远停在 get_tree().paused = true 上没人按键）
-	if _is_ai_unit(victim) or gm.ai_autoplay_player:
+	if _is_ai_unit(victim) or ai_autoplay_player:
 		var ok := rng.next_float() < AI_QTE_CHANCE
 		_log("  🛡 %s 触发【箭矢弹反】：AI 自动判定 %s" % [victim.name, "成功" if ok else "失败"])
 		_on_arrow_qte_done(ok, victim, sh, bonus_milli)
@@ -1409,63 +1122,6 @@ func _spawn_arrow(attacker: Unit, from: Vector3, to: Vector3, target: Unit,
 
 ## 角色挨打后的统一收尾：闪白、刷新指示器、判定阵亡
 
-## 【坠机】被动：直升机的力量池**归零**时才坠机（加速下坠 -> 2.5 格炮击 -> 死亡）。
-##
-## 用户口径（第 97 轮）：**删掉"半血自毁"** —— 以前 `crash_threshold = 21`（力量低于 21 就坠机），
-## 于是直升机还剩 20 点力量时就会自己炸掉。现在阈值 = 0：只有力量池真的被打空（= 阵亡）才坠机。
-## 第 89 轮的口径不变：**就算这一下直接把它打空，也要走坠机的死亡附加伤害**。
-## 所以这里只看 `is_alive()`（= `power_cur > 0`），不能像以前那样要求"还活着"再另判阈值。
-func _check_heli_crash(u: Unit) -> bool:
-	if u == null:
-		return false
-	if not Unit.base_name(u.name).begins_with(HELI_PREFIX):
-		return false
-	if u.tags.has("crashing"):
-		return false
-	if u.is_alive():
-		return false                      # 力量池还有剩 -> 不坠机
-	_start_crash(u)
-	return true
-
-
-func _start_crash(u: Unit) -> void:
-	u.tags["crashing"] = true
-	u.tags.erase("diving")
-	u.tags.erase("dive_ready")
-	u.body_y = -1.0                 # 坠机 = 从悬停高度往下掉
-	skills_mod.dive_clear(u)
-	_log("  💥 %s 力量归零 —— 坠机！" % u.name)
-	var from_h: float = u.visual.position.y if u.visual != null else u.hover
-	var tw := create_tween()
-	tw.tween_property(u.visual, "position:y", 0.0, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.tween_callback(func() -> void: _crash_impact(u))
-
-
-func _crash_impact(u: Unit) -> void:
-	var cfg := Level.heli()
-	var center := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
-	fx.flash_sphere(Vector3(center.x, 0.6, center.y), 2.0, 0.45)
-	var opts := Combat.opts({
-		"power": int(cfg["crash_power"]) * 1000,
-		"armor_break": int(cfg["crash_break"]) * 1000,
-		"ignore_res": float(cfg["crash_res"]),
-		"rng": rng,
-	})
-	_log("  💥 %s 坠机落地 (%.1f, %.1f)：半径 %.1f 格内所有角色吃 %d 力 + %d 破甲（无视 50%% 物抗）" % [
-		u.name, center.x, center.y, float(cfg["crash_r"]),
-		int(cfg["crash_power"]), int(cfg["crash_break"])])
-	var hits: Array = Damage.blast(u, center, float(cfg["crash_r"]), opts, units, placeables,
-		null, u.side, true)
-	for h in hits:
-		if h.unit != null:
-			_log(h.text)
-			_after_damage_to_unit(h.unit)
-	u.power_cur = 0
-	if u.visual != null:
-		u.visual.position.y = 0.0
-	_on_unit_died(u)
-
-
 ## ── 俯冲轰炸（主动技能）：准备 -> 俯冲 -> 停 0.5 秒投弹 -> 原路返回 ──────────
 var _dive_markers: Dictionary = {}        # 单位名 -> 目标格地面标识（Node3D）
 var _dive: Dictionary = {}                # 正在俯冲的状态机
@@ -1484,169 +1140,15 @@ func _clamp_cell(c: Vector2i) -> Vector2i:
 	return turn.clamp_cell(c)
 
 
-## 轮到它的回合：开始【爬升轰炸】（返回 true 表示本回合由它接管）
-## 用户口径（第 86 轮）：不再俯冲下去，而是**均匀爬升到不会自伤的高度** ——
-## 爬到目标上方（升到 climb_h）-> 停 0.5 秒 -> 投弹（弹下落 1 秒）-> 原路返回并降回悬停高度。
-func _dive_begin(u: Unit) -> bool:
-	if not u.tags.has("dive_ready"):
-		return false
-	var cfg := Level.heli()
-	var target: Vector2i = u.tags["dive_ready"]
-	skills_mod.dive_clear(u)
-	u.tags["diving"] = true
-	_dive = {
-		"u": u, "phase": "up",
-		"from": _cc(u.cell),
-		"to": _cc(target),
-		"t": 0.0, "speed": float(cfg["climb_speed"]), "hold": 0.0,
-		"hi": float(cfg["climb_h"]),
-	}
-	gm.on_move_begin(u)          # 哨兵：这次"技能移动"的已触发闩清零（用户口径第 89 轮）
-	if u.visual != null:
-		u.visual.position.y = u.hover
-	_log("  🚁 %s 开始爬升轰炸 -> (%d, %d)（升到 %.1f 格，%.1f 格/秒）" % [
-		u.name, target.x, target.y, float(cfg["climb_h"]), float(cfg["climb_speed"])])
-	return true
-
-
-func _dive_tick(delta: float) -> void:
-	if _dive.is_empty():
-		return
-	var u: Unit = _dive["u"]
-	if u == null or not u.is_alive() or not u.tags.has("diving"):
-		_dive = {}
-		if u != null:
-			u.body_y = -1.0                  # 临时高度作废，回到悬停高度
-		return
-	var cfg := Level.heli()
-	var phase := String(_dive["phase"])
-	var from: Vector2 = _dive["from"]
-	var to: Vector2 = _dive["to"]
-	var speed: float = float(_dive["speed"])
-	var hi: float = float(_dive["hi"])
-	var total := maxf(0.5, from.distance_to(to))
-	if phase == "up":
-		_dive["t"] = minf(1.0, float(_dive["t"]) + speed * delta / total)
-		var k: float = float(_dive["t"])
-		var pos := from.lerp(to, k)
-		_place_diving(u, pos, lerpf(u.hover, hi, k))          # 均匀爬升
-		if k >= 1.0:
-			_dive["phase"] = "hold"
-			_dive["hold"] = float(cfg["drop_hold"])
-			_log("  🚁 %s 爬到目标上方 %.1f 格，停 %.2f 秒投弹" % [
-				u.name, hi, float(cfg["drop_hold"])])
-	elif phase == "hold":
-		_dive["hold"] = float(_dive["hold"]) - delta
-		if float(_dive["hold"]) <= 0.0:
-			_dive["phase"] = "wait_bomb"
-			_dive["hold"] = float(_dive["hold"]) + float(cfg["bomb_fall_sec"])
-			_start_bomb_fall(u, to)                            # 投弹：弹下落 1 秒
-	elif phase == "wait_bomb":
-		# 用户口径（第 89 轮）：**投弹后先留在 4 格上等炸弹落地**再返航 ——
-		# 不然返航途中降到 3 格以下，炸弹会把自己炸到 21 血（41 - 20）。
-		_dive["hold"] = float(_dive["hold"]) - delta
-		_place_diving(u, to, hi)
-		if float(_dive["hold"]) <= 0.0:
-			_dive["phase"] = "back"
-			_dive["t"] = 1.0
-	elif phase == "back":
-		_dive["t"] = maxf(0.0, float(_dive["t"]) - speed * delta / total)
-		var k2: float = float(_dive["t"])
-		var pos2 := from.lerp(to, k2)
-		_place_diving(u, pos2, lerpf(u.hover, hi, k2))         # 返航时均匀降回
-		if k2 <= 0.0:
-			u.tags.erase("diving")
-			u.body_y = -1.0                                    # 回到悬停高度
-			_dive = {}
-			if u.visual != null:
-				u.visual.position.y = u.hover
-			_log("  🚁 %s 返航完成" % u.name)
-			_finish_turn()
-
-
-## 把炸弹从直升机脚下丢下去：下落 bomb_fall_sec 秒后触地结算（用户口径第 86 轮）
-func _start_bomb_fall(u: Unit, at: Vector2) -> void:
-	var cfg := Level.heli()
-	var fall := float(cfg["bomb_fall_sec"])
-	var h0: float = u.visual.position.y if u.visual != null else u.hover
-	var bomb := MeshInstance3D.new()
-	var bm := SphereMesh.new()
-	bm.radius = 0.36                       # 投掷手普攻模型直径翻倍
-	bm.height = 0.72
-	bomb.mesh = bm
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.18, 0.18, 0.20)
-	mat.metallic = 0.5
-	bomb.material_override = mat
-	bomb.position = Vector3(at.x, h0, at.y)
-	add_child(bomb)
-	_log("  💣 %s 投弹：炸弹从 %.1f 格下落（%.2f 秒后触地）" % [u.name, h0, fall])
-	var tw := create_tween()
-	tw.tween_property(bomb, "position:y", 0.15, fall).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.tween_callback(func() -> void:
-		if is_instance_valid(bomb):
-			bomb.queue_free()
-		_drop_bomb(u, at))
-
-
-## 俯冲中的位置同步（格坐标 + 高度）
-func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
-	u.cell = _clamp_cell(Vector2i(int(floor(pos.x)), int(floor(pos.y))))
-	u.body_y = h                  # 第 89 轮：三维判定按"它现在真的在哪"算（否则会被自己的炸弹炸到）
-	if u.visual != null:
-		u.visual.position = Vector3(clampf(pos.x, float(PX) + 0.5, float(PX + PW) - 0.5), h,
-			clampf(pos.y, float(PY) + 0.5, float(PY + PH) - 0.5))
-	_check_heli_crash(u)          # 用户口径：俯冲期间会受伤、也会触发被动
-	# 哨兵（用户口径第 89 轮）：**技能移动和走路一样要触发哨兵** ——
-	# 以前只有 walk_path 的视觉位移会采样，技能飞行完全不惊动哨兵（一次移动最多入队一次）。
-	var sample := pos
-	if u.visual != null:
-		sample = Vector2(u.visual.position.x, u.visual.position.z)
-	sentry.lock(u, sample)
-
-
-## 投弹：投掷手普攻模型直径翻倍、**半径 3 格的三维球**、40 破甲 + 20 力量、不触发哨兵。
-## 用户口径（第 86 轮）：判定改成**三维球**（球心在地面、半径 3 格）——
-## 所以爬到 4 格以上投弹就炸不到自己（以前是"红圈沾格"，站多高都吃伤害）。
-## 第 95 轮：爆炸表现也照这个半径画（以前只有一个 1.2 的小闪光，看不出 3 格的范围）。
-func _drop_bomb(u: Unit, at: Vector2) -> void:
-	var cfg := Level.heli()
-	var radius := float(cfg["drop_blast_r"])
-	fx.flash_sphere(Vector3(at.x, 0.8, at.y), radius, 0.42)
-	var opts := Combat.opts({
-		"power": int(cfg["drop_power"]) * 1000,
-		"armor_break": int(cfg["drop_break"]) * 1000,
-		"ignore_res": 0.0,
-		"rng": rng,
-	})
-	_log("  💣 %s 投弹 (%.1f, %.1f)：半径 %.1f 格（三维球），%d 破甲 + %d 力量（不触发哨兵）" % [
-		u.name, at.x, at.y, radius, int(cfg["drop_break"]), int(cfg["drop_power"])])
-	# skip = null：不分敌我（用户口径）；球心在离地 0.15 格
-	var hits: Array = Damage.air_burst(u, Vector3(at.x, 0.15, at.y), opts, units, null, radius)
-	for h in hits:
-		if h.unit != null:
-			_log(h.text)
-			_after_damage_to_unit(h.unit)
-	# 沙盒道具：照旧按格子判定（道具没有高度轴）
-	for pl in placeables:
-		if not pl.is_alive():
-			continue
-		if Vector2(float(pl.cell.x) + 0.5, float(pl.cell.y) + 0.5).distance_to(at) > radius:
-			continue
-		var r2 := Combat.deal_to_placeable(pl, opts)
-		_log("  [道具] %s：%s" % [pl.name, Combat.describe(r2, pl.pr, 0.0)])
-		_after_damage_to_placeable(pl)
-	fx.show_impact(at)
-
-
 ## 受伤后的被动钩子表：被动表里声明 on_damaged = true 的，在这里依次执行。
 ## 加新被动 = Passives.DEFS 加一行 + 这里加一行，不用再改 _after_damage_to_unit。
 var _passive_hooks: Dictionary = {}          # 被动 id -> Callable(u) -> bool（true = 已接管收尾）
 
 
 func _init_passive_hooks() -> void:
+	# ⚠️ Callable 事实接口：改名即断。坠机接管实现在 air_runner.gd（air 在 _ready 里先于本函数创建）
 	_passive_hooks = {
-		"heli_crash": _hook_heli_crash,
+		"heli_crash": air.hook_heli_crash,
 	}
 
 
@@ -1661,11 +1163,6 @@ func _after_damage_to_unit(u: Unit) -> void:
 		u.visual.update_orb()
 	if not u.is_alive():
 		_on_unit_died(u)
-
-
-## 【坠机】被动钩子（Passives 里声明 "heli_crash"，挂在直升机这一族名字上）
-func _hook_heli_crash(u: Unit) -> bool:
-	return _check_heli_crash(u)
 
 
 ## 道具挨打后的统一收尾
@@ -1809,9 +1306,9 @@ func _damage_placeable(attacker: Unit, p: Placeable, silent: bool = false) -> vo
 # ══════════════════════════════════════════════════════════════════════════════
 
 func _process(delta: float) -> void:
-	_dive_tick(delta)
-	_tick_heli_fx(delta)
-	_tick_loiter_steer(delta)      # 巡飞弹：Q/E 制导（改的是这一帧的方向）
+	air.dive_tick(delta)
+	air.tick_heli_fx(delta)
+	air.tick_loiter_steer(delta)      # 巡飞弹：Q/E 制导（改的是这一帧的方向）
 
 
 ## 直升机的每帧表现（悬浮高度 / 旋翼自转 / 俯冲姿态）—— 队友交付的 HeliFx
@@ -1821,10 +1318,10 @@ func _process(delta: float) -> void:
 	_sync_menu_position()          # 菜单跟着角色走
 	_tick_queue_anim(delta)
 	field.step(delta)              # 弹道物理：推进 / 碰撞 / 上报结果（顺带把进入射界的送进哨兵队列）
-	_tick_loiter_fuse()            # 巡飞弹近炸引信：走完这一帧再看谁进了造伤范围
+	air.tick_loiter_fuse()            # 巡飞弹近炸引信：走完这一帧再看谁进了造伤范围
 	if _qte_active:
 		return                     # 弹反 QTE 进行中：这一帧剩下的都别做（时间已暂停）
-	_tick_loiter_launchers(delta)  # 巡飞弹发射器：12Hz 采样"正在移动的角色"
+	air.tick_loiter_launchers(delta)  # 巡飞弹发射器：12Hz 采样"正在移动的角色"
 	sentry.tick(delta)      # 哨兵：每 150ms 放一支箭打队头
 	_tick_unit_walk(delta)         # 走路中的哨兵检测
 	sentry_range.sync(gm.sentries) # 射界高亮跟着哨兵状态走
@@ -2440,57 +1937,8 @@ func ui_open_attack_menu(t: Unit) -> void:
 		ui.show_attack_menu(t)
 
 
-func _tick_heli_fx(delta: float) -> void:
-	for u in units:
-		if u == null or u.visual == null:
-			continue
-		if not Unit.base_name(u.name).begins_with(HELI_PREFIX):
-			continue
-		HeliFx.tick(u.visual, u, delta)
-		_heli_shadow(u)
-	# AI 回合看门狗：万一某条异步路径没结束回合，也不许把游戏卡死。
-	# 第 93 轮：直升机 8 波齐射要 7 秒（还有走路），看门狗必须让位，否则会把齐射砍断、
-	# 再由齐射的收尾去结束下一个人的回合。
-	if active != null and _is_ai_unit(active) and not get_tree().paused \
-			and _dive.is_empty() and _salvo_u == null:
-		_turn_watch_t += delta
-		if _turn_watch_t > 9.0:
-			_log("  ⚠ AI 回合超时（%.0f 秒未结束），强制结束以免软锁：%s" % [_turn_watch_t, active.name])
-			_turn_watch_t = 0.0
-			_dive = {}
-			active.tags.erase("diving")
-			_finish_turn()
-	else:
-		_turn_watch_t = 0.0
-
-
 ## 直升机脚下的圆形阴影（跟随移动，越高越淡越大）
 var _heli_shadows: Dictionary = {}
-
-
-func _heli_shadow(u: Unit) -> void:
-	var node: Node3D = _heli_shadows.get(u, null)
-	if node == null or not is_instance_valid(node):
-		node = Node3D.new()
-		var disc := MeshInstance3D.new()
-		var cy := CylinderMesh.new()
-		cy.top_radius = 0.42
-		cy.bottom_radius = 0.42
-		cy.height = 0.02
-		disc.mesh = cy
-		var m := StandardMaterial3D.new()
-		m.albedo_color = Color(0.0, 0.0, 0.0, 0.34)
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		disc.material_override = m
-		node.add_child(disc)
-		add_child(node)
-		_heli_shadows[u] = node
-	var h: float = maxf(0.0, u.visual.position.y)
-	node.position = Vector3(u.visual.position.x, 0.02, u.visual.position.z)
-	var k: float = clampf(h / 2.0, 0.0, 1.5)
-	node.scale = Vector3(1.0 + 0.25 * k, 1.0, 1.0 + 0.25 * k)
-
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2578,7 +2026,7 @@ func t_btn_power() -> Button:
 	return _btn_power
 
 func t_loiter_pick_control() -> Projectile:
-	return _loiter_pick_control()
+	return air.loiter_pick_control()
 
 func t_btn_attack() -> Button:
 	return _btn_attack
@@ -2593,7 +2041,7 @@ func t_queue_alternation_ok() -> bool:
 	return turn.queue_alternation_ok()
 
 func t_tick_loiter_launchers(delta: float) -> void:
-	_tick_loiter_launchers(delta)
+	air.tick_loiter_launchers(delta)
 
 func t_update_camera() -> void:
 	aim.update_camera()
@@ -2659,7 +2107,7 @@ func t_last_flash() -> Node3D:
 	return _last_flash
 
 func t_loiter_steer_apply(p: Projectile, dir: float, delta: float) -> void:
-	_loiter_steer_apply(p, dir, delta)
+	air.loiter_steer_apply(p, dir, delta)
 
 func t_salvo_dbg() -> Dictionary:
 	return _salvo_dbg
@@ -2671,7 +2119,7 @@ func t_after_damage_to_unit(u: Unit) -> void:
 	_after_damage_to_unit(u)
 
 func t_ai_attack(u: Unit, plan: Dictionary) -> void:
-	_ai_attack(u, plan)
+	ai.ai_attack(u, plan)
 
 func t_aim_float_pos() -> Vector2:
 	return _aim_float_pos
@@ -2713,7 +2161,7 @@ func t_check_mats() -> Array:
 	return _check_mats
 
 func t_dive_begin(u: Unit) -> bool:
-	return _dive_begin(u)
+	return air.dive_begin(u)
 
 func t_dive_clear(u: Unit) -> void:
 	skills_mod.dive_clear(u)
@@ -2725,7 +2173,7 @@ func t_fire() -> void:
 	aim.fire()
 
 func t_fire_loiter(pl: Placeable, ctr: Vector2, tgt: Unit) -> void:
-	_fire_loiter(pl, ctr, tgt)
+	air.fire_loiter(pl, ctr, tgt)
 
 func t_gm_busy() -> bool:
 	return _gm_busy
@@ -2764,7 +2212,7 @@ func t_set_skill_menu(v: PanelContainer) -> void:
 	_skill_menu = v
 
 func t_ai_ctx(u: Unit) -> Ai.Ctx:
-	return _ai_ctx(u)
+	return ai.ai_ctx(u)
 
 func t_aim_range(t: float) -> float:
 	return aim.aim_range(t)
@@ -2800,7 +2248,7 @@ func t_charge_from_drag(px: float) -> float:
 	return aim.charge_from_drag(px)
 
 func t_check_heli_crash(u: Unit) -> bool:
-	return _check_heli_crash(u)
+	return air.check_heli_crash(u)
 
 func t_clear_selection() -> void:
 	_clear_selection()
@@ -2812,7 +2260,7 @@ func t_dive_markers() -> Dictionary:
 	return _dive_markers
 
 func t_dive_tick(delta: float) -> void:
-	_dive_tick(delta)
+	air.dive_tick(delta)
 
 func t_explode_grenade(p: GameMaster.Pending) -> void:
 	sink.explode_grenade(p)
@@ -2824,7 +2272,7 @@ func t_finish_turn() -> void:
 	await _finish_turn()
 
 func t_gm_step() -> void:
-	await _gm_step()
+	await ai.gm_step()
 
 func t_menu_move() -> void:
 	action_menu.menu_move()
@@ -2863,13 +2311,13 @@ func t_spawn_grenade_shot(u: Unit, aim: Vector2, sid: String) -> Projectile:
 	return skills_mod.spawn_grenade_shot(u, aim, sid)
 
 func t_tick_loiter_fuse() -> void:
-	_tick_loiter_fuse()
+	air.tick_loiter_fuse()
 
 func t_ai_move(u: Unit, cell: Vector2i, wait: bool = true) -> void:
-	await _ai_move(u, cell, wait)
+	await ai.ai_move(u, cell, wait)
 
 func t_ai_skill(u: Unit, plan: Dictionary) -> void:
-	_ai_skill(u, plan)
+	ai.ai_skill(u, plan)
 
 func t_begin_aim() -> void:
 	aim.begin_aim()
@@ -2905,7 +2353,7 @@ func t_face_check_mark() -> void:
 	fx.face_check_mark()
 
 func t_fire_cannon_ai(u: Unit, ends_turn: bool = true) -> void:
-	_fire_cannon_ai(u, ends_turn)
+	ai.fire_cannon_ai(u, ends_turn)
 
 func t_hint_layer() -> Node3D:
 	return _hint_layer
@@ -2914,7 +2362,24 @@ func t_holy_sani_check(u: Unit) -> void:
 	_holy_sani_check(u)
 
 func t_is_ai_unit(u: Unit) -> bool:
-	return _is_ai_unit(u)
+	return ai.is_ai_unit(u)
+
+
+## AI 开关的测试门面（P4：字段已从 GameMaster 迁到本类）
+func t_ai_enabled() -> bool:
+	return ai_enabled
+
+
+func t_set_ai_enabled(v: bool) -> void:
+	ai_enabled = v
+
+
+func t_autoplay_player() -> bool:
+	return ai_autoplay_player
+
+
+func t_set_autoplay_player(v: bool) -> void:
+	ai_autoplay_player = v
 
 func t_menu_rest() -> void:
 	action_menu.menu_rest()

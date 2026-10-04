@@ -36,7 +36,7 @@ func _process(d: float) -> bool:
 	match _stage:
 		0:
 			if _t >= 0.2:
-				_s.gm.ai_enabled = false        # 探针要确定性：关掉通用 AI
+				_s.t_set_ai_enabled(false)        # 探针要确定性：关掉通用 AI
 				var p := 0
 				var e := 0
 				for u in _s.units:
