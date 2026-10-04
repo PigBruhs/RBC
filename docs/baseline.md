@@ -69,6 +69,29 @@ python tools/make_unit_data.py
    `... 2>&1 | Out-File -Encoding utf8 ".tmp_for_deepseek\xxx.txt"`，再用 read/Select-String 看。
    临时输出**统一放 `.tmp_for_deepseek/`**（已 gitignore），不要散落到仓库根或 `tools/`。
 
+### 第 0 步：改完 `view/` 先跑编译快检（几秒钟）
+
+**`tests/run.gd` 根本不加载 `battle_scene.gd`** —— 它只测 `UnitData` / `Rules` / `Damage` 这些纯 core。
+所以 `✅ 全部通过` **完全不能证明视图层编译得过**。改完 `game/src/view/` 下任何 `.gd`，先跑这个：
+
+```powershell
+$exe = "tools\godot\Godot_v4.7.2-stable_win64_console.exe"
+& $exe --headless --path game --check-only --script res://src/view/battle_scene.gd --quit-after 200
+```
+
+- `exit 0` 且**输出里没有 `Parse Error` / `SCRIPT ERROR`** 才算过。
+- **不过就别跑试玩链路**：场景建不起来但进程不退出，会被 `--quit-after 400000` 吊死十几分钟。
+- 视图层最常见的坑：**模块里对动态类型宿主（`_st`）的调用推不出返回类型**，
+  于是 `var x := _st._some_func()` 报推断错误 —— 一律写成显式类型 `var x: T = _st._some_func()`。
+
+### 新增 `class_name` 之后
+
+`.godot/global_script_class_cache.cfg` 需要重建，否则 `--script` 直跑会报 `Identifier "Xxx" not declared`：
+
+```powershell
+& $exe --headless --path game --editor --quit-after 3000
+```
+
 ### 退出码
 
 `0` = 通过，`1` = 有失败。脚本末尾会打印 `失败 N 项`，**以那个为准**（`RID leaked` 之类的噪声不影响退出码）。

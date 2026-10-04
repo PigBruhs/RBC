@@ -183,12 +183,36 @@ _s._rocket_salvo / _s._loiter_pick_control / _s._dive_tick / _s._pending_root / 
 
 | 阶段 | 内容 | 交付判据 |
 |---|---|---|
-| **P0** | ① 写 `battle_scene` 测试门面（`for_test_*`）；② 把 `playtest.gd` 的 1019 处 `_s.xxx` 逐步换成门面；③ 删 §3.1 零引用函数、§3.2 死变量（逐个确认）、§3.3 死信号；④ 在 `game/tools/` 下建一个临时探针把 `_hint_layer` 等 4-5 处纯视觉读取也走门面 | playtest 563 项、run.gd、5 个探针、sim_ai 全绿且**数量不变** |
-| **P1** | 提取**最干净的 4 块**：`_cc`/`_unit_pos` 等 static 纯函数 → `targeting.gd`；哨兵（4 函数/45 行）；普攻（11 函数/169 行，只依赖 `active/attackable/field/rng`）；`ViewFx`（高亮/落点环/闪光/日志） | 同上全绿 |
-| **P2** | 提取中等耦合块：技能（24/576）、弹道与爆炸结算（23/525）、AI 驱动（9/174）、回合机（11/228）、移动寻路（10/157）、放置沙盒（14/195）、巡飞弹（8/176）、相机（并入 ViewFx 或独立） | 同上全绿 |
-| **P3** | 提取最难的两块：UI 菜单与刷新（23/406，33 个成员）、瞄准与输入（14/366，29 个成员）；顺手把 `battle_ui.gd` 直接读宿主字段的 6 处改成走 `ui_*`（含把魔数 `phase == 0 + 4` 换成枚举比较） | 同上全绿 + 手动开一次编辑器确认菜单/瞄准/队列条肉眼正常 |
-| **P4** | 拆 `GameMaster` 四合一（§3.4）；合并重复实现（§3.5）；`battle_scene.gd` 目标 **≤ 800 行** | 同上全绿 |
+| **P0** | ① 写 `battle_scene` 测试门面（`for_test_*`）；② 把 `playtest.gd` 的 1019 处 `_s.xxx` 逐步换成门面；③ 删 §3.1 零引用函数、§3.2 死变量（逐个确认）、§3.3 死信号 | playtest 项数不减少且失败 0；run.gd、5 个探针、sim_ai 全绿 |
+| **P1** ✅ | **已完成（第 97 轮第一期）**：`view/sentry_runner.gd`(57) 哨兵编排 ｜ `view/view_fx.gd`(362) 表现层 15 个函数 ｜ `core/grid_math.gd`(27) 格中心去重（`_cc` 与 `Ordnance._cell_center` 原本是逐字复制品，现唯一实现）。死代码 `_pending_cell_mark` 已删 | ✅ run 全过 ｜ playtest **565/0** ｜ arena 0 ｜ r89 3 项 ｜ r92 11 项 ｜ sim_ai 2/2 |
+| **P2** | 提取中等耦合块：弹道与爆炸结算（`projectile_sink.gd`）、普攻（`basic_attack.gd`）、技能、回合机、移动寻路、放置沙盒、巡飞弹、相机 | 同 P1 |
+| **P3** | 提取最难的两块：UI 菜单与刷新（406 行 / 33 个成员）、瞄准与输入（366 行 / 29 个成员）；顺手把 `battle_ui.gd` 直接读宿主字段的 6 处改成走 `ui_*`（含把魔数 `phase == 0 + 4` 换成枚举比较） | 同上 + 手动开一次编辑器确认菜单/瞄准/队列条肉眼正常 |
+| **P4** | 拆 `GameMaster` 四合一（§3.4）；合并重复实现（§3.5）；`battle_scene.gd` 目标 **≤ 800 行** | 同上 |
 | **P5** | 清理仓库：删 `tools/godot/_smoke/`（旧原型，未跟踪，39.8 MB build + 29 KB 源码）；把 §3.6 的"数值多源"单独开一轮 | `git status` 干净；`docs/规格.md` 更新 |
+
+### 第一期实测效果（第 97 轮）
+
+| 文件 | 行数 | 说明 |
+|---|---|---|
+| `game/src/view/battle_scene.gd` | **4587 → 4316** | −271 行 |
+| `game/src/view/sentry_runner.gd` | 57 | 新建 |
+| `game/src/view/view_fx.gd` | 362 | 新建 |
+| `game/src/core/grid_math.gd` | 27 | 新建 |
+
+**这一期定下来的两条做法（后续每个模块都照抄，别再重新发明）：**
+
+1. **模块 = `RefCounted` 子对象 + `_init(host)` 注入 + `var _st = null` 动态类型。**
+   不能写 `var _st: Node3D` —— 宿主 battle_scene 没有 `class_name`，访问 `_st.gm` / `_st._log` 会在分析期报
+   `Cannot find member ... in base 'Node3D'`。这与既有约定一致（`battle_ui.gd` 的 `host` 也是动态类型）。
+2. **测试直读的名字一律不断**：被搬走的函数在宿主保留**同名薄包装**转发；被测试直读的**字段声明留在宿主**，
+   模块通过 `_st._xxx` 读写。这样 playtest 的 1019 处 `_s.xxx` 一行都不用动。
+   （代价：宿主的"薄包装 + 字段声明"是过渡期噪声，等 P0 测试门面立好之后再统一清理。）
+
+**新增 `class_name` 的副作用（新克隆必看）**：`.godot/global_script_class_cache.cfg` 需要重建，
+否则 `--script` 直跑会报 `Identifier "Xxx" not declared`。跑一次即可：
+```powershell
+tools\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path game --editor --quit-after 3000
+```
 
 ---
 
