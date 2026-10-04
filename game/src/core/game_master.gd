@@ -474,6 +474,60 @@ var passive_used: Dictionary = {}         # "单位名:被动id" -> true（本�
 # 与 `t_ai_enabled()` / `t_set_ai_enabled()` 测试门面。GameMaster 不再知道 AI。
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Reaper（Boss-3）：三循环状态 + 6 格范围被动
+#
+# 用户口径：「Reaper 的回合按三个循环：召唤、横扫与竖切」；
+#           「6 格内每回合造成 20 点护甲伤害和 10 点力量伤害（GM 负责）」。
+#
+# **为什么循环状态放 GM**：它是"跨回合的调度状态"，不属于角色自身属性；
+# GM 已经是"不属于任何角色的场上状态"的持有者（pending / sentries / death_order）。
+# 放这里也不会被 view 遮挡 —— view 只通过 `reaper_step_for()` 读。
+#
+# **为什么被动在 GM**：用户明确"GM 负责"，且它是**环境性**伤害（每个回合边界执行，
+# 与 Reaper 自己的行动回合无关）→ 由 `_gm_step` 在回合边界调用 `reaper_passive_tick()`。
+# ══════════════════════════════════════════════════════════════════════════════
+const REAPER_NAME := "Reaper"
+
+## 单位名 -> 当前循环步（Reaper.Step）。第一次轮到它时从"召唤"开始。
+var reaper_cycle: Dictionary = {}
+
+
+## 这是不是 Reaper（用 base_name 比，兼容 "Reaper (E)" 这种带阵营后缀的实例名）
+static func is_reaper(u: Unit) -> bool:
+	return u != null and Unit.base_name(u.name) == REAPER_NAME
+
+
+## 取当前循环步（不推进）。没登记过 = 从召唤开始。
+func reaper_step_for(u: Unit) -> int:
+	return int(reaper_cycle.get(u.name, Reaper.Step.SUMMON))
+
+
+## 推进到下一步并返回**推进前**的那一步（"这一回合该做哪件事"）。
+func reaper_advance_cycle(u: Unit) -> int:
+	var cur := reaper_step_for(u)
+	reaper_cycle[u.name] = Reaper.next_step(cur)
+	return cur
+
+
+## 6 格范围被动：**每个回合边界**结算一次（由 _gm_step 调）。
+## 返回受影响的单位（供日志/测试）。
+## 口径见 core/reaper.gd 的 `passive_targets`：中心距离 ≤ 6、不把 body_r=3 算进去、**不分敌我**。
+func reaper_passive_tick(units: Array[Unit]) -> Array[Unit]:
+	var out: Array[Unit] = []
+	for r in units:
+		if not is_reaper(r) or not r.is_alive():
+			continue
+		for u in Reaper.passive_targets(r, units):
+			u.take_armor_damage(Reaper.PASSIVE_ARMOR_MILLI)
+			# 10 点力量伤害 = **魔法伤害**（没有物理伤害来源，不走物抗/闪避）。
+			# 10 点力量 = **魔法伤害**（只吃魔抗、无视护甲）。⚠ 第 3 个参数是**点**不是千分比，
+			# 所以是 PASSIVE_POWER_MILLI / 1000；rng 只占位（魔法伤害是确定性的）。
+			Damage.magic_hit(r, u, Reaper.PASSIVE_POWER_MILLI / 1000, null)
+			out.append(u)
+	return out
+
+
 ## 轮到某个角色【自己的回合】了：把他身上 per = "own_turn" 的被动重新置 1。
 ## 用户口径（杰拉尔德弹反）：只有他自己的回合开始才解锁，弹反一次立刻置 0，
 ## 所以别人一个回合里射十支箭也只有第一支进 QTE。

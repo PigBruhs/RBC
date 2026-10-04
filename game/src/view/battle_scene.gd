@@ -124,6 +124,11 @@ var aim: AimController = null
 ## _dive / _dive_markers / _loiter_control / _heli_shadows / _salvo_u 等字段声明仍留在本类。
 var air: AirRunner = null
 
+## 激光类（光束）模块：Reaper 的横扫 / 竖切（见 view/laser_beam.gd）。
+## 光束**不是飞行物**（不进 ProjectileField）：每个物理帧对覆盖到的角色累加帧伤，
+## 光束结束时统一结算一次。`_process` 里每帧 `laser_mod.tick(delta)`，测试走 t_laser_* 门面。
+var laser_mod: LaserBeam.Runner = null
+
 var _zoom: float = 15.0
 
 var _cam_focus: Vector3 = Vector3.ZERO      # 相机注视的地面点（WASD 平移）
@@ -573,6 +578,7 @@ func _ready() -> void:
 	action_menu = ActionMenu.new(self)   # 行动菜单状态机
 	aim = AimController.new(self)        # 瞄准/拖拽 + 相机 + 鼠标拾取
 	air = AirRunner.new(self)            # 巡飞弹（含发射器）+ 直升机全流程
+	laser_mod = LaserBeam.Runner.new(self)  # 激光类光束：帧伤累计 + 统一结算 + 表现
 	# 弹道物场：只做物理与上报，后果由 ProjectileSink 处理
 	# ⚠️ 这里传的是**模块方法**（Callable 事实接口）：改名即断，两处都在本函数里
 	field = ProjectileField.new()
@@ -790,6 +796,9 @@ func _ai_ctx(u: Unit) -> Ai.Ctx:
 ## ⚠️ 跨模块事实接口（**别删**）：turn_runner.gd 正在通过 `_st._ai_take_turn` 调它。
 ## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _ai_take_turn(u: Unit) -> void:
+	if gm.is_reaper(u):
+		await reaper_take_turn(u)        # Boss-3：三循环（召唤/横扫/竖切），不走通用 AI
+		return
 	await ai.ai_take_turn(u)
 
 
@@ -854,6 +863,15 @@ func _finish_turn() -> void:
 	var who := active
 	active = null
 	selected = null
+	# 防御（第 99 轮）：`queue` 在【放置阶段结束】之前是 null —— 场景 `_ready` 之后
+	# 先进放置阶段，玩家点 >> 才 `start_round()` 造队列。这期间若有人（探针/异常输入）
+	# 调到这个函数，以前会报 `Nonexistent function 'advance' in base 'Nil'`。
+	# 现在：没有队列就当"还没开打"，只做收尾不做队列推进。
+	if queue == null:
+		action_menu.hide_action_menu()
+		_clear_pending()
+		fx.clear_hints()
+		return
 	queue.advance(who)
 	action_menu.hide_action_menu()
 	_clear_pending()
@@ -874,6 +892,7 @@ func _finish_turn() -> void:
 ## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _gm_step() -> void:
 	await ai.gm_step()
+	gm.reaper_passive_tick(units)        # Reaper 6 格范围被动（GM 负责，每个回合边界一次）
 
 
 ## GameMaster 演出开关：锁住所有角色操作与 >> 按钮
@@ -1329,6 +1348,10 @@ func _process(delta: float) -> void:
 	_sync_unit_visibility()        # 兜底：活着就必须看得见
 	_check_active_alive()         # 当前行动者在自己回合里被打死 -> 立刻结束其回合
 	aim.camera_process(delta)
+	# 激光类（第 98 轮）：**放在所有既有 tick 之后** —— 光速不是飞行物，它只是
+	# "这一帧的光束在哪里、盖住了谁"，所以必须在弹道/哨兵/走路都推进完之后再采样，
+	# 这样它看到的是本帧最终位置。累计帧伤，寿命到点的光束由模块自己统一结算。
+	laser_mod.tick(delta)
 
 
 ## 队列条动画计时：到点就收尾；期间攒下的刷新请求在这里补做（最小间隔 0.5 秒）
@@ -2421,3 +2444,224 @@ func t_sync_unit_visibility() -> void:
 
 func t_tick_pending_pulse(delta: float) -> void:
 	fx.tick_pending_pulse(delta)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Reaper（Boss-3）回合执行入口：召唤 / 横扫 / 竖切 三循环 + 每回合前移一格
+#
+# 决策与几何全在 core/reaper.gd（纯函数）；这里只负责"演出 + 真的改场上状态"。
+# 三循环状态在 GameMaster.reaper_cycle（跨回合调度状态，不埋在 view 里）。
+#
+# ⚠️ 激光打桩（第 1 版）：mod-sentry-2 的 core/laser.gd + `t_spawn_laser` 尚未交付，
+#    所以本版把每条光束的**起终点/角度/覆盖帧数/伤害**算出来记进 `_reaper_laser_log`
+#    （探针可读），并按**同一个帧模型**直接结算伤害，不生成光束节点。
+#    他交付后 `_spawn_reaper_laser()` / `_reaper_apply_beam()` 两处换成真调用即可。
+# ══════════════════════════════════════════════════════════════════════════════
+## 打桩期记录的光束规格（探针读它验证"本该发射什么"）
+var _reaper_laser_log: Array = []
+## 环色（真模型未就绪时由本变量兜底；就绪后同步给 t_set_reaper_ring）
+var _reaper_ring_color := Color(0.25, 0.55, 1.0)
+const REAPER_RING_IDLE := Color(0.25, 0.55, 1.0)
+
+
+## Reaper 的一个回合：① 向前一格 ② 按三循环做一件事 ③ 结束回合
+func reaper_take_turn(u: Unit) -> void:
+	var step := gm.reaper_advance_cycle(u)
+	var mv := Reaper.plan_forward(u, units)
+	if bool(mv["moved"]):
+		var to: Vector2i = mv["cell"]
+		u.cell = to
+		if u.visual != null:
+			u.visual.position = Vector3(float(to.x) + 0.5, u.visual.position.y, float(to.y) + 0.5)
+		_log("  👁 Reaper 向前移动一格 → %s" % str(to))
+	else:
+		_log("  👁 Reaper 停在原地：%s" % String(mv["blocked"]))
+	_log("  👁 Reaper 回合【%s】（三循环）" % Reaper.step_name(step))
+	match step:
+		Reaper.Step.SUMMON:
+			await _reaper_do_summon(u)
+		Reaper.Step.SWEEP:
+			await _reaper_laser_volley(u, false)
+		Reaper.Step.SLICE:
+			await _reaper_laser_volley(u, true)
+	_finish_turn()
+
+
+## 环色：真模型就绪后自动改走 mod-sentry 的门面（has_method 守卫，两边都不用改）
+func _set_reaper_ring(u: Unit, c: Color) -> void:
+	_reaper_ring_color = c
+	if c == Color.RED:
+		_reaper_saw_red = true               # 探针用：确实进过"红环预警"
+	if has_method("t_set_reaper_ring"):
+		call("t_set_reaper_ring", u, c)
+
+
+func reaper_ring_color() -> Color:
+	return _reaper_ring_color
+
+
+## 探针用：这一回合是否真的进过"红环预警"（预警是 await 出来的，外面采样不到）
+var _reaper_saw_red := false
+
+
+func t_reaper_saw_red() -> bool:
+	return _reaper_saw_red
+
+
+func t_reaper_reset_saw_red() -> void:
+	_reaper_saw_red = false
+
+
+## 花名册查定义（召唤用；不能新建数据行，所以复用现成单位）
+func _roster_def(nm: String) -> Dictionary:
+	for arr in [UnitData.UNITS, UnitData.ENEMIES]:
+		for d in arr:
+			if String(d["name"]) == nm:
+				return d
+	return {}
+
+
+## 召唤回合：二选一（确定性随机）→ 在 Reaper 周围一圈找空格 → 造敌方单位
+func _reaper_do_summon(u: Unit) -> void:
+	var kit: Dictionary = Reaper.SUMMON_KITS[rng.next_int(Reaper.SUMMON_KITS.size())]
+	var names: Array = kit["names"]
+	var cells := Reaper.summon_cells(u, units, names.size())
+	_log("  👁 召唤【%s】：%d 个落点" % [kit["desc"], cells.size()])
+	for i in cells.size():
+		var nm := String(names[i])
+		var d := _roster_def(nm)
+		if d.is_empty():
+			_log("      ⚠ 花名册里没有 %s，跳过" % nm)
+			continue
+		var s := Unit.from_data(d)
+		s.side = u.side                       # 召唤物一律**敌方阵营**（源数据可能是 PLAYER）
+		s.cell = cells[i]
+		s.home_cell = cells[i]
+		units.append(s)
+		var v := UnitVisual.new()
+		add_child(v)
+		v.setup(s)
+		_log("      + %s @ %s（阵营 %d）" % [s.name, str(s.cell), s.side])
+
+
+## 横扫 / 竖切共用：红环预警 2 秒 → 逐条发（打桩）/ 发真激光 → 蓝环
+func _reaper_laser_volley(u: Unit, slice: bool) -> void:
+	var tgt := Reaper.nearest_enemy(u, units)
+	if tgt == null:
+		_log("  ⚠ 场上没有敌人，Reaper 这一击落空")
+		return
+	var tp := GridMath.unit_pos(tgt)
+	_set_reaper_ring(u, Color.RED)
+	_log("  👁 环变红，预警 %.1f 秒（目标 %s）" % [Reaper.WARN_SEC, tgt.name])
+	await get_tree().create_timer(Reaper.WARN_SEC).timeout
+	var steps := 12
+	var secs: float = Reaper.SLICE_SEC if slice else Reaper.SWEEP_SEC
+	var specs: Array = Reaper.slice_specs(u, tp, steps, tgt) if slice \
+			else Reaper.sweep_specs(u, tp, steps, tgt)
+	_log("  👁 %s：%d 条光束，总 %.1f 秒" % ["竖切" if slice else "横扫", specs.size(), secs])
+	for sp in specs:
+		_spawn_reaper_laser(u, sp)
+		await get_tree().create_timer(secs / float(steps)).timeout
+	_set_reaper_ring(u, REAPER_RING_IDLE)
+
+
+## 真激光（docs-keeper task-15 已交付）：直接调宿主门面 t_spawn_laser。
+## ⚠️ 打桩期的"自制命中判定 + 直接扣血"**已删除** —— 真激光会在 _process 里每帧累计、
+##    寿命到/被打断时统一结算；留着会**双倍结算**（docs-keeper 报过）。
+##    命中判定在 laser.gd（三维线段 vs 单位竖直圆柱，半径走 Targeting.unit_body_r）。
+##    `_reaper_laser_log` 只留给探针观测"本该发射什么"。
+func _spawn_reaper_laser(u: Unit, sp: Dictionary) -> void:
+	_reaper_laser_log.append(sp)
+	t_spawn_laser("reaper_laser", sp["from"], sp["to"])
+
+
+## 点到线段的距离（判定"这一格有没有被这条光束扫到"）
+static func _point_seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var l2 := ab.length_squared()
+	if l2 < 0.0001:
+		return p.distance_to(a)
+	var t := clampf((p - a).dot(ab) / l2, 0.0, 1.0)
+	return p.distance_to(a + ab * t)
+
+
+# ── 测试/探针门面（t_*）：Reaper 相关 ──
+func t_reaper_take_turn(u: Unit) -> void:
+	await reaper_take_turn(u)
+
+
+func t_reaper_step(u: Unit) -> int:
+	return gm.reaper_step_for(u)
+
+
+func t_reaper_ring_color() -> Color:
+	return reaper_ring_color()
+
+
+func t_reaper_laser_log() -> Array:
+	return _reaper_laser_log
+
+
+func t_reaper_clear_laser_log() -> void:
+	_reaper_laser_log.clear()
+
+
+func t_reaper_passive_tick() -> Array[Unit]:
+	return gm.reaper_passive_tick(units)
+
+
+# ── Reaper 模型（reaper_model.gd）的测试门面 ─────────────────────────────────
+# 激光预警的调用链是：_reaper_laser_volley -> _set_reaper_ring(u, RED)
+#   -> call("t_set_reaper_ring", u, c)  （mod-fx 留的扩展点，用字符串 call）
+# 这里把它接到真模型上：红 2 秒 -> 打完调回蓝。
+
+## 找这个单位身上挂的 ReaperModel（UnitVisual 的子节点）。不是 Reaper / 还没建模就返回 null。
+func _reaper_model_of(u: Unit) -> ReaperModel:
+	if u == null or u.visual == null:
+		return null
+	return u.visual.find_child("ReaperModel", true, false) as ReaperModel
+
+
+## 激光预警：把环染成 c（红）。**名字是 mod-fx 已经 call() 好的，别改名。**
+func t_set_reaper_ring(u: Unit, c: Color) -> void:
+	var m := _reaper_model_of(u)
+	if m != null:
+		m.set_ring_color(c)
+
+
+## 真模型上环的颜色（0 参的 t_reaper_ring_color() 读的是宿主的兜底变量，不是模型）
+func t_reaper_ring_color_of(u: Unit) -> Color:
+	var m := _reaper_model_of(u)
+	return Color.BLACK if m == null else m.ring_color()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 测试 / 探针门面（t_*）：激光类（第 98 轮 · Boss-1）
+#
+# 契约（名字别改，Reaper AI / 探针都按这个调）：
+#   t_spawn_laser(id, a, b) -> LaserBeam     发一条激光（终点先按地形截断）
+#   t_laser_count() -> int                   在途激光数
+#   t_laser_frames(id_or_beam) -> Dictionary 帧数表（String = 合并同 id；LaserBeam = 自己那条）
+#   t_settle_all_lasers() -> Array           把在途激光全部统一结算，返回 Array[Damage.Hit]
+#   t_laser_clip(a, b) -> Vector2            地形截断（a/b 是水平坐标 Vector2）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func t_spawn_laser(id: String, a: Vector3, b: Vector3) -> LaserBeam:
+	return laser_mod.spawn(id, a, b)
+
+
+func t_laser_count() -> int:
+	return laser_mod.count()
+
+
+func t_laser_frames(id_or_beam) -> Dictionary:
+	return laser_mod.frames(id_or_beam)
+
+
+func t_settle_all_lasers() -> Array:
+	return laser_mod.settle_all()
+
+
+func t_laser_clip(a: Vector2, b: Vector2) -> Vector2:
+	return Laser.clip_by_terrain(a, b, placeables, GW, GH)
+

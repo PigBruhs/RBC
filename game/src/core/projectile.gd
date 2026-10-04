@@ -29,6 +29,10 @@ const KIND_BULLET := "bullet"      # 子弹（萨尼铁塔：箭矢类、无重�
 const KIND_GRENADE := "grenade"    # 枪榴弹（空中=炮弹规则，落地变模型，GM 计时爆炸）
 const KIND_ROCKET := "rocket"      # 37mm 火箭（炮弹类：落地直径 2 格 + 2 枚破片）
 const KIND_LOITER := "loiter"      # 巡飞弹（炮弹类 + 可制导：定高 1.5、恒速 3、近炸引信）
+## 激光（光束类：存在一段时间、逐物理帧累计帧伤、结束**统一结算一次**）。
+## 注意：它不是"飞行物"，**不进 ProjectileField**（不参与互相击落、不能被箭打掉、不惊动哨兵），
+## 这个 kind 只是"弹射物类型"的登记名（见 Ballistics.LASER_LIKE 与 core/laser.gd）。
+const KIND_LASER := "laser"
 
 ## 速度剖面（0 = 匀速；老弹种一律 0，行为逐位不变）
 const SPEED_UNIFORM := 0

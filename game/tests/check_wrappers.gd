@@ -53,6 +53,10 @@ const MODULES := [
 	{"mod": "res://src/view/aim_controller.gd", "host": "res://src/view/battle_scene.gd"},
 	{"mod": "res://src/view/air_runner.gd", "host": "res://src/view/battle_scene.gd"},
 	{"mod": "res://src/view/ai_runner.gd", "host": "res://src/view/battle_scene.gd"},
+	# 激光（第 99 轮，Boss-1）：宿主只在 _process 末行与 t_laser_* 门面里直接调
+	# laser_mod.spawn/tick/count/frames/settle_all，**没有任何同名薄包装**
+	# → 加进 MODULES 是为了让【宿主引用校验】扫到它（否则这个模块的 `_st.<name>` 没人看）。
+	{"mod": "res://src/view/laser_beam.gd", "host": "res://src/view/battle_scene.gd"},
 	# 哨兵的三个方法在宿主里的包装名与模块不同（宿主为了保住测试的
 	# `_s._tick_sentry_queue()` 等调用而改了名），所以显式列出。
 	# ⚠️ 第 97 轮 P0 清账期之后，宿主里的同名薄包装**已删掉 45 个**，
@@ -218,6 +222,9 @@ const FORWARDING_MEMBERS := {
 ## 写下来是为了让 `_injection_note()` 的提示保持干净 —— 有意的豁免 != 漏登记。
 const FORWARDING_EXEMPT := {
 	"sentry_range": "SentryRange：宿主直接调它的 sync()，没有同名薄包装",
+	# 第 99 轮：`LaserBeam.Runner` 这种带点的内部类，`_injection_note()` 的 `Cls.new(self)` 正则看不到，
+	# 所以不加也不会报；这里显式登记是为了把"它为什么没有薄包装"写清楚。
+	"laser_mod": "LaserBeam.Runner：宿主只在 _process 末行与 t_laser_* 门面里直接调，没有同名薄包装",
 }
 
 

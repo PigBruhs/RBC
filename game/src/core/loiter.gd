@@ -110,8 +110,10 @@ static func opts(rng) -> Dictionary:
 
 
 ## 巡飞弹会不会打到这个位置（**造伤**范围：直径两格的球）
+## 碰撞圆柱按单位取（第 98 轮）：既有角色缺省 0.30/1.00 = Damage.BODY_R/BODY_H，逐字不变。
 static func ball_touches_unit(ctr: Vector3, u: Unit) -> bool:
-	return Targeting.sphere_hits_body(ctr, BLAST_R, u.cell, Damage.BODY_R, Damage.BODY_H, u.body_h())
+	return Targeting.sphere_hits_body(ctr, BLAST_R, u.cell,
+		Targeting.unit_body_r(u, Damage.BODY_R), Targeting.unit_body_h(u, Damage.BODY_H), u.body_h())
 
 
 ## 近炸引信：只在**敌方角色**进入 FUSE_R（直径 1.5 格）时触发（第 92 轮）。
@@ -119,7 +121,8 @@ static func ball_touches_unit(ctr: Vector3, u: Unit) -> bool:
 static func fuse_touches_unit(ctr: Vector3, u: Unit) -> bool:
 	if not is_target(u):
 		return false
-	return Targeting.sphere_hits_body(ctr, FUSE_R, u.cell, Damage.BODY_R, Damage.BODY_H, u.body_h())
+	return Targeting.sphere_hits_body(ctr, FUSE_R, u.cell,
+		Targeting.unit_body_r(u, Damage.BODY_R), Targeting.unit_body_h(u, Damage.BODY_H), u.body_h())
 
 
 ## 沙盒元素：只按"沾到格子"判定（道具没有高度轴）

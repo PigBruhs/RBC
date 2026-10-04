@@ -32,6 +32,8 @@ const UNITS := [
 		"pr": 800, "mr": 0,
 		"rng_min": 0, "rng_max": 0,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "Alette",
@@ -43,6 +45,8 @@ const UNITS := [
 		"pr": 0, "mr": 400,
 		"rng_min": 1, "rng_max": 8,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "Airburst mortar",
@@ -54,6 +58,8 @@ const UNITS := [
 		"pr": 0, "mr": 0,
 		"rng_min": 3, "rng_max": 20,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "老国王",
@@ -65,6 +71,8 @@ const UNITS := [
 		"pr": 400, "mr": 0,
 		"rng_min": 1, "rng_max": 15,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "公主·左",
@@ -76,6 +84,8 @@ const UNITS := [
 		"pr": 200, "mr": 0,
 		"rng_min": 1, "rng_max": 12,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "公主·右",
@@ -87,6 +97,8 @@ const UNITS := [
 		"pr": 200, "mr": 0,
 		"rng_min": 1, "rng_max": 12,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "萨尼铁塔",
@@ -98,6 +110,8 @@ const UNITS := [
 		"pr": 0, "mr": 0,
 		"rng_min": 1, "rng_max": 24,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "俯冲轰炸直升机（不要问那么多）",
@@ -109,6 +123,8 @@ const UNITS := [
 		"pr": 0, "mr": 0,
 		"rng_min": 6, "rng_max": 40,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 ]
 
@@ -124,6 +140,8 @@ const ENEMIES := [
 		"pr": 0, "mr": 0,
 		"rng_min": 0, "rng_max": 0,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "Dummy Ranged",
@@ -135,6 +153,8 @@ const ENEMIES := [
 		"pr": 0, "mr": 0,
 		"rng_min": 0, "rng_max": 0,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "Dummy Thrower",
@@ -146,6 +166,8 @@ const ENEMIES := [
 		"pr": 0, "mr": 0,
 		"rng_min": 0, "rng_max": 0,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "Gerald (E)",
@@ -157,6 +179,8 @@ const ENEMIES := [
 		"pr": 800, "mr": 0,
 		"rng_min": 0, "rng_max": 0,
 		"controllable": true,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "Alette (E)",
@@ -168,6 +192,8 @@ const ENEMIES := [
 		"pr": 0, "mr": 400,
 		"rng_min": 1, "rng_max": 8,
 		"controllable": true,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "Airburst mortar (E)",
@@ -179,6 +205,8 @@ const ENEMIES := [
 		"pr": 0, "mr": 0,
 		"rng_min": 3, "rng_max": 20,
 		"controllable": true,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "老国王 (E)",
@@ -190,6 +218,8 @@ const ENEMIES := [
 		"pr": 400, "mr": 0,
 		"rng_min": 1, "rng_max": 15,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "公主·左 (E)",
@@ -201,6 +231,8 @@ const ENEMIES := [
 		"pr": 200, "mr": 0,
 		"rng_min": 1, "rng_max": 12,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "公主·右 (E)",
@@ -212,6 +244,8 @@ const ENEMIES := [
 		"pr": 200, "mr": 0,
 		"rng_min": 1, "rng_max": 12,
 		"controllable": false,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "萨尼铁塔 (E)",
@@ -223,6 +257,8 @@ const ENEMIES := [
 		"pr": 0, "mr": 0,
 		"rng_min": 1, "rng_max": 24,
 		"controllable": true,
+		"body_r": 0.3,
+		"body_h": 1.0,
 	},
 	{
 		"name": "俯冲轰炸直升机（不要问那么多） (E)",
@@ -234,6 +270,34 @@ const ENEMIES := [
 		"pr": 0, "mr": 0,
 		"rng_min": 6, "rng_max": 40,
 		"controllable": true,
+		"body_r": 0.3,
+		"body_h": 1.0,
+	},
+	{
+		"name": "Reaper",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 300, "armor": 100, "armor_break": 0,
+		"energy_max": 0, "move": 1,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 800, "mr": 0,
+		"rng_min": 6, "rng_max": 99,
+		"controllable": true,
+		"body_r": 3.0,
+		"body_h": 12.0,
+	},
+	{
+		"name": "Reaper (E)",
+		"side": Side.ENEMY,
+		"role": Role.RANGED,
+		"power": 300, "armor": 100, "armor_break": 0,
+		"energy_max": 0, "move": 1,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
+		"pr": 800, "mr": 0,
+		"rng_min": 6, "rng_max": 99,
+		"controllable": true,
+		"body_r": 3.0,
+		"body_h": 12.0,
 	},
 ]
 

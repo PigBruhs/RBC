@@ -57,12 +57,17 @@ func next_turn() -> void:
 			await begin_next_round()
 			return
 
-	# 不变式（用户报过 bug）：常规模式下绝不允许同一方连续两回合。
+	# 不变式（用户报过 bug）：**严格交替模式下**绝不允许同一方连续两回合。
 	# 队列理论上不会这样，一旦出现（例如某条路径多推进了一次）就地纠正：这回合让给对面。
 	# 例外：对面队列是空的（全在等复活）—— 那时本来就该他连着动，不算违规。
+	#
+	# ⚠ 第 99 轮：`MODE_BY_SIDE`（Reaper 战）**故意**让同一方连续行动 ——
+	#   所以这条纠正必须跳过，否则它会把 by_side 的"一边全部行动完"硬拉回交替，
+	#   表现为"同一方每个人都能反复动、另一边永远轮不到"（实测就是这个症状）。
 	var other_side := 1 - u.side
-	if not _st.queue.last_stand and _st._last_turn_side != -1 and u.side == _st._last_turn_side \
-			and _st.queue.has_side(other_side):
+	if _st.queue.mode != TurnQueue.MODE_BY_SIDE \
+			and not _st.queue.last_stand and _st._last_turn_side != -1 \
+			and u.side == _st._last_turn_side and _st.queue.has_side(other_side):
 		_st._log("  ⚠ 检测到同一方连续行动，已纠正：%s 让位" % u.name)
 		_st.queue.advance(u)
 		var other: Unit = _st.queue.current()
@@ -115,8 +120,13 @@ func next_turn() -> void:
 func start_round() -> void:
 	_st.round_no += 1
 	_st.queue = TurnQueue.new(_st.rng)
+	# 回合顺序模式来自【场景元数据】（第 99 轮）：没声明 = 严格交替（既有行为）。
+	# Reaper 战声明 `turn_mode = "by_side"` -> 一边全部行动完才轮到另一边。
+	_st.queue.mode = Level.turn_mode()
 	var n: int = _st.queue.rebuild(_st.units)
 	_st._log("—— 第 %d 轮开始，队列 %d 人：%s ——" % [_st.round_no, n, _st.queue.dump()])
+	if _st.queue.mode == TurnQueue.MODE_BY_SIDE:
+		_st._log("  回合顺序：一边全部行动完才轮到另一边（本场景专属）")
 	_st.round_started.emit(_st.round_no)
 	next_turn()
 

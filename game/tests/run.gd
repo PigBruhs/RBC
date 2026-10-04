@@ -11,6 +11,9 @@ func _initialize() -> void:
 	var by_name := {}
 	for d in UnitData.UNITS:
 		by_name[d["name"]] = d
+	# 敌方表也要进 by_name（第 99 轮）：Reaper 战/竞技场断言要用 "Gerald (E)" 之类的镜像条目
+	for d in UnitData.ENEMIES:
+		by_name[d["name"]] = d
 	_expect(by_name.has("Gerald"), "解析到 Gerald（注意用户文件用了全角冒号）", fails)
 	var g: Dictionary = by_name.get("Gerald", {})
 	_expect(g.get("power", 0) == 82, "Gerald 力量 = 82（非投掷手翻倍后）", fails)
@@ -792,10 +795,11 @@ func _initialize() -> void:
 	_expect(due_g.size() == 1 and String(due_g[0].skill_id) == "grenade",
 		"手榴弹 4 个回合边界后到期（GM 计时）", fails)
 
-	# ── 关卡：测试场 + 皇室竞技场 ──
+	# ── 关卡：测试场 + 皇室竞技场 + Reaper 战（第 99 轮）──
 	print("\n── 关卡 ──")
-	_expect(Level.ids().size() == 2 and Level.ids().has("field") and Level.ids().has("arena"),
-		"两个关卡：测试场 + 皇室竞技场", fails)
+	_expect(Level.ids().size() == 3 and Level.ids().has("field") and Level.ids().has("arena")
+		and Level.ids().has("reaper"),
+		"三个关卡：测试场 + 皇室竞技场 + Reaper 战", fails)
 	_expect(Level.gw("field") == 48 and Level.gh("field") == 48, "测试场 48×48", fails)
 	_expect(Level.gw("arena") == 100 and Level.gh("arena") == 100,
 		"竞技场物理边界 100×100（第 83 轮：炮弹不再飞出边界就消失）", fails)
@@ -851,6 +855,96 @@ func _initialize() -> void:
 	_expect(epads[0] == Vector2i(5, 37) and eheroes[1] == Vector2i(10, 37),
 		"敌方镜像对称（公主 3 格前、英雄重生在国王前 3 格那一行）", fails)
 	_expect(absf(Level.cam_yaw("arena") - Level.cam_yaw("field")) < 0.001, "两个关卡相机角度一致（与测试场同角度）", fails)
+
+	# ── Reaper 战（第 99 轮：第一个 Boss 关）──
+	print("\n── Reaper 战场景 ──")
+	_expect(Level.gw("reaper") == 100 and Level.gh("reaper") == 100, "Reaper 战物理边界 100×100", fails)
+	var pr98: Array = Level.play_rect("reaper")
+	_expect(pr98[0] == 0 and pr98[1] == 0 and pr98[2] == 65 and pr98[3] == 81,
+		"Reaper 战可到达格子 65×81（实际 %s）" % [str(pr98)], fails)
+	_expect(Level.play_w("reaper") == 65 and Level.play_h("reaper") == 81, "65×81 的宽高读数一致", fails)
+	# 左边尽头与皇室竞技场一致：玩家老国王居中在 play 区正中那一行、两个公主在国王前 3 格 ±5
+	var rk98: Vector2i = Level.king_cell(UnitData.Side.PLAYER, "reaper")
+	_expect(rk98.y == 81 / 2 and rk98.x == 2,
+		"老国王在左端、居中于 81 格正中那一行（与皇室竞技场同一行约定，实际 %s）" % [str(rk98)], fails)
+	_expect(rk98 == Level.king_cell(UnitData.Side.PLAYER, "reaper")
+		and Level.king_cell(UnitData.Side.ENEMY, "reaper").x == 62,
+		"敌方国王（Reaper 站位）在右端", fails)
+	var rpads98: Array[Vector2i] = Level.pad_cells(UnitData.Side.PLAYER, "reaper")
+	_expect(rpads98.size() == 2 and rpads98[0] == Vector2i(5, 35) and rpads98[1] == Vector2i(5, 45),
+		"两个公主在国王前 3 格、左右各 5 格（实际 %s）" % [str(rpads98)], fails)
+	_expect(Level.respawn_cells(UnitData.Side.PLAYER, "reaper").size() == 5,
+		"玩家侧五个英雄重生点（用户口径「对应的五个重生的」）", fails)
+	_expect(Level.respawn_cells(UnitData.Side.ENEMY, "reaper").size() == 5,
+		"敌方（Reaper）侧也是五个重生点", fails)
+	var rp_pads: Array = Level.pad_cells(UnitData.Side.PLAYER, "reaper")
+	_expect(rp_pads.size() == 2, "玩家两个公主（pad）位置", fails)
+	# 出场名单：玩家 = 老国王 + 两个公主 + 五个英雄；敌方 = 只有 Reaper（召唤物由它自己产生）
+	var rroster: Array = Level.roster("reaper")
+	_expect(rroster.size() == 9, "出场名单 9 条（老国王 + 两个公主 + 五个英雄 + Reaper，实际 %d）" % rroster.size(), fails)
+	# 玩家侧必须有**可行动单位**（no_turn 的国王/公主不算）—— 否则 Reaper 会先手连动
+	var p_actors := 0
+	for e in rroster:
+		if int(e[1]) != UnitData.Side.PLAYER:
+			continue
+		var nm98 := String(e[0])
+		if nm98 == "老国王" or nm98.begins_with("公主"):
+			continue
+		p_actors += 1
+	_expect(p_actors == 5, "玩家侧 5 个可行动英雄（不是只有 no_turn 的国王/公主，实际 %d）" % p_actors, fails)
+	# 胜负条件：非对称（老国王死 = 败；Reaper 死 = 胜）
+	var rv: Dictionary = Level.victory("reaper")
+	_expect(String(rv.get("type", "")) == "boss" and String(rv.get("boss_name", "")) == "Reaper",
+		"Reaper 战胜负条件 = boss / Reaper", fails)
+	# 回合顺序：只有本场景是 by_side
+	_expect(Level.turn_mode("reaper") == TurnQueue.MODE_BY_SIDE, "Reaper 战回合顺序 = by_side", fails)
+	_expect(Level.turn_mode("field") == TurnQueue.MODE_ALTERNATE
+		and Level.turn_mode("arena") == TurnQueue.MODE_ALTERNATE,
+		"其余场景仍是严格交替（turn_mode 是场景元数据，不是全局改动）", fails)
+
+	# ── by_side 回合顺序的纯函数验证（不加载场景）──
+	print("\n── 一边全部行动完才换边（by_side）──")
+	var tq_rng := RngService.new(7)
+	var tq_units: Array[Unit] = []
+	for nm in ["Gerald", "Alette"]:
+		var pu := Unit.from_data(by_name[nm])
+		pu.side = UnitData.Side.PLAYER
+		pu.controllable = true
+		pu.no_turn = false
+		pu.name = nm
+		tq_units.append(pu)
+	for nm2 in ["Gerald (E)", "Alette (E)"]:
+		var eu := Unit.from_data(by_name[nm2])
+		eu.side = UnitData.Side.ENEMY
+		eu.controllable = true
+		eu.no_turn = false
+		eu.name = nm2
+		tq_units.append(eu)
+	var tq_alt := TurnQueue.new(tq_rng)
+	tq_alt.mode = TurnQueue.MODE_ALTERNATE
+	tq_alt.rebuild(tq_units)
+	var alt_sides: Array[int] = []
+	for i in 4:
+		alt_sides.append(tq_alt.turn_side)
+		tq_alt.advance(tq_alt.current())
+	_expect(alt_sides == [0, 1, 0, 1], "alternate：严格交替（实际 %s）" % [str(alt_sides)], fails)
+	var tq_bs := TurnQueue.new(RngService.new(7))
+	tq_bs.mode = TurnQueue.MODE_BY_SIDE
+	tq_bs.rebuild(tq_units)
+	var bs_sides: Array[int] = []
+	for i in 4:
+		bs_sides.append(tq_bs.turn_side)
+		tq_bs.advance(tq_bs.current())
+	_expect(bs_sides == [0, 0, 1, 1], "by_side：一边两个都行动完才换边（实际 %s）" % [str(bs_sides)], fails)
+	# 预测队列条也要按同一规则（否则底部条会骗人）
+	var tq_bs2 := TurnQueue.new(RngService.new(7))
+	tq_bs2.mode = TurnQueue.MODE_BY_SIDE
+	tq_bs2.rebuild(tq_units)
+	var pv98: Array[Unit] = tq_bs2.preview(4)
+	var pv98_sides: Array[int] = []
+	for qu98 in pv98:
+		pv98_sides.append(qu98.side)
+	_expect(pv98_sides == [0, 0, 1, 1], "by_side 的预测队列与 advance 同规则（实际 %s）" % [str(pv98_sides)], fails)
 
 	# ── 英雄重生（GM 记 10 个回合）──
 	print("\n── 英雄重生 ──")

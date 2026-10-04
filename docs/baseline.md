@@ -13,6 +13,10 @@
 | 3 | `tools/probe_arena.gd` | 竞技场探针 | ✅ 失败 0 项（含复活点落位、枪榴弹被击落整发消失） |
 | 4 | `tools/probe_r89.gd` | 火箭探针 | ✅ 3 项检查，失败 0 项 |
 | 5 | `tools/probe_r92.gd` | 制导探针 | ✅ 11 项检查，失败 0 项 |
+| 5c | `tools/probe_laser.gd` | **激光类探针** | ✅ 38 项检查，失败 0 项（帧伤累计/统一结算/地形阻挡/魔法伤害无视护甲吃魔抗） |
+| 5d | `tools/probe_reaper.gd` | **Reaper 碰撞与建模** | ✅ 40 项检查，失败 0 项（圆柱 3/12、包围盒 12/6、蓝环离地 6.0） |
+| 5e | `tools/probe_reaper_ai.gd` | **Reaper 三循环 AI** | ✅ 17 项检查，失败 0 项（循环顺序/前移/召唤/6 格被动/红环预警/斜射光束） |
+| 5f | `tools/probe_boss_scene.gd` | **Boss 关端到端** | ✅ 26 项检查，失败 0 项（真实加载 Reaper 战、by_side、环色、6 格被动、非对称胜负） |
 | 5b | `tools/probe_marker.gd` | **轨道空爆标记探针** | ✅ 9 项检查，失败 0 项（专测"标记球落地 → 立光柱"；**这条链路原先没有断言，带着一个崩溃进了第 97 轮收口版本**） |
 | 6 | `tools/sim_ai.gd --games=2 --seed=1` | AI 自动演算 | ✅ 2/2 局打完（第 1 局敌方胜 / 边界 89 ｜ 第 2 局玩家方胜 / 边界 72） |
 | 7 | `python tools/make_unit_data.py` | 数据流水线 | ✅ **幂等**：重跑后 `game/src/core/unit_data.gd` 哈希不变 |

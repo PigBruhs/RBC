@@ -46,6 +46,9 @@ COLS = {
     "备注": "note", "note": "note", "comment": "note",
     # 敌方表专用：可控 = 阵营仍是敌方，但回合由玩家操作（用户要求）
     "可控": "controllable", "controllable": "controllable", "玩家控制": "controllable",
+    # 碰撞体尺寸（第 99 轮新增，给 Reaper 这种"大个子圆柱"用；不写 = 用 Targeting 的缺省值）
+    "体半径": "body_r", "body_r": "body_r", "半径": "body_r",
+    "体高": "body_h", "body_h": "body_h", "身高": "body_h",
 }
 
 # 第 3 张表 = 可放置物。它没有"攻击方式"，靠这一列区分。
@@ -171,6 +174,9 @@ def parse(text: str):
             "pr": _tier(d.get("pr")), "mr": _tier(d.get("mr")),
             "rng_min": rmin, "rng_max": rmax,
             "controllable": _yes(d.get("controllable")),
+            # 碰撞体尺寸：不写就交给 Targeting.BODY_R / BODY_H 的缺省值
+            "body_r": _fnum(d.get("body_r"), None),
+            "body_h": _fnum(d.get("body_h"), None),
             "note": (d.get("note") or "").strip(),
         }
         # 兜底值：休息恢复力量/护甲 = 0，休息恢复精力 = 2（用户指定）
@@ -191,6 +197,20 @@ def _yes(cell) -> bool:
     """'yes'/'no'/'true'/'false'/'是'/'否'/1/0 都认。"""
     t = str(cell or "").strip().lower()
     return t in ("yes", "y", "true", "1", "是", "可")
+
+
+def _fnum(cell, default):
+    """浮点列（体半径 / 体高）：空 = default。"""
+    if cell is None or str(cell).strip() == "":
+        return default
+    m = re.search(r"-?\d+(?:\.\d+)?", str(cell))
+    return float(m.group(0)) if m else default
+
+
+def _ftxt(v) -> str:
+    """GDScript 浮点字面量：整数就写成 3.0，避免 "3" 被当成 int。"""
+    f = float(v)
+    return ("%d.0" % int(f)) if f == int(f) else ("%g" % f)
 
 
 def _parse_placeable(name: str, d: dict) -> dict:
@@ -249,6 +269,11 @@ def gd_emit(players, enemies, placeables) -> str:
         L.append('\t\t"pr": %d, "mr": %d,' % (u["pr"], u["mr"]))
         L.append('\t\t"rng_min": %d, "rng_max": %d,%s' % (u["rng_min"], u["rng_max"], note))
         L.append('\t\t"controllable": %s,' % ("true" if u.get("controllable") else "false"))
+        # 只在表里显式写了才输出：这样既保持旧角色的行不膨胀，也不影响任何既有解析
+        if u.get("body_r") is not None:
+            L.append('\t\t"body_r": %s,' % _ftxt(u["body_r"]))
+        if u.get("body_h") is not None:
+            L.append('\t\t"body_h": %s,' % _ftxt(u["body_h"]))
         L.append("\t},")
 
     L.append("# 我方角色（来自 bc_stat.md 的「我方角色」表）")

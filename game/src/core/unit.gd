@@ -61,6 +61,15 @@ var body_y: float = -1.0
 func body_h() -> float:
 	return hover if body_y < 0.0 else body_y
 
+## 这一位的**碰撞圆柱**：底面半径 / 高（格）。
+## ⚠ 缺省 0.30 / 1.00 必须与 Damage.BODY_R / Damage.BODY_H **同值** ——
+##   probe_reaper.gd 里有不变量断言锁着。既有角色的数据行不写 body_r/body_h，
+##   一律走缺省 -> 与"全项目共用一个尺寸"的时代**逐字等价**。
+##   大头目 Reaper 是 3.0 / 12.0（底面半径 3 格、高 12 格），靠它自己那行数据撑开。
+## ⚠ 名字不能叫 body_h —— 那个名字已被上面的 body_h() 方法占用（身体底面高度，另一个含义）。
+var body_r: float = 0.30
+var body_height: float = 1.00
+
 # 表现层引用（由 battle_scene 注入）
 var visual: Node3D = null
 
@@ -86,6 +95,9 @@ static func from_data(d: Dictionary) -> Unit:
 	u.pr = d["pr"]
 	u.mr = d["mr"]
 	u.controllable = bool(d.get("controllable", false))
+	# 碰撞圆柱：表格里写了就用（Reaper 3.0/12.0），没写走缺省 —— 缺省与 Damage 的常量同值
+	u.body_r = float(d.get("body_r", 0.30))
+	u.body_height = float(d.get("body_h", 1.00))
 	return u
 
 

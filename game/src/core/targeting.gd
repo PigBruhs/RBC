@@ -14,19 +14,37 @@ const ARROW_BODY_R := 0.075
 ## 角色身高（和 Damage.BODY_H / UnitData 的口径一致）
 const BODY_H := 1.0
 
+## 缺省碰撞圆柱（格）：**与 Damage.BODY_R / Damage.BODY_H 必须同值**。
+## 这里写字面量、不引 Damage —— 避免 core 内的环依赖。probe_reaper.gd 有断言锁着三者相等。
+const BODY_R_DEFAULT := 0.30
+const BODY_H_DEFAULT := 1.00
+
+
+## 这个角色的碰撞圆柱半径（格）。缺省 0.30 = BODY_R_DEFAULT = Damage.BODY_R。
+## 大头目 Reaper 的数据行写了 body_r = 3.0，于是它是一根半径 3 格的大圆柱。
+static func unit_body_r(u: Unit, fallback: float = BODY_R_DEFAULT) -> float:
+	return fallback if u == null else u.body_r
+
+
+## 这个角色的碰撞圆柱高（格）。缺省 1.00 = BODY_H_DEFAULT = Damage.BODY_H。
+## ⚠ Unit 上的字段叫 body_height（body_h 这个名字被"身体底面高度"的方法占了）。
+static func unit_body_h(u: Unit, fallback: float = BODY_H_DEFAULT) -> float:
+	return fallback if u == null else u.body_height
+
 
 ## 角色身体在【高度轴】上的区间 [下, 上]。
 ## 用户口径（第 83 轮）：悬空单位（直升机 hover = 2 格）整个身体抬高 ——
 ## 所以"瞄得对不对"必须考虑高度轴：瞄地面高度是打不到悬停的直升机的。
 ## 第 89 轮：临时高度（爬升轰炸）由 Unit.body_h() 给出 —— 身体在哪就按哪算。
+## 第 98 轮：身高改成**按单位取**（Reaper 12 格）—— 缺省单位与以前逐字相同。
 static func body_span(u: Unit) -> Vector2:
 	var y0 := u.body_h()
-	return Vector2(y0, y0 + BODY_H)
+	return Vector2(y0, y0 + unit_body_h(u))
 
 
 ## 瞄准一个角色时应该瞄的高度 = 身体中心（跟着临时高度走）
 static func aim_height(u: Unit) -> float:
-	return u.body_h() + BODY_H * 0.5
+	return u.body_h() + unit_body_h(u) * 0.5
 
 
 ## 当前位置能打到的所有格子。
@@ -125,13 +143,16 @@ static func sphere_hits_body(ctr: Vector3, radius: float, cell: Vector2i,
 ## 但**只要碰到任何角色（不分敌我）就照常造伤**。
 static func arrow_body_hit_seg(from: Vector3, to: Vector3, attacker: Unit,
 		units: Array[Unit], unit_body_r: float, body_r: float = ARROW_BODY_R) -> Unit:
-	var rr := body_r + unit_body_r
 	var steps := maxi(2, int(from.distance_to(to) / 0.05) + 1)
 	for s in steps + 1:
 		var p := from.lerp(to, float(s) / float(steps))
 		for o in units:
 			if not o.is_alive() or o == attacker:
 				continue
+			# 第 98 轮：**按单位自己的碰撞圆柱**判（Reaper 半径 3 / 高 12）。
+			# unit_body_r 参数保留为兜底：单位没自带尺寸时（= 既有角色）取它 ——
+			# 既有调用方一律传 0.30，与 o.body_r 的缺省同值，所以行为逐字不变。
+			var rr := body_r + unit_body_r(o, unit_body_r)
 			var dx := p.x - (float(o.cell.x) + 0.5)
 			var dz := p.z - (float(o.cell.y) + 0.5)
 			if dx * dx + dz * dz > rr * rr:

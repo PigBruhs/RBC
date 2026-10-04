@@ -13,9 +13,20 @@
 #
 # 最后一人连击（用户规则）：一方只剩 1 人时，孤军 → 对面每人各一次 → 孤军 …
 #   连击一旦进入就保持（对面复活也不退出）。
+#
+# 【回合顺序模式】（第 99 轮，用户口径）：
+#   · `MODE_ALTERNATE`（缺省）= 严格交替：一个人行动完就换边。**除 Reaper 战外的所有场景都用这个。**
+#   · `MODE_BY_SIDE`         = **一边所有角色都行动完，才轮到另一边**。
+#     用户原话：「一边所有角色进行完回合才轮到另一边；只有这个场景是这样的」——
+#     所以它由【场景元数据】`Level.DEFS[<场景>]["turn_mode"]` 声明，**不是全局改动**。
+#     实现 = `advance()` 里判断"本边还剩几个没行动的人"：还有就不换边，
+#     一个场景里只有声明了 by_side 的那一个会走到这条分支。
 # ══════════════════════════════════════════════════════════════════════════════
 class_name TurnQueue
 extends RefCounted
+
+const MODE_ALTERNATE := "alternate"        # 严格交替（缺省）
+const MODE_BY_SIDE := "by_side"            # 一边全行动完才换边（Reaper 战）
 
 var p_queue: Array[Unit] = []        # 玩家方队列（[0] = 队头）
 var e_queue: Array[Unit] = []        # 敌方队列（[0] = 队头）
@@ -26,6 +37,11 @@ var round_no: int = 0
 var rng: RngService
 var last_stand: bool = false
 var lone: Unit = null
+## 回合顺序模式（`MODE_ALTERNATE` / `MODE_BY_SIDE`）—— 由场景元数据的 `turn_mode` 决定
+var mode: String = MODE_ALTERNATE
+## by_side 专用：这一"圈"里已经行动过的人（键 = 单位，本圈结束就清空）。
+## 用"谁还没动"而不是"数人头"来判换边 —— 阵亡/复活中途改过队列长度也不会算错。
+var _acted: Dictionary = {}
 
 
 func _init(rng_service: RngService) -> void:
@@ -176,6 +192,13 @@ func _queue_of(side: int) -> Array[Unit]:
 
 ## 结束一个单位的回合 -> 把它【出队再入队尾】，然后换边。
 ## who 缺省 = 当前队头；显式传入更稳（复活会把别人压到队头，那时队头已经不是他了）。
+##
+## 【换边规则】（第 99 轮）：
+##   · `MODE_ALTERNATE`（缺省）：行动完就换边 —— 既有行为，一字未改
+##   · `MODE_BY_SIDE`：**本边还有这一圈没行动过的人，就不换边**
+##     （一边所有角色都行动完，才轮到另一边）。判据 = 标记"他动过了"，然后问
+##     "本边队列里还有谁没动过"。用标记而不是数人头：阵亡/复活中途改队列长度也不会算错。
+##     本圈结束（两边的队首都动过）时清空标记，下一圈重新开始。
 func advance(who: Unit = null) -> Unit:
 	var u: Unit = who if who != null else _front(turn_side)
 	if u != null:
@@ -183,9 +206,31 @@ func advance(who: Unit = null) -> Unit:
 		q.erase(u)
 		if u.is_alive() and u.has_turn():
 			q.append(u)                          # 出队入队尾 -> 下一圈还会轮到他
+	if mode == MODE_BY_SIDE:
+		if u != null:
+			_acted[u] = true
+			if _side_has_unacted(u.side):
+				# 本边还有人没行动 -> 不换边，继续本边下一位
+				# （如果本边队首是"已行动过"的人，说明这一圈本边走完了 →
+				#   清空标记，让下一圈从队首重新开始）
+				if _acted.has(_front(u.side)):
+					_acted.clear()
+				_refresh_preview()
+				return current()
+		_acted.clear()
 	turn_side = 1 - turn_side
 	_refresh_preview()
 	return current()
+
+
+## 本边队列里还有没有人这一圈没行动过
+func _side_has_unacted(side: int) -> bool:
+	var q := _queue_of(side)
+	_purge_dead()
+	for x in q:
+		if not _acted.has(x):
+			return true
+	return false
 
 
 ## 预测接下来 n 个行动者（含当前，给底部队列条用）
@@ -198,6 +243,7 @@ func preview(n: int) -> Array[Unit]:
 	_purge_arr(eq)
 	var side := turn_side
 	var guard := 0
+	var acted := _acted.duplicate()          # 预测不污染真实状态
 	while out.size() < n and guard < n * 4 + 32:
 		guard += 1
 		if pq.is_empty() and eq.is_empty():
@@ -213,6 +259,19 @@ func preview(n: int) -> Array[Unit]:
 		q.append(u)                              # 出队入队尾（和 advance 一致）
 		if u.is_alive():
 			out.append(u)
+		# 换边规则必须和 advance() 一致，否则底部队列条会骗人（第 99 轮）
+		if mode == MODE_BY_SIDE:
+			acted[u] = true
+			var rest := false
+			for x in q:
+				if not acted.has(x):
+					rest = true
+					break
+			if rest:
+				if acted.has(q[0]):
+					acted.clear()
+				continue                         # 本边还有人没行动 -> 不换边
+			acted.clear()
 		side = 1 - side
 	return out
 

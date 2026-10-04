@@ -29,6 +29,13 @@ const TYPE_KING := "king"
 const TYPE_ANNIHILATE := "annihilate"
 const TYPE_SURVIVE := "survive"
 const TYPE_REACH := "reach"
+## "boss"：**非对称胜负** —— 打 Boss 的关卡用它（第 99 轮，Reaper 战）。
+##   元数据：{"type": "boss", "boss_name": "Reaper", "king_side": 0}
+##     · 敌方那个叫 `boss_name` 的单位阵亡 -> 玩家胜
+##     · `king_side`（缺省 = 玩家方 0）的老国王阵亡 -> 该方失败
+##   为什么要单独一种：`king` 是"谁家国王死谁输"，非对称；Boss 关是
+##   "玩家国王死 = 败，Boss 死 = 胜"，两个条件针对不同单位。
+const TYPE_BOSS := "boss"
 const DEFAULT_TYPE := TYPE_KING
 
 
@@ -113,6 +120,18 @@ static func check_one(spec: Dictionary, units: Array[Unit], turn_count: int) -> 
 				if cells.has(u.cell):
 					return u.side
 			return NONE
+		TYPE_BOSS:
+			# 非对称：玩家老国王死 = 败；那只 Boss 死 = 胜。
+			var boss_name := String(spec.get("boss_name", ""))
+			var king_side := int(spec.get("king_side", UnitData.Side.PLAYER))
+			for u in units:
+				if boss_name != "" and String(u.name).begins_with(boss_name):
+					if u.side != king_side and not u.is_alive():
+						return king_side                 # Boss 阵亡 -> 玩家胜
+			for u in units:
+				if u.is_king and u.side == king_side and not u.is_alive():
+					return 1 - king_side                 # 玩家老国王阵亡 -> 败
+			return NONE
 	return NONE
 
 
@@ -144,6 +163,8 @@ static func reason_text(cfg: Dictionary, winner_side: int) -> String:
 			return "守满 %d 个回合" % int(cfg.get("rounds", 0))
 		TYPE_REACH:
 			return "有人抵达目标格"
+		TYPE_BOSS:
+			return "击毙 %s" % String(cfg.get("boss_name", "Boss"))
 		_:
 			return "老国王阵亡"
 

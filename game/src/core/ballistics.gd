@@ -14,6 +14,8 @@
 #   · 投掷物（炮弹 / 召唤球）走抛物线，土堆挡不住
 #   · 箭矢不惊动哨兵（否则"箭生箭"会指数爆炸）
 #   · 炮弹 / 召唤球惊动哨兵，且不分敌我
+#   · 激光（第 98 轮，第三种类型）：**光束**，不进 ProjectileField —— 不能被击落、
+#     不惊动哨兵；只吃地形阻挡，且与箭矢同款（土堆拦、木刺不拦）。见 LASER_LIKE。
 # ══════════════════════════════════════════════════════════════════════════════
 class_name Ballistics
 extends RefCounted
@@ -27,9 +29,12 @@ static func placeable_block_mode(pl: Placeable, kind: String) -> int:
 	if pl == null or not pl.is_alive():
 		return Block.NEVER
 	if kind == Projectile.KIND_ARROW or kind == Projectile.KIND_CANNON \
-			or kind == Projectile.KIND_FRAGMENT or kind == Projectile.KIND_BULLET:
+			or kind == Projectile.KIND_FRAGMENT or kind == Projectile.KIND_BULLET \
+			or kind == Projectile.KIND_LASER:
 		# 木刺 block_ranged=false -> 不拦；土堆 block_ranged=true -> 一定拦
 		# （用户强调：不看箭矢是否"碰撞"到它，只看是否从它上空飞过）
+		# 激光类同款（用户口径：激光"可以被木刺和土堆阻挡"——实际生效的是土堆，
+		# 因为木刺的 block_ranged = false，这是既有数据口径，不改 bc_stat.md）。
 		return Block.ALWAYS if pl.block_ranged else Block.NEVER
 	# 炮弹 / 召唤球 / 手榴弹：抛物线，土堆挡不住
 	return Block.NEVER
@@ -61,6 +66,24 @@ static func is_shell_class(kind: String) -> bool:
 	return SHELL_LIKE.has(kind)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 【激光类】（用户口径第 98 轮 · Boss-1）：与箭矢类 / 炮弹类**同级**的第三种弹射物类型。
+#
+#   激光不是"飞过去命中"，而是"存在一段时间的光束"：逐物理帧累计帧伤、结束统一结算
+#   （规则见 core/laser.gd，表现见 view/laser_beam.gd）。因为它根本不飞：
+#     · 不能被任何东西击落（`intercept_result` = ""）
+#     · 不惊动哨兵（`sentry_trigger` = false）
+#     · 不参与"飞行中撞到角色"的判定（`body_impact` = ""）
+#     · 挡不挡只看地形 —— 与箭矢**同一处口径**：土堆拦、木刺不拦
+#   所以它只在下面这几张表里登记，不进 SHELL_LIKE、不进 shell_like_defaults()。
+# ══════════════════════════════════════════════════════════════════════════════
+const LASER_LIKE := [Projectile.KIND_LASER]
+
+
+static func is_laser_class(kind: String) -> bool:
+	return LASER_LIKE.has(kind)
+
+
 ## 这一类【在半空被箭打掉】时怎么收尾：
 ##   "burst"  -> 就地空爆（炮弹 / 火箭 / 巡飞弹）
 ##   ""       -> 整发作废、**模型直接消失**（枪榴弹 / 召唤球）
@@ -75,7 +98,11 @@ static func intercept_result(kind: String) -> String:
 
 
 ## 炮弹类飞行物的出厂默认值：命中标签 / 惊动哨兵 / 被击落时的收尾方式，只在这里定义一次
+## ⚠️ 只对**炮弹类**有效：别的类型（激光 / 召唤球）调用它会拿到一份"什么都不吃"的空模板，
+## 不会莫名其妙获得 `hit_tags = ["arrow"]`（那会让光束看起来"可以被箭击落"）。
 static func shell_like_defaults(kind: String) -> Dictionary:
+	if not is_shell_class(kind):
+		return {"hit_tags": [], "sentry_trigger": false, "intercept": ""}
 	return {
 		"hit_tags": ["arrow"],                    # 可以被箭击落
 		"sentry_trigger": true,                   # 惊动哨兵（不分敌我）

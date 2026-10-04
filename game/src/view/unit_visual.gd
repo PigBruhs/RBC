@@ -186,6 +186,11 @@ func _build_model() -> void:
 	if bname.begins_with("俯冲轰炸直升机"):
 		HeliModel.build(self, _faction_color())
 		return
+	# 大头目 Reaper（质量效应风的大鱿鱼）：独立模型文件 ReaperModel。
+	# 视觉包围盒 = 碰撞圆柱（高 12 / 直径 6），蓝环离地 6 格 —— 见 reaper_model.gd
+	if bname == "Reaper":
+		ReaperModel.attach(self, _faction_color())
+		return
 	# 萨尼铁塔：远程造型 + 背上背一根医疗拐杖（用户口径）
 	if bname == "萨尼铁塔":
 		_build_ranged(body_mat, dark_mat, metal_mat)

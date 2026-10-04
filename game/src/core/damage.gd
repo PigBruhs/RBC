@@ -10,6 +10,7 @@
 #   blast()        爆心范围内全体（炮弹 / 轨道炮 / 地毯式轰炸）
 #   strike()       对单个角色的一次攻击（近战立即 / 箭矢命中）
 #   prop_strike()  箭矢打中沙盒道具
+# 第四种（第 98 轮）：magic_hit() 魔法伤害 —— 只吃魔抗、无视护甲（激光 / Reaper 被动）
 # ══════════════════════════════════════════════════════════════════════════════
 class_name Damage
 extends RefCounted
@@ -109,7 +110,10 @@ static func air_burst(attacker: Unit, ctr: Vector3, opts: Dictionary, units: Arr
 		if not u.is_alive() or u == skip:
 			continue
 		# 身体底面 = 它【现在】的高度（悬停 2 格 / 爬升到 4 格都按真实高度算，第 89 轮）
-		if not Targeting.sphere_hits_body(ctr, radius, u.cell, BODY_R, BODY_H, u.body_h()):
+		# 碰撞圆柱**按单位取**（第 98 轮）：Reaper 半径 3 / 高 12；既有角色走缺省 = BODY_R/BODY_H
+		# 同值 -> 行为与"全项目一个尺寸"逐字相同。
+		if not Targeting.sphere_hits_body(ctr, radius, u.cell,
+				Targeting.unit_body_r(u, BODY_R), Targeting.unit_body_h(u, BODY_H), u.body_h()):
 			continue
 		var h := Hit.new()
 		h.unit = u
@@ -222,6 +226,37 @@ static func prop_strike(attacker: Unit, pl: Placeable, rng) -> Hit:
 		pl.take_power_damage(Rules.points_to_milli(pr.damage))
 		h.died = not pl.is_alive()
 		h.text = "  %s 被箭矢击中：%d 点（剩余 %s）" % [pl.name, pr.damage, _fmt(pl.power_cur)]
+	return h
+
+
+## ── 魔法伤害（第 98 轮 · Boss-1 激光）────────────────────────────────────────
+## 只吃【魔法抗性 mr】，**无视护甲**（与破片的"固定力量"同族，但抗性换成 mr）。
+## 也就是：不走 Combat.deal_to_unit 的力量线（那条要先减护甲），而是自己按固定值折算。
+##   points = 结算前的伤害点数（例：激光 30 帧 × 2 点/帧 = 60）
+##   label  = 日志里的来源词（激光 = "激光"；Reaper 的 6 格被动用缺省 "魔法"）
+## 实现照 `Combat.deal_to_unit` 的 `fixed_power` 分支：只按抗性乘 (1 - eff/1000)、不碰护甲池。
+static func magic_hit(attacker: Unit, target: Unit, points: int, rng, label: String = "魔法") -> Hit:
+	if target == null or not target.is_alive() or points <= 0:
+		return null
+	var eff: int = clampi(target.mr, 0, 1000)
+	var pts: int = 0
+	if eff < 1000:
+		pts = int(floor(float(points) * float(1000 - eff) / 1000.0))
+	var h := Hit.new()
+	h.unit = target
+	h.pr_before = target.pr                  # 魔法伤害不看物抗，这里只是给日志留个上下文
+	h.ignore_res = 0.0
+	h.result = Combat.Result.new()
+	h.result.power_dmg = Rules.points_to_milli(maxi(0, pts))
+	h.result.hit = pts > 0
+	if eff >= 1000:
+		h.result.branch = Rules.Branch.NO_DAMAGE
+		h.result.note = "被魔抗完全抵消"
+	if pts > 0:
+		target.take_power_damage(Rules.points_to_milli(pts))
+	h.died = not target.is_alive()
+	var tail := "（被魔抗完全抵消）" if eff >= 1000 else ""
+	h.text = "  ✦ %s命中 %s：%d 点魔法伤害（魔抗 %d‰）%s" % [label, target.name, pts, eff, tail]
 	return h
 
 

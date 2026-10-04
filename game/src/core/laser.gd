@@ -1,0 +1,167 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# 激光类弹射物（第 98 轮 · Boss-1）：**不是"飞过去命中"，而是"存在一段时间的光束"**
+#
+# 与既有两类弹道物的区别（这是"第三种类型"，与箭矢类 / 炮弹类同级）：
+#   · 箭矢类 / 炮弹类 = `Projectile`（纯物理对象：飞、撞、落地、可被击落）
+#   · 激光类 = **光束**：在一段时间里，每个物理帧对覆盖到的目标累加【帧伤】，
+#     光束结束时【统一结算一次】—— 一次结算 = 一次伤害，而不是每帧各打一次。
+#   因此它**不进 ProjectileField**：不参与互相击落、不会被箭打掉、不惊动哨兵。
+#
+# 用户口径：
+#   · 高度：Reaper 的蓝环离地 **6 格** -> 光束从 6 格高处射出（`BASE_HEIGHT`）；
+#     "末端是攻击目标"，所以终点可以比起点低（斜射），判定是**三维线段 vs 竖直圆柱**。
+#   · 阻挡：**可以被地形挡住** —— 与箭矢同一处口径（`Ballistics.placeable_block_mode`）：
+#     木刺 `block_ranged = false` 不拦、土堆 `block_ranged = true` 拦，撞到就停在它那一格。
+#   · 伤害：**魔法伤害**（只吃魔抗、无视护甲）—— 见 `Damage.magic_hit`。
+#
+# 本文件是**纯规则**（RefCounted、不碰 Node、可无头测试）：几何 + 帧伤 + 结算。
+# 表现与推进（光束节点、每帧 tick、统一结算的收尾）在 `view/laser_beam.gd`。
+# ══════════════════════════════════════════════════════════════════════════════
+class_name Laser
+extends RefCounted
+
+## 发射端离地高度（用户口径：Reaper 的蓝环离地 6 格）
+const BASE_HEIGHT := 6.0
+
+## 光束粗细（判定半径）。命中判据 = 光束到角色竖轴的距离 <= HIT_R + 角色自己的 body_r
+const HIT_R := 0.5
+
+## 帧伤的单位帧：1 帧 = 1/60 秒（与 `Reaper.FRAME_HZ` 对齐）。
+## 伤害按 delta 折算成帧数，所以掉帧不会改变每秒伤害。
+const FRAME_HZ := 60.0
+
+## 激光 id -> 每帧伤害（点）。**帧伤由激光 id 决定**，不按距离查表。
+const DMG_PER_FRAME := {
+	"reaper_laser": 2,
+}
+const DEFAULT_DMG_PER_FRAME := 2
+
+
+## 这个激光 id 的每帧伤害（点）。没登记的 id 走缺省 2 点/帧。
+static func dmg_per_frame_of(id: String) -> int:
+	return int(DMG_PER_FRAME.get(id, DEFAULT_DMG_PER_FRAME))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 地形截断
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 光束从 a 到 b 的哪一段会被地形截断。返回 b 被截断后的终点（没截断就返回 b）。
+##
+## 判定入口是 `Ballistics.placeable_block_mode(pl, Projectile.KIND_LASER)` —— 只此一处：
+##   · 土堆   `block_ranged = true`  -> `Block.ALWAYS`  拦，光束停在它那一格
+##   · 木刺   `block_ranged = false` -> `Block.NEVER`   不拦（尖桩之间有缝，与箭矢同款）
+## 返回的是【第一个进入阻挡物所在格的采样点】，所以 `floor(终点)` 一定是阻挡物那一格
+## （光束视觉上抵到它的边缘，不会穿过去）。
+static func clip_by_terrain(a: Vector2, b: Vector2, placeables: Array[Placeable],
+		grid_w: int, grid_h: int) -> Vector2:
+	if placeables.is_empty():
+		return b
+	var total := a.distance_to(b)
+	if total <= 0.0001:
+		return b
+	var steps: int = maxi(1, int(ceil(total / 0.05)))
+	for i in range(1, steps + 1):
+		var t := float(i) / float(steps)
+		var p := a + (b - a) * t
+		var c := Vector2i(int(floor(p.x)), int(floor(p.y)))
+		# 空场（可行动区域之外）没有地形
+		if c.x < 0 or c.y < 0 or c.x >= grid_w or c.y >= grid_h:
+			continue
+		for pl in placeables:
+			if pl == null or not pl.is_alive() or not pl.covers(c):
+				continue
+			if Ballistics.placeable_block_mode(pl, Projectile.KIND_LASER) != Ballistics.Block.ALWAYS:
+				continue
+			return p
+	return b
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 命中判定（三维）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 光束会不会打到这个角色。
+##
+## 三维口径：光束是 `a -> b` 的线段；角色是**竖直圆柱**
+## （半径 `Targeting.unit_body_r(u)`、高 `Targeting.unit_body_h(u)`、底面 `u.body_h()`）。
+## 做法分两步，精确解、不采样：
+##   ① 把线段按圆柱的高度区间 [y0, y1] 裁一刀（`_clip_seg_y`）；
+##   ② 算这一小段到"圆柱中轴"的**水平**距离 <= HIT_R + 角色半径 即命中（`_dist_point_to_seg_2d`）。
+##
+## 于是"贴地飞的水平光束"打不到地面角色（高度轴生效），而"从 6 格高处斜射到目标身上"
+## 的线段一定在末端命中目标 —— 这正是 Reaper 激光的几何。
+static func hits_unit(a: Vector3, b: Vector3, u: Unit) -> bool:
+	if u == null or not u.is_alive():
+		return false
+	var y0 := u.body_h()
+	var y1 := y0 + Targeting.unit_body_h(u)
+	var seg := _clip_seg_y(a, b, y0, y1)
+	if seg.is_empty():
+		return false
+	var p0: Vector3 = seg[0]
+	var p1: Vector3 = seg[1]
+	var ctr := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
+	var rr := HIT_R + Targeting.unit_body_r(u)
+	return _dist_point_to_seg_2d(ctr, Vector2(p0.x, p0.z), Vector2(p1.x, p1.z)) <= rr
+
+
+## 线段落在高度区间 [y0, y1] 里的那一小段（返回 [Vector3, Vector3]，空数组 = 完全在区间外）。
+static func _clip_seg_y(a: Vector3, b: Vector3, y0: float, y1: float) -> Array:
+	var dy := b.y - a.y
+	var t0 := 0.0
+	var t1 := 1.0
+	if absf(dy) <= 0.000001:
+		# 水平光束：整条都在同一高度，要么全在区间里、要么全不在
+		if a.y < y0 or a.y > y1:
+			return []
+		return [a, b]
+	var ta := (y0 - a.y) / dy
+	var tb := (y1 - a.y) / dy
+	var lo := minf(ta, tb)
+	var hi := maxf(ta, tb)
+	t0 = maxf(t0, lo)
+	t1 = minf(t1, hi)
+	if t0 > t1:
+		return []
+	return [a.lerp(b, t0), a.lerp(b, t1)]
+
+
+## 点到线段的距离（二维，水平面）。线段退化成一个点时就是点到点的距离。
+static func _dist_point_to_seg_2d(p: Vector2, s0: Vector2, s1: Vector2) -> float:
+	var d := s1 - s0
+	var l2 := d.length_squared()
+	if l2 <= 0.0000001:
+		return p.distance_to(s0)
+	var t := clampf((p - s0).dot(d) / l2, 0.0, 1.0)
+	return p.distance_to(s0 + d * t)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 帧伤结算（光束结束时**统一结算一次**）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## frames_by_id 是 {角色 instance_id: 被光束覆盖的物理帧数}；
+## dmg_per_frame 由【激光 id】决定（`"reaper_laser"` = 2 点/帧）。
+## 伤害走 `Damage.magic_hit`（只吃魔抗、无视护甲），返回 Array[Damage.Hit]。
+## 已经阵亡 / 不在 units 里的目标：这一份帧伤作废（不给尸体结算）。
+static func settle(units: Array[Unit], frames_by_id: Dictionary, dmg_per_frame: int,
+		rng) -> Array[Damage.Hit]:
+	var out: Array[Damage.Hit] = []
+	if frames_by_id.is_empty() or dmg_per_frame <= 0:
+		return out
+	var by_id := {}
+	for u in units:
+		if u != null and u.is_alive():
+			by_id[u.get_instance_id()] = u
+	for key in frames_by_id.keys():
+		var u: Unit = by_id.get(key, null)
+		if u == null:
+			continue
+		var frames := int(frames_by_id[key])
+		if frames <= 0:
+			continue
+		var h := Damage.magic_hit(null, u, frames * dmg_per_frame, rng, "激光")
+		if h != null:
+			out.append(h)
+	return out
