@@ -27,4 +27,4 @@
 |---|---|---|---|---|---|---|---|---|
 | 木刺 | 1x1 | 40 | 0 | none | immune | yes | no | 4 |
 | 土堆 | 1x1 | 20 | 0 | mid | immune | yes | yes | 6 |
-| 巡飞弹发射器 | 1x1 | 20 | 0 | none | immune | yes | no | 2 |
+| 巡飞弹发射器 | 1x1 | 20 | 0 | none | immune | yes | no | 1 |

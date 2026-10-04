@@ -2853,8 +2853,9 @@ func _initialize() -> void:
 	_s.phase = _s.Phase.IDLE
 	_s.active = null
 	_s._place_kind = "巡飞弹发射器"
-	_chk(int(_s.place_left.get("巡飞弹发射器", 0)) > 0, "沙盒里有巡飞弹发射器（数量来自表格）")
-	_s.place_left["巡飞弹发射器"] = 2
+	_chk(int(_s.place_left.get("巡飞弹发射器", 0)) == 1,
+		"沙盒里有巡飞弹发射器，且每个场景上限 1 台（数量来自表格）")
+	_s.place_left["巡飞弹发射器"] = 1
 	_s._place_at(Vector2i(10, 10))
 	var p90_lp: Placeable = null
 	for p90_pl in _s.placeables:
@@ -2880,6 +2881,16 @@ func _initialize() -> void:
 	_s._tick_loiter_launchers(0.2)                  # 位置没变 -> 不算"在动"
 	_chk(_count_kind(Projectile.KIND_LOITER) == p90_n0,
 		"站着不动的角色不会触发发射器（只打运动中的）")
+	# 区分敌我（第 91 轮）：友军从旁边走过也不打
+	var p91_friend: Unit = _unit_by("Gerald", 0)
+	p91_friend.cell = Vector2i(10, 16)
+	p91_friend.visual.position = Vector3(10.5, 0.0, 16.5)
+	_s._tick_loiter_launchers(0.2)
+	p91_friend.cell = Vector2i(10, 15)
+	p91_friend.visual.position = Vector3(10.5, 0.0, 15.5)
+	_s._tick_loiter_launchers(0.2)
+	print("    友军（我方 Gerald）在射程内走动：巡飞弹 %d 发" % p90_n0)
+	_chk(_count_kind(Projectile.KIND_LOITER) == p90_n0, "友军在射程内移动不会触发发射器（区分敌我）")
 	# 动一下（浮点位置变了）-> 下一帧采样就该发射
 	p90_tgt.cell = Vector2i(10, 15)
 	p90_tgt.visual.position = Vector3(10.5, 0.0, 15.5)
@@ -2911,7 +2922,7 @@ func _initialize() -> void:
 	_chk(_count_kind(Projectile.KIND_LOITER) == 1, "冷却没到 -> 不许再发射（每 5 个回合一枚）")
 	# ── Q/E 制导：越按越快 + 有上下限 + 松手带惯性 ──
 	if p90_mun != null:
-		_s._loiter_control = p90_mun
+		_s._loiter_first = p90_mun              # 本局第一发（发射时自动记下，这里写明）
 		var p90_h0: float = p90_mun.heading
 		_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)          # 刚按下
 		var p90_d1: float = absf(wrapf(p90_mun.heading - p90_h0, -PI, PI))
@@ -2932,12 +2943,23 @@ func _initialize() -> void:
 		_chk(p90_w <= Loiter.TURN_MAX + 0.001, "角速度有上限（%.1f <= %.0f）" % [p90_w, Loiter.TURN_MAX])
 		_chk(p90_w_off > 0.0 and p90_d_off > 0.0, "松手带惯性：角速度还在，继续转一点再停")
 		_chk(absf(p90_w_off) < absf(p90_w), "松手后角速度在衰减（%.1f -> %.1f）" % [p90_w, p90_w_off])
-		# ── 近炸引信：把一个角色挪到造伤范围里 ──
+		# ── 第 91 轮：只有最先发射的那一发受控，多余的永远不受控 ──
+		var p91_b := Ordnance.make_loiter(-1, "巡飞弹发射器", Vector2(3.5, 40.5), 0.0, _s.rng)
+		_s.field.register(p91_b)
+		print("    场上两发：受控的是%s ｜ 第二发受控=%s" % [
+			"最先那发" if _s._loiter_pick_control() == p90_mun else "？",
+			_s._loiter_pick_control() == p91_b])
+		_chk(_s._loiter_pick_control() == p90_mun, "只有最先发射的那一发受 Q/E 控制")
+		_chk(_s._loiter_pick_control() != p91_b, "多余的那发不受控（沿直线飞）")
+		p90_mun.kill("test_kill")               # 第一发爆炸
+		_chk(_s._loiter_pick_control() == null and p91_b.alive,
+			"第一发爆炸后不再接管：多余的那发还在飞，但永远不受控")
+		# ── 近炸引信：把一个角色挪到第二发的造伤范围里 ──
 		var p90_vic: Unit = _unit_by("Alette", 1)
 		p90_vic.power_cur = p90_vic.power_max
 		p90_vic.armor_cur = 0
-		p90_vic.cell = Vector2i(int(floor(p90_mun.pos().x)), int(floor(p90_mun.pos().y)))
-		p90_vic.visual.position = Vector3(p90_mun.pos().x, 0.0, p90_mun.pos().y)
+		p90_vic.cell = Vector2i(int(floor(p91_b.pos().x)), int(floor(p91_b.pos().y)))
+		p90_vic.visual.position = Vector3(p91_b.pos().x, 0.0, p91_b.pos().y)
 		var p90_vhp: int = p90_vic.power_cur
 		_s._debug_log.clear()
 		_s._tick_loiter_fuse()
@@ -2946,8 +2968,8 @@ func _initialize() -> void:
 			if String(p90_lg).contains("近炸引信"):
 				p90_fuse = true
 		print("    近炸引信：触发=%s ｜ 目标力量 %d -> %d ｜ 巡飞弹还在=%s" % [
-			p90_fuse, p90_vhp / 1000, p90_vic.power_cur / 1000, p90_mun.alive])
-		_chk(p90_fuse and not p90_mun.alive, "造伤范围内出现角色 -> 近炸引信引爆")
+			p90_fuse, p90_vhp / 1000, p90_vic.power_cur / 1000, p91_b.alive])
+		_chk(p90_fuse and not p91_b.alive, "造伤范围内出现角色 -> 近炸引信引爆")
 		_chk(p90_vic.power_cur < p90_vhp, "巡飞弹造伤落到范围里的角色身上（40 破甲 + 40 力量）")
 	# ── 飞满 32 格自动引爆 ──
 	_s.clear_projectiles()

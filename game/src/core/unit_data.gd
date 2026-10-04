@@ -262,6 +262,6 @@ const PLACEABLES := [
 		"power": 20, "armor": 0,
 		"pr": 0, "mr": 1000,
 		"block_move": true, "block_ranged": false,
-		"count": 2,
+		"count": 1,
 	},
 ]

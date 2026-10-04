@@ -448,7 +448,8 @@ func _tick_queue_anim(delta: float) -> void:
 #   · 巡飞弹：定高 1.5、恒速 3 格/秒、直径一格的球；玩家用 Q/E 制导；
 #     造伤范围直径两格的球（40 破甲 + 40 力量）；近炸引信 / 飞满 32 格自动引爆。
 # ══════════════════════════════════════════════════════════════════════════════
-var _loiter_control: Projectile = null     # 玩家正在制导的那一发
+var _loiter_first: Projectile = null       # 本局第一发（**只有它受 Q/E 控制**）
+var _loiter_first_done: bool = false       # 第一发已经没了：之后谁都不再受控（第 91 轮）
 var _loiter_sample: float = 0.0            # 发射器采样计时
 var _unit_seen: Dictionary = {}            # Unit -> 上次采样到的浮点位置（判"在动"）
 
@@ -471,6 +472,8 @@ func _tick_loiter_launchers(delta: float) -> void:
 		var best: Unit = null
 		var best_d := 1e9
 		for u in moving:
+			if not Loiter.is_target(u):
+				continue                                 # 区分敌我：只打敌方角色（第 91 轮）
 			var d: float = ctr.distance_to(_unit_pos(u))
 			if d > Loiter.LAUNCH_RANGE:
 				continue
@@ -504,8 +507,8 @@ func _fire_loiter(pl: Placeable, ctr: Vector2, tgt: Unit) -> void:
 	p.ignore_placeable = pl                    # 别一出膛就被自己的发射器触发了引信
 	field.register(p)
 	pl.tags["loiter_next"] = gm.turn_count + Loiter.LAUNCH_COOLDOWN_TURNS
-	if _loiter_control == null or not _loiter_control.alive:
-		_loiter_control = p
+	if _loiter_first == null and not _loiter_first_done:
+		_loiter_first = p                         # 本局第一发：只有它受 Q/E 控制
 	var d: float = ctr.distance_to(_unit_pos(tgt))
 	_log("  🚀 %s 发射【巡飞弹】→ 目标 %s（%.1f 格，初始方向 %.0f°，中心线偏 %+.0f°）｜ Q/E 制导" % [
 		pl.name, tgt.name, d, rad_to_deg(heading),
@@ -605,18 +608,19 @@ func _loiter_steer_apply(p: Projectile, dir: float, delta: float) -> void:
 		p.heading = Loiter.steer(p.heading, axes[0], axes[1], p.turn_w, delta)
 
 
-## 玩家当前制导的那一发巡飞弹（上一发没了就自动接管下一发）
+## 玩家当前制导的那一发 = **本局最先发射的那一发**（用户口径第 91 轮）。
+## 场上多出来的巡飞弹一律沿直线飞、永远不受控；第一发爆炸/被打掉之后
+## 也不再接管任何一发（`_loiter_first_done` 一旦置位就不再受控）。
 func _loiter_pick_control() -> Projectile:
-	if _loiter_control != null and _loiter_control.alive:
-		return _loiter_control
-	_loiter_control = null
-	if field == null:
+	if _loiter_first_done:
 		return null
-	for it in field.items:
-		var p: Projectile = it["p"]
-		if p.kind == Projectile.KIND_LOITER and p.alive:
-			_loiter_control = p
-	return _loiter_control
+	if _loiter_first == null:
+		return null
+	if not _loiter_first.alive:
+		_loiter_first_done = true
+		_loiter_first = null
+		return null
+	return _loiter_first
 
 
 func _camera_process(delta: float) -> void:

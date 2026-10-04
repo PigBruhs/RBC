@@ -1142,8 +1142,15 @@ func _initialize() -> void:
 	for d in UnitData.PLACEABLES:
 		if String(d["name"]) == Loiter.LAUNCHER_NAME:
 			lpl = d
-	_expect(int(lpl.get("power", 0)) == 20 and bool(lpl.get("block_move", false)),
-		"巡飞弹发射器：血量 20、阻挡移动（表格里那一行）", fails)
+	_expect(int(lpl.get("power", 0)) == 20 and bool(lpl.get("block_move", false))
+		and int(lpl.get("count", 0)) == 1,
+		"巡飞弹发射器：血量 20、阻挡移动、**每个场景上限 1 台**（表格里那一行）", fails)
+	# 区分敌我（第 91 轮）：只打敌方角色
+	var lt_foe := _enemy_of(by_name, "Gerald")
+	var lt_friend := Unit.from_data(by_name["Gerald"])
+	_expect(Loiter.is_target(lt_foe) and not Loiter.is_target(lt_friend)
+		and not Loiter.is_target(null),
+		"发射器只把敌方角色当目标（友军/空 都不打）", fails)
 
 	# ── 汇总 ──
 	print("── 规则自检 ──")

@@ -44,10 +44,18 @@ const LAUNCH_COOLDOWN_TURNS := 5   # 每 5 个回合边界一枚（GM 计时）
 const CONE_DEG := 45.0             # 初始方向：以"发射器 -> 目标"为中心线，左右各 45° 内随机
 const SAMPLE_HZ := 12.0            # 每帧检测太浪费，按这个频率采样
 const MOVE_EPS := 0.05             # 位移超过这么多就算"在动"（格）
+## 只打【敌方】角色（用户口径第 91 轮）：沙盒是玩家放的，所以"敌人" = 敌方阵营。
+## 站桩的不打（要"在动"），友军从旁边走过也不打。
+const LAUNCH_TARGET_SIDE := 1      # UnitData.Side.ENEMY
 
 
 static func is_launcher(pl: Placeable) -> bool:
 	return pl != null and pl.name.begins_with(LAUNCHER_NAME)
+
+
+## 这台发射器会不会把 u 当成目标（阵营 + 必须活着）
+static func is_target(u: Unit) -> bool:
+	return u != null and u.is_alive() and u.side == LAUNCH_TARGET_SIDE
 
 
 ## 按住时长 -> 目标角速度（度/秒，无符号）。刚开始转得慢，按久了转得快，有上下限。
