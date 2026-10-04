@@ -47,8 +47,10 @@ static func is_direct_hit(kind: String) -> bool:
 #   炮弹（迫击炮）/ 火箭（37mm）/ 枪榴弹 —— 三者共享同一套规则：
 #     · 惊动哨兵（不分敌我）
 #     · 可以被箭击落
-#     · 被拦下（被箭打掉 / 飞行中撞到角色）-> 就地空爆
-#   唯一的例外是枪榴弹：它本来就"落地才炸"，所以被拦下 = 就地落地开始 4 回合计时。
+#     · 被箭打掉（还在半空）-> 就地空爆
+#     · 撞到角色（还没落地）-> **当成在命中处落地**，照常结算伤害（用户口径第 87 轮；
+#       火箭还要撒破片）—— 以前这里被当成"被拦下"，火箭常常整发作废、落地没伤害。
+#   唯一的例外是枪榴弹：它本来就"落地才炸"，所以撞到角色 = 在那个格子落地开始计时。
 #   加一种新的炮弹 = 在 SHELL_LIKE 里加一行 + 工厂里调 shell_like_defaults()。
 # ══════════════════════════════════════════════════════════════════════════════
 const SHELL_LIKE := [Projectile.KIND_SHELL, Projectile.KIND_ROCKET, Projectile.KIND_GRENADE]
@@ -58,7 +60,7 @@ static func is_shell_class(kind: String) -> bool:
 	return SHELL_LIKE.has(kind)
 
 
-## 这一类被击落 / 撞到人时怎么收尾：
+## 这一类【在半空被箭打掉】时怎么收尾：
 ##   "burst"  -> 就地空爆（炮弹 / 火箭）
 ##   "drop"   -> 就地落地、开始自己的计时（枪榴弹）
 ##   ""       -> 不适用（召唤球只是信标：被击落直接作废，不炸）
@@ -70,7 +72,7 @@ static func intercept_result(kind: String) -> String:
 	return ""
 
 
-## 炮弹类飞行物的出厂默认值：命中标签 / 惊动哨兵 / 被拦下的处理方式，只在这里定义一次
+## 炮弹类飞行物的出厂默认值：命中标签 / 惊动哨兵 / 被击落时的收尾方式，只在这里定义一次
 static func shell_like_defaults(kind: String) -> Dictionary:
 	return {
 		"hit_tags": ["arrow"],                    # 可以被箭击落
@@ -79,15 +81,15 @@ static func shell_like_defaults(kind: String) -> Dictionary:
 	}
 
 
-## 飞行途中撞到角色会怎样（用户口径第 83 轮）：
+## 飞行途中撞到角色会怎样：
 ##   "direct" -> 直接命中，按命中结算（箭矢 / 加农炮弹 / 破片 / 子弹）
-##   "burst"  -> 被身体拦下，就地空爆（炮弹类：炮弹 / 火箭 / 枪榴弹）
+##   "land"   -> **当成在命中处落地**（炮弹类：炮弹 / 火箭 / 枪榴弹）
 ##   ""       -> 不撞（召唤球：它只是个信标，穿过去）
 static func body_impact(kind: String) -> String:
 	if is_direct_hit(kind):
 		return "direct"
 	if is_shell_class(kind):
-		return "burst"
+		return "land"
 	return ""
 
 

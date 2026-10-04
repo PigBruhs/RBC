@@ -34,7 +34,7 @@ const ARROW_LINGER_SEC := 2.0
 const EV_OUT := "out_of_bounds"       # 飞出边界
 const EV_HIT_PROJ := "hit_projectile" # 打中另一发弹道物
 const EV_HIT_TARGET := "hit_target"   # 打中角色/沙盒道具（直接命中型）
-const EV_HIT_BODY := "hit_body"       # 炮弹类飞行中撞到角色 -> 被拦下就地空爆（用户口径第 83 轮）
+const EV_HIT_BODY := "hit_body"       # 炮弹类飞行中撞到角色 -> 当成在命中处落地（用户口径第 87 轮）
 const EV_LANDED := "landed"           # 落地
 const EV_REMOVED := "removed"         # 任何一次消亡（最后必然发一次）
 
@@ -185,12 +185,12 @@ func step(delta: float) -> void:
 			continue
 
 		# ③ 撞到角色 / 挡道道具：
-		#    箭矢类是"直接命中"，炮弹类是"被拦下就地空爆"（用户口径第 83 轮）
+		#    箭矢类是"直接命中"，炮弹类是"当成在命中处落地"（用户口径第 87 轮）
 		var impact := Ballistics.body_impact(p.kind)
 		if impact != "" and hit_test.is_valid():
 			var what: Dictionary = hit_test.call(p, prev, cur)
 			if not what.is_empty():
-				p.kill("body_impact")          # 被拦下就是消亡（不然"活着"的它还会被当成在场上）
+				p.kill("body_impact")          # 落地结算完就是消亡（不然"活着"的它还会被当成在场上）
 				_report(EV_HIT_TARGET if impact == "direct" else EV_HIT_BODY, p, what)
 				retire(e)
 				items.remove_at(i)
@@ -210,6 +210,9 @@ func step(delta: float) -> void:
 				e["linger_until"] = clock + ARROW_LINGER_SEC
 				p.kill("landed_on_ground")
 				continue
+			# 落地 = 这一发消亡。以前只从场里摘掉、alive 还留着 true ——
+			# 于是落地的手榴弹/炮弹在 GM 眼里"还在飞"（哨兵会一直瞄着它射）。
+			p.kill("landed")
 			retire(e)
 			items.remove_at(i)
 

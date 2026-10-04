@@ -299,15 +299,15 @@ func _initialize() -> void:
 	var hv_hits: Array = Damage.air_burst(null, Vector3(5.5, 2.5, 5.5), ab_opts, [ab_hv] as Array[Unit])
 	_expect(hv_hits.size() == 1, "空爆结算会按 hover 判定（悬空单位也能被空爆打到）", fails)
 
-	# ── 炮弹类的"撞到人就空爆"规则表（第 83 轮）──
+	# ── 炮弹类的"撞到人 = 在命中处落地"规则表（第 87 轮）──
 	print("\n── 弹道撞人规则 ──")
-	_expect(Ballistics.body_impact(Projectile.KIND_SHELL) == "burst"
-		and Ballistics.body_impact(Projectile.KIND_ROCKET) == "burst"
-		and Ballistics.body_impact(Projectile.KIND_GRENADE) == "burst",
-		"炮弹 / 火箭 / 枪榴弹：飞行中撞到人 -> 就地空爆", fails)
+	_expect(Ballistics.body_impact(Projectile.KIND_SHELL) == "land"
+		and Ballistics.body_impact(Projectile.KIND_ROCKET) == "land"
+		and Ballistics.body_impact(Projectile.KIND_GRENADE) == "land",
+		"炮弹 / 火箭 / 枪榴弹：飞行中撞到人 -> 当成在命中处落地（不再算被拦下）", fails)
 	_expect(Ballistics.body_impact(Projectile.KIND_ARROW) == "direct"
 		and Ballistics.body_impact(Projectile.KIND_BULLET) == "direct",
-		"箭矢 / 子弹仍是直接命中", fails)
+		"箭矢 / 子弹仍是直接命中（碰到谁就伤谁）", fails)
 	_expect(Ballistics.body_impact(Projectile.KIND_MARKER) == "",
 		"召唤球只是信标：不撞人（穿过去）", fails)
 	_expect(Ballistics.is_shell_class(Projectile.KIND_ROCKET) and Ballistics.triggers_sentry(
@@ -930,6 +930,101 @@ func _initialize() -> void:
 				hook_bad.append(String(id2))
 	_expect(hook_bad.is_empty(), "受伤钩子都声明了 on_damaged（%s）" % [hook_bad], fails)
 
+	# ── 回合队列（第 87 轮：阵亡移出 / 复活压队头 / 队空跳过）──
+	print("\n── 回合队列（第 87 轮）──")
+	var q_units: Array[Unit] = [
+		Unit.from_data(by_name["Gerald"]), Unit.from_data(by_name["Alette"]),
+		Unit.from_data(by_name["Airburst mortar"]),
+		_enemy_of(by_name, "Gerald"), _enemy_of(by_name, "Alette"),
+		_enemy_of(by_name, "Airburst mortar"),
+	]
+	var tq := TurnQueue.new(RngService.new(5))
+	_expect(tq.rebuild(q_units) == 6 and tq.has_side(0) and tq.has_side(1),
+		"双方各 3 人 -> 两条队列各 3 人", fails)
+	_expect(tq.alternation_ok(), "常规队列严格交替（不会同一方连着两回合）", fails)
+	var head_q: Unit = tq.current()
+	_expect(head_q == tq.p_queue[0] or head_q == tq.e_queue[0], "current() = 队头（只看不取）", fails)
+	var size_q: int = tq.p_queue.size() + tq.e_queue.size()
+	head_q.power_cur = 0
+	tq.remove(head_q)
+	_expect(tq.p_queue.size() + tq.e_queue.size() == size_q - 1
+		and not tq.p_queue.has(head_q) and not tq.e_queue.has(head_q),
+		"阵亡：当场移出队列（%d -> %d 人，不是跳到队尾）" % [size_q, size_q - 1], fails)
+	_expect(tq.current() != head_q, "死者不再是队头（回合不会卡在尸体上）", fails)
+	head_q.power_cur = head_q.power_max
+	tq.push_front(head_q)
+	var own_q: Array[Unit] = tq.p_queue if head_q.side == UnitData.Side.PLAYER else tq.e_queue
+	_expect(own_q.size() > 0 and own_q[0] == head_q, "复活：压进自己这条队列的队头", fails)
+	tq.push_front(head_q)
+	_expect(own_q.size() == 3, "重复压队头不会出现两个他（入队前先去重）", fails)
+	# 队空自动跳过 + 复活立刻排上（用户报的"复活导致的饥饿"）
+	var solo := TurnQueue.new(RngService.new(11))
+	var sa := Unit.from_data(by_name["Gerald"])
+	var sb := Unit.from_data(by_name["Alette"])
+	var se := _enemy_of(by_name, "Gerald")
+	solo.rebuild([sa, sb, se] as Array[Unit])
+	sa.power_cur = 0
+	sb.power_cur = 0
+	solo.remove(sa)
+	solo.remove(sb)
+	_expect(not solo.has_side(UnitData.Side.PLAYER), "玩家方全灭 -> 队列为空", fails)
+	var seen_side: Array[int] = []
+	for i in 3:
+		var cu: Unit = solo.current()
+		seen_side.append(-1 if cu == null else cu.side)
+		solo.advance(cu)
+	_expect(seen_side.size() == 3 and not seen_side.has(-1) and not seen_side.has(UnitData.Side.PLAYER),
+		"一方队空 -> 自动跳过它的回合，另一方连续行动", fails)
+	sa.power_cur = sa.power_max
+	solo.push_front(sa)
+	solo.advance(solo.current())                # 敌方这一回合结束 -> 换边
+	_expect(solo.current() == sa,
+		"复活压到队头 -> 对面这一回合结束立刻轮到他（不会再饿死）", fails)
+	# 轮转语义：出队入队尾 = 一个循环之后又轮到他
+	var rot := TurnQueue.new(RngService.new(3))
+	var ra := Unit.from_data(by_name["Gerald"])
+	var re := _enemy_of(by_name, "Gerald")
+	rot.rebuild([ra, re] as Array[Unit])
+	_expect(rot.current() == ra, "1v1：队头先动", fails)
+	rot.advance(ra)
+	_expect(rot.current() == re, "出队入队尾 + 换边 -> 轮到对面", fails)
+	rot.advance(re)
+	_expect(rot.current() == ra, "再轮一圈 -> 又回到他（循环队列）", fails)
+
+	# ── 枪榴弹：落地后与投出者解耦（第 87 轮）──
+	print("\n── 枪榴弹解耦（第 87 轮）──")
+	var gm_g := GameMaster.new()
+	gm_g.schedule_grenade(Vector2i(5, 5), "萨尼铁塔", 0, 4)
+	var pend_g: GameMaster.Pending = gm_g.pending[0]
+	_expect(pend_g.decoupled, "落地的手榴弹标记为「与投出者解耦」", fails)
+	var caster_g := Unit.from_data(by_name["Airburst mortar"])
+	gm_g.schedule("orbital_strike", caster_g, Vector2i(3, 3), Vector2(3.5, 3.5), 5)
+	gm_g.cancel_pending_for("萨尼铁塔")          # 投出者阵亡
+	_expect(gm_g.pending.size() == 2, "投出者阵亡不会清掉已落地的枪榴弹", fails)
+	gm_g.cancel_pending_for(caster_g.name)       # 另一个人的技能照旧作废
+	_expect(gm_g.pending.size() == 1 and gm_g.pending[0] == pend_g,
+		"没落地的技能照旧作废（只有解耦的东西留得下来）", fails)
+	var due_gd: Array = []
+	for i in 4:
+		due_gd = gm_g.dispatch_turn_boundary()
+	_expect(due_gd.size() == 1 and String(due_gd[0].skill_id) == "grenade",
+		"投出者已阵亡，解耦的枪榴弹照样 4 个回合边界后引爆", fails)
+
+	# ── 杰拉尔德反弹：只吃 25% 力量（第 87 轮）──
+	print("\n── 箭矢弹反力量系数 ──")
+	var refl_mult: float = float(Passives.def("arrow_deflect").get("power_mult", 1.0))
+	_expect(absf(refl_mult - 0.25) < 0.0001, "反弹箭力量系数 = 25%", fails)
+	var rf_src := Unit.from_data(by_name["萨尼铁塔"])
+	rf_src.power_cur = Rules.points_to_milli(40)
+	var rf_tgt := Unit.from_data(by_name["Gerald"])
+	rf_tgt.pr = 0
+	rf_tgt.armor_cur = 0
+	rf_tgt.power_cur = rf_tgt.power_max
+	Damage.strike(rf_src, rf_tgt, false, RngService.new(13), 0, refl_mult)
+	var rf_dmg: int = rf_tgt.power_max - rf_tgt.power_cur
+	_expect(rf_dmg == Rules.points_to_milli(10),
+		"反弹伤害 = 40 × 25%% = 10（实际 %d 千分比）" % rf_dmg, fails)
+
 	# ── 汇总 ──
 	print("── 规则自检 ──")
 	if fails.is_empty():
@@ -948,6 +1043,14 @@ func _expect(cond: bool, label: String, fails: Array[String]) -> void:
 	else:
 		print("  FAIL  ", label)
 		fails.append(label)
+
+
+## 造一个敌方镜像单位（by_name 只有我方定义；镜像只在名字和阵营上不同）
+func _enemy_of(by_name: Dictionary, nm: String) -> Unit:
+	var d: Dictionary = (by_name[nm] as Dictionary).duplicate()
+	d["name"] = nm + " (E)"
+	d["side"] = UnitData.Side.ENEMY
+	return Unit.from_data(d)
 
 
 ## 按名字取可放置物的数据（规则自检用）

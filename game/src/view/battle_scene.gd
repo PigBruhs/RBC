@@ -1171,15 +1171,8 @@ func _next_turn() -> void:
 		await _begin_next_round()
 		return
 
-	# 英雄可以无限重生：死人还在队列里的话直接跳过（否则回合会卡在尸体上）
-	var guard := 0
-	while u != null and not u.is_alive() and guard < units.size() + 2:
-		guard += 1
-		queue.advance()
-		u = queue.current()
-	if u == null:
-		await _begin_next_round()
-		return
+	# 用户口径第 87 轮：死人【当场移出队列】，所以队列里不会有尸体 ——
+	# current() 只会返回活人（它自己也会顺手清一遍，兜底）。
 
 	# 最后一人机制（用户新规则）：某一方只剩 1 人时，立刻刷新队列，
 	# 把当前回合交给这个孤军，然后对面每人一回合，再轮回孤军。
@@ -1191,9 +1184,12 @@ func _next_turn() -> void:
 
 	# 不变式（用户报过 bug）：常规模式下绝不允许同一方连续两回合。
 	# 队列理论上不会这样，一旦出现（例如某条路径多推进了一次）就地纠正：这回合让给对面。
-	if not queue.last_stand and _last_turn_side != -1 and u.side == _last_turn_side:
+	# 例外：对面队列是空的（全在等复活）—— 那时本来就该他连着动，不算违规。
+	var other_side := 1 - u.side
+	if not queue.last_stand and _last_turn_side != -1 and u.side == _last_turn_side \
+			and queue.has_side(other_side):
 		_log("  ⚠ 检测到同一方连续行动，已纠正：%s 让位" % u.name)
-		queue.advance()
+		queue.advance(u)
 		var other := queue.current()
 		if other != null and other.side != _last_turn_side:
 			u = other
@@ -1439,9 +1435,12 @@ func _finish_turn() -> void:
 	_turn_just_finished = active
 	if active.visual != null:
 		active.visual.set_active(false)
+	# 用户口径第 87 轮：谁行动完就【出队再入队尾】—— 必须把 active 显式传进去：
+	# 复活会把别人压到队头，那时"队头"已经不是他了。
+	var who := active
 	active = null
 	selected = null
-	queue.advance()
+	queue.advance(who)
 	_hide_action_menu()
 	_clear_pending()
 	_clear_hints()
@@ -2024,12 +2023,14 @@ func _on_projectile_event(event: String, p: Projectile, extra = null) -> void:
 		ProjectileField.EV_HIT_TARGET:
 			_resolve_arrow_hit(sh, extra)
 		ProjectileField.EV_HIT_BODY:
-			# 用户口径（第 83/84 轮）：炮弹类飞行途中撞到角色 -> 走统一的"被拦下"收尾
+			# 用户口径（第 87 轮）：炮弹类飞行途中撞到角色 = **当成在命中处落地**：
+			# 照常结算伤害（火箭还要撒破片），不再被当成"被拦下"而整发作废。
 			var hit_u: Unit = extra.get("unit", null) if extra is Dictionary else null
-			_log("  🛑 %s的%s在半空撞到 %s，被拦下" % [
+			var hit_at := p.pos()
+			_log("  🛑 %s的%s还没落地就撞到 %s：当成在 (%.1f, %.1f) 落地结算" % [
 				p.owner_name, ProjectileField.kind_cn(p.kind),
-				hit_u.name if hit_u != null else "障碍"])
-			_shell_intercepted(p, "被身体拦下")
+				hit_u.name if hit_u != null else "障碍物", hit_at.x, hit_at.y])
+			_land_shell(p, hit_at)
 		ProjectileField.EV_LANDED:
 			_on_proj_landed(p)
 		ProjectileField.EV_REMOVED:
@@ -2050,9 +2051,10 @@ func _after_projectile_gone(sh: Ordnance.Shot) -> void:
 		_finish_turn()
 
 
-## 炮弹类【被拦下】的统一收尾（用户口径第 83/84 轮）：被箭击落、飞行中撞到角色都走这里。
+## 炮弹类【被箭击落】的统一收尾（用户口径第 83/84 轮）：
 ##   · 炮弹 / 火箭 -> 就地空爆（一格球三维判定，真的造成伤害）
 ##   · 枪榴弹       -> 就地落地（立模型 + GM 4 回合计时）—— 它本来就"落地才炸"
+## 注意（第 87 轮）：**飞行中撞到角色不走这里**，那是"在命中处落地"（_land_shell）。
 func _shell_intercepted(p: Projectile, why: String) -> void:
 	if p == null:
 		return
@@ -2068,7 +2070,7 @@ func _shell_intercepted(p: Projectile, why: String) -> void:
 
 ## 半空被打爆的炮弹：落点就是它当时的位置。
 ## 用户口径：三维判定 + 爆炸范围恒定为一格球（半径 0.5）——在头顶上炸但飞得高就没伤害。
-## why：日志措辞（"被打爆" / "被身体拦下"），伤害口径完全一样。
+## why：日志措辞（现在只有一种：在半空被打爆），伤害口径固定。
 func _air_burst(p: Projectile, why: String = "被打爆") -> void:
 	var sh: Ordnance.Shot = p.shot
 	var ctr: Vector3 = p.pos3()
@@ -2094,10 +2096,16 @@ func _air_burst(p: Projectile, why: String = "被打爆") -> void:
 			_after_damage_to_unit(h.unit)
 
 
-## 落地结算（由事件处理调用）
-
+## 落地事件（弹道物理上报）
 func _on_proj_landed(p: Projectile) -> void:
-	var at := p.pos()
+	_land_shell(p, p.pos())
+
+
+## 炮弹类【落地结算】的**唯一入口**（用户口径第 87 轮）：
+## 正常落地（EV_LANDED）和"飞行中撞到角色"（EV_HIT_BODY，落点 = 命中处）都走这里 ——
+## 所以"撞到人"跟"落地"的伤害口径永远一致，不会又出现"某一路忘了结算"。
+## at = 落点（浮点，格坐标）；调用时这一发已经消亡，伤害/破片全靠发射单。
+func _land_shell(p: Projectile, at: Vector2) -> void:
 	var sh: Ordnance.Shot = p.shot
 	var land_cell := Vector2i(int(floor(at.x)), int(floor(at.y)))
 	# 用户口径：炮弹 / 召唤球落进河里直接消失（河里不拦弹道，只是落进去就没了）
@@ -2132,7 +2140,7 @@ func _on_proj_landed(p: Projectile) -> void:
 				sh.opts if sh != null else {}, Ordnance.ROCKET_BLAST_R)
 			_rocket_fragments(sh.caster if sh != null else null, at)
 		Projectile.KIND_GRENADE:
-			_spawn_grenade_model(Vector2i(int(floor(at.x)), int(floor(at.y))), p)
+			_spawn_grenade_model(land_cell, p)
 		Projectile.KIND_FRAGMENT:
 			pass                              # 破片打空就是打空
 		Projectile.KIND_BULLET:
@@ -2224,21 +2232,25 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 var _grenade_models: Dictionary = {}      # 格 -> Node3D（模型，不可交互）
 
 
-## 落地后立一个手榴弹模型（椭球 + 顶部削平长方体 + 经纬线凹槽），并让 GM 开始计时
+## 落地后立一个手榴弹模型（椭球 + 顶部削平长方体 + 经纬线凹槽），并让 GM 开始计时。
+## 用户口径第 87 轮：**落地就和投出者解耦** —— GM 的计时器（Pending.decoupled）不再
+## 属于投出者，萨尼铁塔扔完就阵亡也照常爆炸；模型引用挂在 Pending 上，
+## 爆炸时按引用回收（同格两发也不会互相顶掉模型）。
 func _spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
-	var sh: Ordnance.Shot = p.shot
 	var d: Dictionary = Skills.get_def("grenade_launcher")
 	var delay: int = int(d.get("delay_turns", 4))
 	var caster_name := p.owner_name
 	var caster_side: int = p.side
-	if _grenade_models.has(cell) and is_instance_valid(_grenade_models[cell]):
-		(_grenade_models[cell] as Node3D).queue_free()
+	var old = _grenade_models.get(cell, null)
+	if old != null and is_instance_valid(old):
+		(old as Node3D).queue_free()
 	var root: Node3D = ProjectileField.build_grenade_model(self)
 	root.position = Vector3(float(cell.x) + 0.5, 0.0, float(cell.y) + 0.5)
 	_grenade_models[cell] = root
-	_log("  💣 手榴弹落地 (%d, %d)：%d 个回合后爆炸（%s 投出）" % [
+	var pend := gm.schedule_grenade(cell, caster_name, caster_side, delay)
+	pend.model = root
+	_log("  💣 手榴弹落地 (%d, %d)：%d 个回合后爆炸（%s 投出 ｜ 已与投出者解耦，他阵亡也照炸）" % [
 		cell.x, cell.y, delay, caster_name])
-	gm.schedule_grenade(cell, caster_name, caster_side, delay)
 
 
 ## 球状闪光（用户口径：只要球状闪光，不要红圈）
@@ -2280,11 +2292,20 @@ func _flash_sphere(center: Vector3, radius: float = 1.5, life: float = 0.38) -> 
 
 
 ## 爆炸：向 8 个方向各射出一枚破片（不分敌我，会伤到自己人）
+## 用户口径第 87 轮：这一发**已经和投出者解耦** —— 投出者死了也照炸，
+## 而且模型一定回收（按 Pending 上的引用收，不靠格子字典，同格两发不会互相顶掉）。
 func _explode_grenade(p: GameMaster.Pending) -> void:
 	var cell: Vector2i = p.center
-	if _grenade_models.has(cell) and is_instance_valid(_grenade_models[cell]):
-		(_grenade_models[cell] as Node3D).queue_free()
-	_grenade_models.erase(cell)
+	var m: Node3D = p.model if (p.model != null and is_instance_valid(p.model)) else null
+	if m == null and p.model == null:
+		# 兜底：早期登记没有模型引用时，按格子回收
+		var mm = _grenade_models.get(cell, null)
+		if mm != null and is_instance_valid(mm):
+			m = mm
+	if m != null:
+		m.queue_free()
+		if _grenade_models.get(cell, null) == m:
+			_grenade_models.erase(cell)
 	var caster: Unit = null
 	for u in units:
 		if u.name == p.caster_name:
@@ -2294,7 +2315,8 @@ func _explode_grenade(p: GameMaster.Pending) -> void:
 	var from := Vector3(float(cell.x) + 0.5, Ordnance.FRAGMENT_HEIGHT, float(cell.y) + 0.5)
 	var base := rng.next_float() * TAU
 	_flash_sphere(Vector3(from.x, 0.55, from.z), 1.5, 0.38)      # 球状闪光（不要红圈）
-	_log("  💥 手榴弹爆炸 (%d, %d)：向 %d 个方向撒出破片" % [cell.x, cell.y, n])
+	_log("  💥 手榴弹爆炸 (%d, %d)：向 %d 个方向撒出破片（模型已回收=%s）" % [
+		cell.x, cell.y, n, "是" if m != null else "否"])
 	for i in n:
 		var ang := base + float(i) * TAU / float(n)
 		var dir := Vector2(cos(ang), sin(ang))
@@ -2361,7 +2383,7 @@ func _resolve_arrow_hit(sh: Ordnance.Shot, what: Dictionary) -> void:
 			return
 		# 反弹回来的箭：命中一定要有明确日志（用户报过"命中却没伤害、也没日志"）
 		if sh.reflected:
-			_log("  ↩ 反弹箭命中 %s" % victim.name)
+			_log("  ↩ 反弹箭命中 %s（力量系数 %.0f%%）" % [victim.name, mult * 100.0])
 		_apply_attack(attacker, victim, sh.break_armor, silent, bonus, mult)
 	elif what.has("placeable"):
 		_damage_placeable(attacker, what["placeable"], silent)
@@ -2422,8 +2444,11 @@ func _on_arrow_qte_done(ok: bool, victim: Unit, sh: Ordnance.Shot, bonus_milli: 
 			Vector3(landing.x, 0.55, landing.y), null, sh.break_armor, false, false)
 		refl.ignore_unit = victim        # 物理上从杰拉尔德身上出手：判定跳过他自己
 		refl.shot.reflected = true       # 标记：命中时要写"反弹箭命中"日志
-		_log("  ↩ 弹反成功：%s 的箭被弹回，落点 (%.2f, %.2f)，距离 %.1f 格，散步半径 %.2f 格" % [
-			shooter.name, landing.x, landing.y, vpos.distance_to(spos),
+		# 用户口径第 87 轮：反弹出去的箭只吃 25% 力量（同一个 power_mult 参数，先乘再减护甲）
+		var refl_mult: float = float(Passives.def("arrow_deflect").get("power_mult", 1.0))
+		refl.shot.power_mult = refl_mult
+		_log("  ↩ 弹反成功：%s 的箭被弹回（力量系数 %.0f%%），落点 (%.2f, %.2f)，距离 %.1f 格，散步半径 %.2f 格" % [
+			shooter.name, refl_mult * 100.0, landing.x, landing.y, vpos.distance_to(spos),
 			Spread.reflect_radius(vpos.distance_to(spos))])
 	else:
 		_log("  ✗ 弹反失败，照常结算伤害")
@@ -2886,6 +2911,10 @@ func _on_unit_died(u: Unit) -> void:
 	else:
 		_log("  ☠ %s 阵亡" % u.name)
 		u.visual.visible = false
+		# 用户口径第 87 轮：**阵亡 = 当场移出回合队列**（不是跳到队尾）。
+		# 死人不再占位置，队列整圈也不再因为他变长；复活时再压回队头。
+		if queue != null:
+			queue.remove(u)
 		# 用户口径：**阵亡清除一切 buff 与状态**（哨兵警戒不保留、蓄势清零、挂起的技能作废）
 		gm.note_death(u)          # 阵亡顺序（圣萨尼要用）
 		_clear_unit_states(u)
@@ -2893,7 +2922,7 @@ func _on_unit_died(u: Unit) -> void:
 		if not u.is_king and not Passives.has(u, "always_sentry"):
 			var rt: int = Level.respawn_turns(u.name)
 			gm.schedule_hero_revive(u, rt)
-			_log("    %s 将在 %d 个回合后满血复活（位置 %s）" % [u.name, rt, u.home_cell])
+			_log("    %s 将在 %d 个回合后满血复活（位置 %s）" % [u.name, rt, _revive_cell(u)])
 
 
 ## 阵亡：清空这个角色的一切状态与 buff（用户口径）
@@ -2912,7 +2941,10 @@ func _clear_unit_states(u: Unit) -> void:
 	_log("    %s 阵亡：所有状态已清除（哨兵=%s）" % [u.name, "有" if had_sentry else "无"])
 
 
-## 英雄重生：满血满护甲 + 回到关卡给的固定格（两个公主之间那三格）
+## 英雄重生：满血满护甲 + 回到关卡给的固定格
+##   · 测试场：地图正中、两军之间那三格
+##   · 竞技场：**老国王正前方 3 格那一行**（两个公主之间居中）
+## 用户口径第 87 轮：复活的人【压回自己这条队列的队头】—— 下一次轮到自己这方立刻能动。
 func _revive_hero(u: Unit) -> void:
 	if u == null:
 		return
@@ -2924,32 +2956,60 @@ func _revive_hero(u: Unit) -> void:
 	u.energy = u.energy_max
 	u.has_moved = false
 	u.has_acted = false
-	# 回家：优先回【关卡的英雄重生点】（河旁边居中那三格），被占了再顺着往后找
+	u.cell = _revive_cell(u)
+	if u.visual != null:
+		u.visual.position = Vector3(float(u.cell.x) + 0.5, u.hover, float(u.cell.y) + 0.5)
+		u.visual.update_orb()
+	_queue_revive(u)
+	_log("    %s 复活：状态已清空（阵亡时清掉的哨兵警戒等不会带回来）" % u.name)
+	_log("  ♻ %s 复活（力%s 甲%s 精力%s）→ 回到 %s" % [
+		u.name, _fmt(u.power_cur), _fmt(u.armor_cur), u.energy_points(), u.cell])
+
+
+## 复活落点 = **关卡给的英雄重生点**（用户口径第 87 轮修正）。
+## 以前第一个候选是 home_cell（开局的出场格）——竞技场里那就是河边，
+## 所以"重生点改到国王面前"改了关卡数据也没用，人还是回河边。现在：
+##   ① 按"本阵营第几个会行动的角色"分配英雄格（三人各占一格，不挤在一起）
+##   ② 那一格被占了就顺着英雄格往后找
+##   ③ 全被占了才回家（出场格）—— 兜底，正常不会走到
+func _revive_cell(u: Unit) -> Vector2i:
 	var hs: Array = Level.respawn_cells(u.side)
 	if hs.is_empty():
 		hs = Level.hero_cells(u.side)
-	var target: Vector2i = u.home_cell
-	var free_found := true
-	for c in [target] + hs:
-		var cc: Vector2i = c
-		var taken := false
-		for o in units:
-			if o != u and o.is_alive() and o.cell == cc:
-				taken = true
-		if not taken:
-			target = cc
-			free_found = true
+	if hs.is_empty():
+		return u.home_cell
+	var idx := 0
+	for x in units:
+		if x == u:
 			break
-		free_found = false
-	if not free_found:
-		target = u.home_cell
-	u.cell = target
-	if u.visual != null:
-		u.visual.position = Vector3(float(target.x) + 0.5, u.hover, float(target.y) + 0.5)
-		u.visual.update_orb()
-	_log("    %s 复活：状态已清空（阵亡时清掉的哨兵警戒等不会带回来）" % u.name)
-	_log("  ♻ %s 复活（力%s 甲%s 精力%s）→ 回到 %s" % [
-		u.name, _fmt(u.power_cur), _fmt(u.armor_cur), u.energy_points(), target])
+		if x.side == u.side and x.has_turn():
+			idx += 1
+	var pref: Vector2i = hs[idx % hs.size()]
+	var cands: Array[Vector2i] = [pref]
+	for c in hs:
+		var cc: Vector2i = c
+		if cc != pref:
+			cands.append(cc)
+	if not cands.has(u.home_cell):
+		cands.append(u.home_cell)
+	for c in cands:
+		if not _cell_occupied(c, u):
+			return c
+	return u.home_cell
+
+
+## 这一格上有没有别的活人（复活占位判定）
+func _cell_occupied(c: Vector2i, except: Unit) -> bool:
+	for o in units:
+		if o != except and o.is_alive() and o.cell == c:
+			return true
+	return false
+
+
+## 复活的人压回自己这条队列的队头（没有回合的人——国王/公主/假人——不进队列）
+func _queue_revive(u: Unit) -> void:
+	if queue != null and u != null and u.has_turn():
+		queue.push_front(u)
 
 func _on_revive_timeout(u: Unit) -> void:
 	if u == null or u.visual == null:
@@ -3892,6 +3952,7 @@ func _revive_unit(u: Unit) -> void:
 	if u.visual != null:
 		u.visual.visible = true
 		u.visual.update_orb()
+	_queue_revive(u)                 # 调试复活也走同一条路：压回队列队头
 	_log("[调试] %s 力量 >0，已复活（力%s 甲%s）" % [u.name, _fmt(u.power_cur), _fmt(u.armor_cur)])
 
 

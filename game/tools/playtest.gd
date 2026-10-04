@@ -1236,7 +1236,7 @@ func _initialize() -> void:
 	_s.clear_projectiles()
 	var rings_before: int = _s.count_impact_rings()
 	_s.active = null
-	# 第 83 轮起：炮弹飞行途中撞到角色会被拦下就地空爆 —— 所以先清空弹道（所有人挪到角落）
+	# 第 87 轮起：炮弹飞行途中撞到角色会当成"在命中处落地" —— 所以先清空弹道（所有人挪到角落）
 	for u in _s.units:
 		u.cell = Vector2i(1, 40)
 		if u.visual != null:
@@ -1510,6 +1510,10 @@ func _initialize() -> void:
 	_s.clear_projectiles()
 	var hp1: int = gerald.power_cur
 	var al_hp: int = alette.power_cur
+	# 第 87 轮：反弹箭只吃 25% 力量 —— 52 × 25% = 13，所以把她的护甲压低到 8
+	# 才能看到伤害（不然 13 - 24 < 0 直接"打不动"，那是数值问题不是链路问题）
+	var al_armor0: int = alette.armor_cur
+	alette.armor_cur = Rules.points_to_milli(8)
 	var arrow2: Projectile = _s._spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
 		Vector3(5.5, 0.55, 5.5), gerald, false, true)
 	var q2: ArrowQTE = null
@@ -1539,14 +1543,18 @@ func _initialize() -> void:
 			refl.shot.caster.name, refl.from, refl.to, d_refl])
 		_chk(refl.shot.caster == alette, "反弹箭绑定的发射者必须是【原射手】，不是杰拉尔德")
 		_chk(refl.shot.caster != gerald, "反弹箭不能记在杰拉尔德头上")
+		_chk(absf(refl.shot.power_mult - 0.25) < 0.0001,
+			"反弹箭只吃 25% 力量（第 87 轮，实际 %.2f）" % refl.shot.power_mult)
 		_chk(d_refl <= 8.0, "7 格距离的散步很小，落点应贴在射手附近")
 	# 让反弹箭飞完：应该打回射手身上
 	for i in 900:
 		_s.field.step(1.0 / 60.0)
 		if refl != null and not refl.alive:
 			break
-	print("    反弹箭落地后：射手力量 %d -> %d" % [al_hp, alette.power_cur])
+	print("    反弹箭落地后：射手力量 %d -> %d（护甲 %d，25%% 力量系数）" % [
+		al_hp, alette.power_cur, alette.armor_cur / 1000])
 	_chk(alette.power_cur < al_hp, "反弹的箭应该打回射手身上")
+	alette.armor_cur = al_armor0                # 还原，别影响后面的检查
 
 	# ── 汇总 ──
 	# ── 29. 英雄无限重生（GM 记 10 个回合，回到两公主之间的固定格）──
@@ -2452,6 +2460,157 @@ func _initialize() -> void:
 	_chk(not rk_s.alive and rk_s.removed_reason == "shot_down", "火箭会被箭击落")
 	_chk(burst, "火箭被击落后走统一的空爆结算（有日志）")
 	_s.clear_projectiles()
+
+	# ── 45. 火箭还没落地就撞到角色 = 当成在命中处落地（第 87 轮）──
+	print("\n[45] 火箭撞到角色 -> 在命中处落地")
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()               # 公主会射箭拦火箭，先请她们下班
+	var he_v: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	var tgt_v: Unit = _unit_by("Gerald", 0)
+	for u5 in _s.units:
+		u5.cell = Vector2i(1, 40)
+		if u5.visual != null:
+			u5.visual.position = Vector3(1.5, u5.hover, 40.5)
+	he_v.cell = Vector2i(4, 5)
+	he_v.visual.position = Vector3(4.5, he_v.hover, 5.5)
+	he_v.power_cur = he_v.power_max
+	# 靶子站在弹道末端：那里火箭已经降到 1 格以下（撞得到人）
+	tgt_v.cell = Vector2i(15, 5)
+	tgt_v.visual.position = Vector3(15.5, 0.0, 5.5)
+	tgt_v.power_cur = tgt_v.power_max
+	tgt_v.armor_cur = 0
+	tgt_v.pr = 0
+	var hp_v: int = tgt_v.power_cur
+	var frags0: int = _count_kind(Projectile.KIND_FRAGMENT)
+	_s._debug_log.clear()
+	var rk_v := Ordnance.make_rocket(he_v, Vector3(4.5, he_v.hover + 0.25, 5.5),
+		Vector2(16.0, 5.5), false)
+	_s.field.register(rk_v)
+	for i5 in 900:
+		_s.field.step(1.0 / 60.0)
+		if not rk_v.alive:
+			break
+	var landed_log := false
+	var burst_log := false
+	for lg5 in _s._debug_log:
+		if String(lg5).contains("当成在"):
+			landed_log = true
+		if String(lg5).contains("空爆"):
+			burst_log = true
+	print("    火箭 alive=%s 原因='%s' 位置 (%.1f, %.1f) ｜ 杰拉尔德 %d -> %d ｜ 破片 %d -> %d" % [
+		rk_v.alive, rk_v.removed_reason, rk_v.pos().x, rk_v.pos().y,
+		hp_v, tgt_v.power_cur, frags0, _count_kind(Projectile.KIND_FRAGMENT)])
+	print("    日志：落地=%s 空爆=%s" % [landed_log, burst_log])
+	_chk(not rk_v.alive and rk_v.removed_reason == "body_impact",
+		"火箭撞到角色的消亡原因 = 命中处落地（不是 shot_down）")
+	_chk(landed_log, "日志写明「当成在命中处落地结算」")
+	_chk(not burst_log, "撞到人不再走空爆（空爆只留给被箭击落的）")
+	_chk(tgt_v.power_cur < hp_v, "命中处落地必须真的造伤（以前这里常常整发作废）")
+	_chk(_count_kind(Projectile.KIND_FRAGMENT) >= frags0 + Ordnance.ROCKET_FRAGMENTS,
+		"火箭在命中处落地照常撒出 %d 枚破片" % Ordnance.ROCKET_FRAGMENTS)
+	_s.clear_projectiles()
+
+	# ── 46. 枪榴弹：落地后与投出者解耦，投出者阵亡也照常爆炸（第 87 轮）──
+	print("\n[46] 枪榴弹与投出者解耦")
+	_s.clear_projectiles()
+	var sani_g: Unit = _unit_by("萨尼铁塔", 0)
+	sani_g.cell = Vector2i(12, 20)
+	sani_g.visual.position = Vector3(12.5, 0.0, 20.5)
+	sani_g.power_cur = sani_g.power_max
+	sani_g.armor_cur = sani_g.armor_max
+	sani_g.energy = sani_g.energy_max
+	sani_g.has_acted = false
+	sani_g.has_moved = false
+	_s.active = sani_g
+	var gp_cell := Vector2i(20, 20)
+	var gp: Projectile = _s._spawn_grenade_shot(sani_g, Vector2(20.5, 20.5), "grenade_launcher")
+	for i6 in 900:
+		_s.field.step(1.0 / 60.0)
+		if not gp.alive:
+			break
+	print("    落地：alive=%s 模型=%s ｜ GM：%s" % [
+		gp.alive, _s._grenade_models.has(gp_cell), _s.gm.pending_desc()])
+	_chk(not gp.alive and _s._grenade_models.has(gp_cell), "枪榴弹落地：地上立起弹体模型")
+	_chk(_s.gm.decoupled_count() == 1, "落地后 GM 里这一条已和投出者解耦")
+	# 投出者阵亡（用户报的 bug：萨尼扔完就死 -> 手榴弹不炸了）
+	var pend0: int = _s.gm.pending.size()
+	sani_g.power_cur = 0
+	_s._on_unit_died(sani_g)
+	print("    萨尼阵亡：GM 待引爆 %d -> %d ｜ 解耦条数 %d" % [
+		pend0, _s.gm.pending.size(), _s.gm.decoupled_count()])
+	_chk(_s.gm.pending.size() == pend0 and _s.gm.decoupled_count() == 1,
+		"投出者阵亡不会取消已落地的手榴弹")
+	_s._debug_log.clear()
+	for i7 in int(Skills.get_def("grenade_launcher")["delay_turns"]):
+		_s._gm_step()                        # 真实路径：GM 回合边界 -> 到点引爆
+	var boom := false
+	for lg6 in _s._debug_log:
+		if String(lg6).contains("手榴弹爆炸"):
+			boom = true
+	print("    %d 个回合边界后：爆炸日志=%s ｜ 模型还在=%s" % [
+		int(Skills.get_def("grenade_launcher")["delay_turns"]), boom, _s._grenade_models.has(gp_cell)])
+	_chk(boom, "投出者已阵亡，手榴弹照样到点爆炸")
+	_chk(not _s._grenade_models.has(gp_cell), "爆炸后弹体模型必须回收（不能留在地上）")
+	_s.clear_projectiles()
+
+	# ── 47. 队列：阵亡当场移出 / 复活压回队头（第 87 轮：修"复活饥饿"）──
+	print("\n[47] 队列：阵亡移出 / 复活压队头")
+	var qv: Unit = _unit_by("Alette", 1)
+	qv.power_cur = qv.power_max
+	qv.armor_cur = qv.armor_max
+	_s.queue.rebuild(_s.units)
+	var in_q0: bool = _s.queue.p_queue.has(qv) or _s.queue.e_queue.has(qv)
+	qv.power_cur = 0
+	_s._on_unit_died(qv)
+	var in_q1: bool = _s.queue.p_queue.has(qv) or _s.queue.e_queue.has(qv)
+	print("    阵亡前在队列=%s ｜ 阵亡后在队列=%s ｜ %s" % [in_q0, in_q1, _s.queue.dump()])
+	_chk(in_q0 and not in_q1, "阵亡的人当场移出队列（不是跳到队尾）")
+	# 模拟"他不在队列里"的处境（旧实现里全灭重排就会把他甩掉，活过来也没回合）
+	_s.queue.rebuild(_s.units)
+	var in_q2: bool = _s.queue.p_queue.has(qv) or _s.queue.e_queue.has(qv)
+	_s._revive_hero(qv)
+	var eqv: Array[Unit] = _s.queue.p_queue if qv.side == UnitData.Side.PLAYER else _s.queue.e_queue
+	print("    重排时在队列=%s ｜ 复活后队头=%s（本方 %d 人）" % [
+		in_q2, eqv[0].name if eqv.size() > 0 else "-", eqv.size()])
+	_chk(not in_q2, "重排时他不在队列里（旧实现就是这样把活过来的人饿死的）")
+	_chk(eqv.size() > 0 and eqv[0] == qv, "复活：压回自己这条队列的队头")
+	var seen_q: Array[String] = []
+	for i8 in 4:
+		var cu2: Unit = _s.queue.current()
+		seen_q.append(cu2.name if cu2 != null else "-")
+		_s.queue.advance(cu2)
+	print("    复活后接下来 4 个行动者：%s" % [seen_q])
+	_chk(seen_q.has(qv.name), "复活的人立刻出现在行动序列里（不会再饿死）")
+	# 用户报的场景（复活饥饿）：一方全灭 -> 对面一直动 -> 活过来的人必须立刻接上回合
+	var px_n := 0
+	var first_rev: Unit = null
+	for u9 in _s.units:
+		if u9.side == UnitData.Side.PLAYER and u9.has_turn():
+			if first_rev == null:
+				first_rev = u9
+			u9.power_cur = 0
+			_s._on_unit_died(u9)
+			px_n += 1
+	var e_only: bool = not _s.queue.has_side(UnitData.Side.PLAYER) \
+		and _s.queue.has_side(UnitData.Side.ENEMY)
+	var after_q: Array[String] = []
+	for i9 in 3:
+		var cu3: Unit = _s.queue.current()
+		after_q.append(cu3.name if cu3 != null else "-")
+		_s.queue.advance(cu3)
+	print("    我方 %d 个英雄全灭：我方队列空=%s ｜ 对面接下来：%s" % [
+		px_n, not _s.queue.has_side(UnitData.Side.PLAYER), after_q])
+	_chk(e_only, "一方全灭 -> 那条队列清空，对面连续行动（不会卡住）")
+	_chk(not after_q.has("-"), "全灭期间对面照常一个一个动")
+	_s._revive_hero(first_rev)
+	var got_turn := false
+	for i10 in 3:
+		if _s.queue.current() == first_rev:
+			got_turn = true
+			break
+		_s.queue.advance(_s.queue.current())
+	print("    复活 %s -> 最多等对面 1 个回合就轮到（结果=%s）" % [first_rev.name, got_turn])
+	_chk(got_turn, "复活的人立刻接上回合（旧实现里他排在队尾，永远轮不到）")
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():

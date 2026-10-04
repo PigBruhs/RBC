@@ -28,6 +28,12 @@ class Pending extends RefCounted:
 	var ticks: int = -1                  # 已经过了几个"回合边界"
 	var delay: int = 0
 	var pylon: Node3D = null             # 这一发自己的紫色光柱（允许多个在途打击）
+	## 落地后与投出者【解耦】（用户口径第 87 轮：枪榴弹落地就是场上的一个物件）：
+	## 解耦之后，投出者阵亡也不会把它取消掉 —— 照常到点爆炸。
+	var decoupled: bool = false
+	## 落地模型（枪榴弹的弹体）：爆炸时按这个引用回收，
+	## 不靠"格子 -> 模型"的字典（同格两发会互相顶掉）。
+	var model: Node3D = null
 
 
 ## 哨兵状态（环境型）：登记在 GM 上，因为它要跨回合存活
@@ -184,13 +190,25 @@ func forget_passives(u: Unit) -> void:
 
 
 ## 角色阵亡：取消他还没落下的技能（例：轨道空爆的标记）
+## 例外：**已经落地并解耦的东西不算他的技能**（枪榴弹落地后就是场上的物件），
+## 投出者阵亡也照常爆炸 —— 用户口径第 87 轮。
 func cancel_pending_for(caster_name: String) -> void:
 	if caster_name == "":
 		return
 	for i in range(pending.size() - 1, -1, -1):
 		var p = pending[i]
+		if bool(p.decoupled):
+			continue
 		if String(p.caster_name) == caster_name:
 			pending.remove_at(i)
+
+## 场上已经落地、跟投出者解耦的东西（自检/日志用）
+func decoupled_count() -> int:
+	var n := 0
+	for p in pending:
+		if bool(p.decoupled):
+			n += 1
+	return n
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -223,8 +241,11 @@ func last_dead_teammate(side: int, units: Array[Unit]) -> Unit:
 
 
 ## 手榴弹排程：delay 个回合边界后到期（时钟由 GM 负责）
+## 用户口径第 87 轮：**落地后就和投出者解耦** —— 所以登记时直接打上 decoupled，
+## 投出者阵亡（cancel_pending_for）也不会把它清掉。返回这条 Pending，
+## 方便 view 把落地的弹体模型挂在它身上（爆炸时按引用回收）。
 func schedule_grenade(center: Vector2i, caster_name: String, caster_side: int,
-		delay: int, skill_id: String = "grenade") -> void:
+		delay: int, skill_id: String = "grenade") -> Pending:
 	var p := Pending.new()
 	p.skill_id = skill_id
 	p.caster_name = caster_name
@@ -232,7 +253,9 @@ func schedule_grenade(center: Vector2i, caster_name: String, caster_side: int,
 	p.center = center
 	p.ticks = 0
 	p.delay = delay
+	p.decoupled = true
 	pending.append(p)
+	return p
 
 
 ## 清除某个角色的哨兵（阿莱特的下一回合开始时调用）

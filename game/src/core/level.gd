@@ -62,8 +62,9 @@ const DEFS := {
 		"enemy": {"king": Vector2i(10, 40), "forward": Vector2i(0, -1), "lateral": Vector2i(1, 0)},
 		# 假人只出现在测试场（用户口径：竞技场没有假人）
 		"dummies": [],
-		# 英雄【重生点】（用户口径第 86 轮）：**老国王前方 3 格那一行**，三格彼此间隔一个、居中；
-		# 开局的出场位置仍由 roster 决定（在河边）。
+		# 英雄【重生点】（用户口径第 86/87 轮）：**老国王前方 3 格那一行**，三格彼此间隔一个、
+		# 整体居中在两个公主之间。开局的出场位置仍由 roster 决定（在河边）——
+		# 两者是分开的：竞技场重生 = 国王面前，出场 = 河边。
 		"spawn": {
 			"player": [Vector2i(8, 3), Vector2i(10, 3), Vector2i(12, 3)],
 			"enemy": [Vector2i(8, 37), Vector2i(10, 37), Vector2i(12, 37)],
@@ -199,7 +200,9 @@ static func hero_cells(side: int, id: String = "") -> Array[Vector2i]:
 	return [mid - lat, mid, mid + lat]
 
 
-## 英雄【重生点】：和出生点同一处（用户口径：出生点也改到河边居中，敌我双方一样）
+## 英雄【重生点】：和出生点同一处（关卡数据里的 spawn）。
+## 注意（第 87 轮 bug）：**复活时优先用这里的格子**，home_cell（开局的出场格）只是兜底 ——
+## 以前先试 home_cell，竞技场里那就是河边，于是关卡数据怎么改都没用。
 static func respawn_cells(side: int, id: String = "") -> Array:
 	return hero_cells(side, id)
 

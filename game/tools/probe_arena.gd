@@ -149,6 +149,37 @@ func _process(d: float) -> bool:
 				_chk(_guard.power_cur == _guard.power_max, "落河不产生爆炸伤害")
 				_chk(_s.count_impact_rings() == 0, "落河不留红圈")
 				_shot("arena_after.png")
+				# ── 复活点（第 87 轮）：必须在老国王正前方那一行，不许回河边 ──
+				print("\n[3] 英雄复活点")
+				var gz = unit_by("Gerald")
+				var roster_cell: Vector2i = gz.home_cell
+				var hs: Array = Level.respawn_cells(gz.side)
+				gz.power_cur = 0
+				_s._on_unit_died(gz)
+				_s.gm.revive_at[gz] = _s.gm.turn_count            # 立刻到点
+				for ru in _s.gm.due_revives():
+					_s._revive_hero(ru)
+				print("    开局出场格 %s ｜ 关卡重生点 %s ｜ 复活格 %s ｜ 国王 %s" % [
+					roster_cell, hs, gz.cell, pos_of("老国王")])
+				_chk(hs.has(gz.cell), "复活回到关卡给的英雄重生点（%s）" % [hs])
+				_chk(gz.cell.y == 3 and gz.cell.x >= 8 and gz.cell.x <= 12,
+					"复活格在老国王正前方那一行（y=3），不再回河边")
+				var mid_x := 0
+				for c3 in hs:
+					mid_x += (c3 as Vector2i).x
+				mid_x = mid_x / hs.size()
+				_chk(gz.cell == Vector2i(8, 3) and mid_x == 10,
+					"第一个复活的落在 (8,3)，三个重生格的中心 = 两公主中点 (10,3)")
+				_chk(roster_cell == Vector2i(9, 18) and gz.cell != roster_cell,
+					"开局的出场格（河边）与复活格已经分开")
+				var az = unit_by("Alette")
+				az.power_cur = 0
+				_s._on_unit_died(az)
+				_s.gm.revive_at[az] = _s.gm.turn_count
+				for ru2 in _s.gm.due_revives():
+					_s._revive_hero(ru2)
+				print("    第二个复活的人（Alette）→ %s" % [az.cell])
+				_chk(az.cell != gz.cell and hs.has(az.cell), "第二个人换一格站（三格分开）")
 				print("\n── 竞技场探针：%d 张截图，失败 %d 项 ──" % [_shots, _fail])
 				Level.current = "field"            # 收尾：恢复默认关卡
 				return true
