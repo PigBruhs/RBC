@@ -71,6 +71,15 @@ class Target extends RefCounted:
 			return unit.is_alive()
 		return false
 
+	## 目标当前位置（浮点格坐标）。
+	##
+	## ⚠️ 这里**刻意**读 `unit.visual.position`（core → view 的依赖），不要"顺手清理"成 unit.cell：
+	##   逻辑格子 `unit.cell` 在移动发起的那一刻就瞬移到终点了，只有视觉位置才知道角色
+	##   **此刻**走到哪一格之间 —— 而哨兵的射界判定是**连续的**（用户口径第 92 轮：
+	##   格与格之间也算在界内，直升机边走边打时必须能被锁定），所以这里必须问 view。
+	##   本项目 core → view 的依赖**总共只有两处**，这是其中之一（另一处是
+	##   core/grid_math.gd 的 `unit_pos()`，给"从当前位置出膛"的弹道用）——
+	##   两处口径必须一致：都读 visual.position，取不到才退回格中心。
 	func pos() -> Vector2:
 		if proj != null:
 			return proj.pos()
@@ -115,7 +124,16 @@ func report_projectile(event: String, p: Projectile, extra = null) -> void:
 
 var pending: Array[Pending] = []
 var sentries: Array[Sentry] = []
-var turn_count: int = 0                  # 走了多少个回合边界（调试用）
+
+## 回合边界时钟 + 复活计时（P4a 拆出，见 core/game_clock.gd）。
+## 真实状态在 clock 里；下面的 `turn_count` / `revive_at` 都是**转发属性**，
+## 保证 `gm.turn_count`（battle_scene）、`gm.revive_at[u] = ...`（probe_arena）照旧可用。
+var clock := GameClock.new()
+
+## 走了多少个回合边界（调试用）。真实值在 clock.turn_count —— 只读转发。
+var turn_count: int:
+	get:
+		return clock.turn_count
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -138,7 +156,7 @@ func schedule(skill_id: String, caster: Unit, center: Vector2i, float_pos: Vecto
 ## 回合边界（下一个角色回合开始前）调用：计数并返回到点的效果。
 ## 调用方必须 await 演出结束后再继续回合 —— 这就是"暂停回合"。
 func dispatch_turn_boundary() -> Array[Pending]:
-	turn_count += 1
+	clock.advance()          # 时钟真实状态在 GameClock；本函数只负责"到点的效果"
 	var due: Array[Pending] = []
 	for p in pending:
 		p.ticks += 1
@@ -452,6 +470,13 @@ func sentry_queue_size() -> int:
 var passive_used: Dictionary = {}         # "单位名:被动id" -> true（本回合机会已用掉）
 
 ## AI 开关：默认敌方整队交给 AI；ai_autoplay_player 是"自动演算"（两边都交给 AI，用来跑测试）
+##
+## TODO(P4)：**职责越界，待迁出** —— GameMaster 是 core 层的"场上状态裁判"，
+##   不该知道 AI 的存在。这两个开关属于**驱动层**决策（"谁的操作交给 AI"），
+##   唯一读者是 view 侧 battle_scene 的 `_is_ai_unit()` / 受击演出，应搬到那里。
+##   本轮**故意不删**：删了 battle_scene 立刻断（那个文件正在别人的写区里重构）。
+##   迁出时要改的点（P4a 报告已列）：battle_scene.gd:1409 / 1410 / 2293 三处读，
+##   playtest.gd ×7、probe_v14.gd ×1、sim_ai.gd ×2 的写。
 var ai_enabled: bool = true
 var ai_autoplay_player: bool = false
 
@@ -502,34 +527,29 @@ func reflect_landing(victim: Unit, shooter: Unit, rng: RngService) -> Vector2:
 # ══════════════════════════════════════════════════════════════════════════════
 # 英雄重生（用户口径：三个英雄可以无限满血满护甲重生，每次要等 10 个回合）
 #
-# "回合"用 GM 自己的回合边界计数（turn_count），和轨道炮击共用同一套时钟。
-# GM 只负责"谁该回来了"；真的把单位放回场上由 view 做（要动视觉节点）。
+# ★ 实现已搬到 core/game_clock.gd（P4a）；下面全是**转发**，语义逐字不变。
+#   外部照旧写 `gm.schedule_hero_revive(...)` / `GameMaster.HERO_REVIVE_TURNS`。
 # ══════════════════════════════════════════════════════════════════════════════
-const HERO_REVIVE_TURNS := 10
+## 真值在 GameClock；转发是为了不让外部（playtest / run.gd / level.gd）的
+## `GameMaster.HERO_REVIVE_TURNS` 断掉。
+const HERO_REVIVE_TURNS := GameClock.HERO_REVIVE_TURNS
 
-var revive_at: Dictionary = {}            # Unit -> 到期的 turn_count
+## Unit -> 到期的 turn_count。**转发属性**：返回的是 clock 里那个 Dictionary 本身，
+## 所以 probe_arena 的 `gm.revive_at[u] = gm.turn_count`（下标写）照旧生效。
+var revive_at: Dictionary:
+	get:
+		return clock.revive_at
 
 
 func schedule_hero_revive(u: Unit, turns: int = -1) -> void:
-	if u == null:
-		return
-	var d: int = HERO_REVIVE_TURNS if turns < 0 else turns
-	revive_at[u] = turn_count + d
+	clock.schedule_hero_revive(u, turns)
 
 
 ## 到点该复活的英雄（view 在每个回合边界之后调用）
 func due_revives() -> Array[Unit]:
-	var out: Array[Unit] = []
-	for u in revive_at.keys():
-		if int(revive_at[u]) <= turn_count:
-			out.append(u)
-	for u in out:
-		revive_at.erase(u)
-	return out
+	return clock.due_revives()
 
 
-## 还要等几个回合（日志 / UI 用）
+## 还要等几个回合（日志 / UI 用）；没排过复活返回 -1
 func revive_countdown(u: Unit) -> int:
-	if u == null or not revive_at.has(u):
-		return -1
-	return maxi(0, int(revive_at[u]) - turn_count)
+	return clock.revive_countdown(u)

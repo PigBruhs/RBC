@@ -46,6 +46,12 @@ const MODULES := [
 	{"mod": "res://src/view/projectile_sink.gd", "host": "res://src/view/battle_scene.gd"},
 	{"mod": "res://src/view/basic_attack.gd", "host": "res://src/view/battle_scene.gd"},
 	{"mod": "res://src/view/view_fx.gd", "host": "res://src/view/battle_scene.gd"},
+	{"mod": "res://src/view/skill_runner.gd", "host": "res://src/view/battle_scene.gd"},
+	# 哨兵的三个方法在宿主里的包装名与模块不同（宿主为了保住测试的
+	# `_s._tick_sentry_queue()` 等调用而改了名），所以显式列出。
+	# ⚠️ 第 97 轮 P0 清账期之后，宿主里的同名薄包装**已删掉 45 个**，
+	# 只剩 5 个"跨模块回调"（别的模块通过 `_st._xxx` 调它，删了会断）。
+	# 所以这个数组现在的意义变了：它守的是**跨模块事实接口**，不再是"测试门面"。
 	{
 		"mod": "res://src/view/sentry_runner.gd",
 		"host": "res://src/view/battle_scene.gd",
@@ -117,6 +123,7 @@ const FORWARDING_MEMBERS := {
 	"fx": "res://src/view/view_fx.gd",
 	"sink": "res://src/view/projectile_sink.gd",
 	"attack": "res://src/view/basic_attack.gd",
+	"skills_mod": "res://src/view/skill_runner.gd",
 	"field": "res://src/view/projectile_field.gd",
 	"ui": "res://src/view/battle_ui.gd",
 }

@@ -88,6 +88,10 @@ var sink: ProjectileSink = null
 ## 见 view/basic_attack.gd）。attackable 等被测试直读的字段仍声明在本类。
 var attack: BasicAttack = null
 
+## 技能编排模块（唯一入口 perform_skill / 光柱 / 地毯轰炸 / 俯冲 / 待确认格子，
+## 见 view/skill_runner.gd）。字段名不叫 skills —— 那是 core 的类名。
+var skills_mod: SkillRunner = null
+
 var _zoom: float = 15.0
 
 var _cam_focus: Vector3 = Vector3.ZERO      # 相机注视的地面点（WASD 平移）
@@ -537,7 +541,7 @@ func _loiter_burst(p: Projectile, ctr: Vector3) -> void:
 	var opts: Dictionary = sh.opts if sh != null else {}
 	if opts.is_empty():
 		opts = Loiter.opts(rng)
-	_flash_sphere(ctr, Loiter.BLAST_R * 1.7, 0.42)
+	fx.flash_sphere(ctr, Loiter.BLAST_R * 1.7, 0.42)
 	_log("  💥 巡飞弹引爆 (%.1f, %.1f) 高度 %.2f：直径 %.0f 格的球，%d 破甲 + %d 力量（不分敌我）" % [
 		ctr.x, ctr.z, ctr.y, Loiter.BLAST_R * 2.0, int(Loiter.BREAK), int(Loiter.POWER)])
 	var hits: Array = Damage.air_burst(null, ctr, opts, units, null, Loiter.BLAST_R)
@@ -695,13 +699,21 @@ func _ready() -> void:
 	PH = Level.play_h()
 	_cam_yaw = Level.cam_yaw()
 	_log("[关卡] %s（物理 %d×%d，可行动 %d×%d @ %d,%d）" % [Level.name_of(), GW, GH, PW, PH, PX, PY])
-	# 弹道物场：只做物理与上报，后果由 _on_projectile_event 处理
+	# 协作模块（组合，非继承）：构造函数只注入宿主引用、没有副作用，
+	# 所以先建它们 —— 下面的 field.setup / gm.on_projectile_event 要把**模块方法**当 Callable 传进去。
+	sentry = SentryRunner.new(self)      # 哨兵编排模块（宿主 = 本场景）
+	fx = ViewFx.new(self)                # 表现层模块（高亮/待确认标记/落点环/闪光）
+	sink = ProjectileSink.new(self)      # 弹道物与爆炸结算模块
+	attack = BasicAttack.new(self)       # 普攻唯一入口模块
+	skills_mod = SkillRunner.new(self)   # 技能编排模块（唯一入口 perform_skill）
+	# 弹道物场：只做物理与上报，后果由 ProjectileSink 处理
+	# ⚠️ 这里传的是**模块方法**（Callable 事实接口）：改名即断，两处都在本函数里
 	field = ProjectileField.new()
-	field.setup(self, gm, _arrow_hit_check)
+	field.setup(self, gm, sink.arrow_hit_check)
 	field.log_fn = _log
 	field.grid_w = GW
 	field.grid_h = GH
-	gm.on_projectile_event = _on_projectile_event
+	gm.on_projectile_event = sink.on_projectile_event
 	# 哨兵射界高亮：只画描边，判定仍然走 Sentry.in_range
 	sentry_range = SentryRange.new()
 	sentry_range.setup(self)
@@ -709,10 +721,6 @@ func _ready() -> void:
 	sentry_range.grid_h = PH
 	sentry_range.grid_x0 = PX
 	sentry_range.grid_y0 = PY
-	sentry = SentryRunner.new(self)      # 哨兵编排模块（宿主 = 本场景）
-	fx = ViewFx.new(self)                # 表现层模块（高亮/待确认标记/落点环/闪光）
-	sink = ProjectileSink.new(self)      # 弹道物与爆炸结算模块
-	attack = BasicAttack.new(self)       # 普攻唯一入口模块
 	_build_env()
 	_build_terrain()
 	_build_camera()
@@ -842,14 +850,14 @@ func _finish_placement() -> void:
 func _set_pending(kind: String, cell: Vector2i, actor: Unit = null) -> void:
 	_pending_kind = kind
 	_pending_cell = cell
-	_set_pending_actor(actor)
-	_update_pending_visual()          # 立刻刷新：不然调用方忘了 _draw_hints 就看不见黄勾
+	fx.set_pending_actor(actor)
+	fx.update_pending_visual()          # 立刻刷新：不然调用方忘了 _draw_hints 就看不见黄勾
 
 func _clear_pending() -> void:
 	_pending_kind = ""
 	_pending_cell = Vector2i(-1, -1)
-	_set_pending_actor(null)
-	_update_pending_visual()
+	fx.set_pending_actor(null)
+	fx.update_pending_visual()
 
 func _same_pending(kind: String, cell: Vector2i) -> bool:
 	return _pending_kind == kind and _pending_cell == cell
@@ -899,84 +907,9 @@ func _placeable_at(c: Vector2i) -> Placeable:
 #   ④ 下次轮到 Gerald：先执行轨道炮击（5 发，1 秒/发，间隔 0.5 秒），再正常开始他的回合
 # ══════════════════════════════════════════════════════════════════════════════
 
-func _menu_skill() -> void:
-	if active == null:
-		return
-	var ids := Skills.skills_for(active)
-	if ids.is_empty():
-		pass
-		return
-	if ids.size() == 1:
-		_choose_skill(ids[0])
-		return
-	# 多技能：先把「行动」菜单收起来，再弹技能列表（否则两层菜单会叠在一起）
-	_hide_action_menu()
-	ui_open_skill_menu(ids)
-
-
 ## 一个单位有多个技能时，先弹一个小列表让玩家选
 
-## 真正进入某个技能的瞄准。走哪条流程由 Skills.aim_of(id) 决定（数据驱动）：
-##   self  -> 点一下就用（哨兵） ｜ cell -> 直接点一格（俯冲轰炸） ｜ drag -> 拖拽瞄准
-func _choose_skill(id: String) -> void:
-	if active == null:
-		return
-	var d := Skills.get_def(id)
-	if d.is_empty():
-		return
-	if active.energy_points() < int(d["cost"]):
-		return
-	_action_menu.visible = false
-	if _skill_menu != null:
-		_skill_menu.visible = false
-	match Skills.aim_of(id):
-		Skills.AIM_SELF:
-			_aim_skill_id = ""
-			_skill_info_text = ""
-			_perform_skill(active, id, _cc(active.cell), active.cell)
-		Skills.AIM_CELL:
-			# 用户口径：俯冲轰炸是【直接点 0~20 格内的一个格子】，不是拖拽瞄准，也不用标记球；
-			# 第 84 轮：可选格用【粉色高亮】画出来，而且要两次点击确认（第一次出黄勾）
-			_aim_skill_id = id
-			_cell_targeting = true
-			phase = Phase.CHOOSE_TARGET
-			_skill_info_text = Skills.detail_text(id)
-			cell_targets = Targeting.disc_cells(_cc(active.cell),
-				float(d.get("range_max", 20.0)), PW, PH, PX, PY)
-			_clear_hints()
-			_draw_hints()
-			_refresh_all()
-			_log("  🎯 选择【%s】目标：%d 格内共 %d 个可选格（粉色高亮）" % [
-				d["name"], int(d.get("range_max", 20.0)), cell_targets.size()])
-		_:
-			_aim_skill_id = id
-			_begin_aim()
-			# 用户要求：瞄准时下方属性栏写技能名、描述与数值
-			_skill_info_text = Skills.detail_text(id)
-			_refresh_detail()
-
-
 ## 施放【哨兵】：不瞄准，进入警戒状态，登记在 GameMaster 上（跨回合存活）
-
-func _cast_sentry(caster: Unit) -> void:
-	var d := Skills.get_def("sentry")
-	if caster == null or not caster.is_alive():
-		return
-	if caster.energy_points() < int(d["cost"]):
-		_show_action_menu()
-		if _ai_turn:
-			_finish_turn()                   # AI 没有菜单可点，必须自己收尾
-		return
-	caster.spend_energy(int(d["cost"]))
-	caster.has_acted = true
-	caster.has_moved = true
-	_push_unit_stats(caster)
-	var s := gm.add_sentry(caster, int(d["range_min"]), int(d["range_max"]))
-	_log("%s 进入【哨兵】状态：射界 %d~%d 格，精力 -%d（剩余 %d），持续到自己的下一个回合" % [
-		caster.name, s.rng_min, s.rng_max, int(d["cost"]), caster.energy_points()])
-	_log("  🎯 GM 已登记警戒：%s" % gm.sentry_desc())
-	_finish_turn()
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 技能统一入口（用户要求：玩家路径与 AI 路径必须是同一条生产线）
@@ -988,216 +921,15 @@ func _cast_sentry(caster: Unit) -> void:
 # 俯冲轰炸都真实发生过）。现在加技能 = Skills.DEFS 加一行 + 一个 cast 实现。
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 【唯一】技能施放入口。返回 false = 没施放（精力不够 / 目标非法）。
-func _perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
-	var d := Skills.get_def(sid)
-	if d.is_empty() or u == null or not u.is_alive():
-		return false
-	if u.energy_points() < int(d["cost"]):
-		return false                             # 拒绝类文案不写日志（用户口径：只留在状态栏/菜单）
-	match Skills.cast_of(sid):
-		Skills.CAST_SENTRY:
-			_cast_sentry(u)                      # 自己扣精力 + 结束回合
-			return true
-		Skills.CAST_DIVE:
-			if not _in_bounds(cell):
-				return false
-			_cast_dive(u, cell)                  # 自己扣精力；下次轮到自己才俯冲
-			_finish_turn()
-			return true
-		Skills.CAST_CARPET:
-			# 注意：_start_carpet_bomb 自己扣精力 + 标记已行动（它也会被单独调用），
-			# 这里**不能再 _commit_skill**，否则一次技能扣两份精力。
-			_start_carpet_bomb(u, aim)
-			return true
-		Skills.CAST_GRENADE:
-			_commit_skill(u, sid)
-			_spawn_grenade_shot(u, aim, sid)
-			return true
-		Skills.CAST_MARKER:
-			_commit_skill(u, sid)
-			var md := _cc(u.cell).distance_to(aim)
-			_log("%s 投出【%s】召唤球，落点 (%d, %d)，距离 %.1f 格，飞行 %.2f 秒" % [
-				u.name, d["name"], cell.x, cell.y, md, md / Ordnance.SHELL_TILES_PER_SEC])
-			_spawn_marker(u, aim)                # 落地后由 _fire_skill_at 登记 GM 计时
-			return true
-	push_error("未知技能施放方式：%s（%s）" % [Skills.cast_of(sid), sid])
-	return false
-
-
-## 拖拽/投掷类技能共用的"扣精力 + 标记已行动"
-## （回合结束交给弹道物：落地/消失时才 _finish_turn，所以飞行途中还能被击落）
-func _commit_skill(u: Unit, sid: String) -> void:
-	var d := Skills.get_def(sid)
-	u.spend_energy(int(d["cost"]))
-	u.has_acted = true
-	u.has_moved = true
-	_push_unit_stats(u)
-
-
-## 枪榴弹：与投掷手普攻同款抛物线；落地后只是模型，GM 计时 4 个回合后爆炸
-func _spawn_grenade_shot(u: Unit, aim: Vector2, sid: String) -> Projectile:
-	var d := Skills.get_def(sid)
-	var gp := Ordnance.make_grenade(u, aim, true)
-	gp.shot.group = "grenade_%d" % Time.get_ticks_msec()
-	field.register(gp)
-	var cell := Vector2i(int(floor(aim.x)), int(floor(aim.y)))
-	_log("%s 投出【%s】：落点 (%d, %d)，%d 个回合后爆炸" % [
-		u.name, d["name"], cell.x, cell.y, int(d.get("delay_turns", 4))])
-	return gp
-
-
 ## 在落点竖起紫色光柱：沿地面法线（+Y）向上，长度足够冲出屏幕
-
-func _raise_pylon_at(pos: Vector2) -> Node3D:
-	var root := Node3D.new()
-	root.position = Vector3(pos.x, 0.0, pos.y)
-	add_child(root)
-
-	# 柱体：很高（80 单位）。缩到最小（zoom 30）时视口高度也就 30 出头，
-	# 所以 80 一定能冲出屏幕顶部。
-	var mi := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.20
-	cyl.bottom_radius = 0.32
-	cyl.height = 80.0
-	mi.mesh = cyl
-	mi.position = Vector3(0, 40.0, 0)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(0.72, 0.28, 1.0, 0.55)
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.material_override = m
-	root.add_child(mi)
-
-	# 底部光环，强调落点
-	var ring := MeshInstance3D.new()
-	var disc := CylinderMesh.new()
-	disc.top_radius = 1.0
-	disc.bottom_radius = 1.0
-	disc.height = 0.05
-	ring.mesh = disc
-	ring.position = Vector3(0, 0.04, 0)
-	var rm := StandardMaterial3D.new()
-	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	rm.albedo_color = Color(0.80, 0.40, 1.0, 0.45)
-	ring.material_override = rm
-	root.add_child(ring)
-
-	# 轻微脉动，让光柱看起来是"活的"
-	var tw := create_tween()
-	tw.tween_property(m, "albedo_color:a", 0.85, 0.7)
-	tw.tween_property(m, "albedo_color:a", 0.40, 0.7)
-	tw.tween_callback(func() -> void:
-		if is_instance_valid(m):
-			var t2 := create_tween()
-			t2.tween_property(m, "albedo_color:a", 0.85, 0.7)
-			t2.tween_property(m, "albedo_color:a", 0.40, 0.7))
-
-	_orbital_pylons.append(root)
-	return root
-
-func _clear_pylons() -> void:
-	for p in _orbital_pylons:
-		if is_instance_valid(p):
-			p.queue_free()
-	_orbital_pylons.clear()
-
 
 ## 轨道炮击：以标记点为中心、半径 3 格内的【不重复】随机落点，随机顺序，
 ## 每发从"斜右上方"用 1 秒落到中心，两发之间停 0.5 秒。
 ## 落点是浮点坐标（不做格子吸附），打到哪里算哪里。
 
-func _run_orbital_barrage(p: GameMaster.Pending) -> void:
-	var d := Skills.get_def(p.skill_id)
-	_orbital_busy = true
-	var centers := _pick_shell_centers(p.float_pos, float(d["marker_radius"]), int(d["shells"]))
-	for i in range(centers.size() - 1, 0, -1):
-		var j := rng.next_int(i + 1)
-		var tmp: Vector2 = centers[i]
-		centers[i] = centers[j]
-		centers[j] = tmp
-	var names: Array[String] = []
-	for c in centers:
-		names.append("(%.1f,%.1f)" % [c.x, c.y])
-	_log("  落点顺序：" + " → ".join(names))
-	for c in centers:
-		_orbital_shell_incoming(c)
-		await get_tree().create_timer(float(d["shell_fall_sec"])).timeout
-		_resolve_shell_impact(p, c, d)
-		await get_tree().create_timer(float(d["shell_gap_sec"])).timeout
-	_orbital_marks.clear()
-	# 只拆掉"这一发"的光柱（其他在途打击的光柱继续留着）
-	if p.pylon != null and is_instance_valid(p.pylon):
-		p.pylon.queue_free()
-		_orbital_pylons.erase(p.pylon)
-	p.pylon = null
-	_orbital_busy = false
-	_log("—— 轨道火力结束 ——")
-
-
 ## 圆内随机落点，【保证互不重复】。浮点坐标，不做格子吸附。
 
-func _pick_shell_centers(center: Vector2, r: float, n: int) -> Array[Vector2]:
-	var out: Array[Vector2] = []
-	var tries := 0
-	while out.size() < n and tries < n * 300:
-		tries += 1
-		var ang := rng.next_int(100000) / 100000.0 * TAU
-		var rad := sqrt(rng.next_int(100000) / 100000.0) * r
-		var q := center + Vector2(cos(ang), sin(ang)) * rad
-		q.x = clampf(q.x, float(PX) + 0.05, float(PX + PW) - 0.05)
-		q.y = clampf(q.y, float(PY) + 0.05, float(PY + PH) - 0.05)
-		var dup := false
-		for e in out:
-			if q.distance_to(e) < 0.9:
-				dup = true
-				break
-		if not dup:
-			out.append(q)
-	return out
-
-
 ## 一发炮弹从天而降的动画：从"斜右上方"的视野外落到中心，耗时 1 秒
-
-func _orbital_shell_incoming(pos: Vector2) -> void:
-	var target := Vector3(pos.x, 0.0, pos.y)
-	# 起点：目标右上方很高处（相机在 -Z 方向俯视，抬高就是出画面）
-	var start := target + Vector3(7.0, 26.0, 7.0)
-
-	# 特效与投掷手炮击同款（用户要求）：亮稻草黄 + 光晕 + 尾迹
-	var node: Node3D = ProjectileField.make_shell_node(self)
-	if node == null or not is_instance_valid(node):
-		return
-	node.visible = true
-	node.position = start
-
-	# 落点红圈：半径按 impact_radius（1 格）
-	var ring := _make_impact_ring(pos, float(Skills.get_def("orbital_strike")["impact_radius"]))
-
-	var tw := create_tween()
-	tw.tween_method(func(t: float) -> void:
-		if not is_instance_valid(node):
-			return
-		node.position = start.lerp(target, t)
-		ProjectileField.orient(node, start.lerp(target, t), start.lerp(target, maxf(0.0, t - 0.02)), 52.0)
-		, 0.0, 1.0, float(Skills.get_def("orbital_strike")["shell_fall_sec"]))
-	tw.tween_callback(func() -> void:
-		if is_instance_valid(node):
-			node.queue_free()
-		_flash_impact(ring)
-		)
-
-## ↓ 实现已搬到 view/view_fx.gd（保留同名薄包装：playtest / probe / 反射仍从本类调它）
-func _make_impact_ring(pos: Vector2, radius: float) -> MeshInstance3D:
-	return fx.make_impact_ring(pos, radius)
-
-
-func _flash_impact(ring: MeshInstance3D) -> void:
-	fx.flash_impact(ring)
-
 
 ## 场上现有的"落点红圈"数量（自检/试玩用）。
 ## 只数炮弹落地时新建的红圈，不含普攻共用的那一个 _impact_ring。
@@ -1217,21 +949,6 @@ func count_impact_rings() -> int:
 
 
 ## 一发炮弹的结算：12 破甲 + 12 力量（无视 50% 物抗），范围内所有单位（含友军）都吃
-
-func _resolve_shell_impact(p: GameMaster.Pending, pos: Vector2, d: Dictionary) -> void:
-	# 轨道炮与普攻炮击走同一套范围规则（红圈沾到格子就算命中），
-	# 差别只有：轨道炮不分敌我（skip = null）、参数来自技能表。
-	var hits: Array = Damage.blast(null, pos, float(d["impact_radius"]), Combat.opts_orbital(d, rng),
-		units, placeables, null, p.caster_side, true)
-	if hits.is_empty():
-		_log("  爆炸范围内无人")
-		return
-	for h in hits:
-		_log(h.text)
-		if h.unit != null:
-			_after_damage_to_unit(h.unit)
-		else:
-			_after_damage_to_placeable(h.placeable)
 
 func _spawn_units() -> void:
 	# 用户口径：**场景解耦** —— 花名册（UnitData.UNITS/ENEMIES）只存"定义"，
@@ -1312,7 +1029,7 @@ func _begin_next_round() -> void:
 	_start_round()
 
 func _next_turn() -> void:
-	_clear_hints()
+	fx.clear_hints()
 	phase = Phase.IDLE
 	selected = null
 	_aim_active = false
@@ -1511,7 +1228,7 @@ func _ai_attack(u: Unit, plan: Dictionary) -> void:
 	if t == null and pl == null:
 		_finish_turn()
 		return
-	if not _perform_basic(u, aim, t, pl, bool(plan.get("break_armor", false))):
+	if not attack.perform_basic(u, aim, t, pl, bool(plan.get("break_armor", false))):
 		_finish_turn()          # 精力不足/目标非法：也必须结束回合，否则软锁
 
 
@@ -1521,7 +1238,7 @@ func _ai_skill(u: Unit, plan: Dictionary) -> void:
 	var sid := String(plan.get("skill", ""))
 	var aim: Vector2 = plan.get("aim", _cc(u.cell))
 	var cell: Vector2i = plan.get("cell", Vector2i(int(floor(aim.x)), int(floor(aim.y))))
-	if not _perform_skill(u, sid, aim, cell):
+	if not skills_mod.perform_skill(u, sid, aim, cell):
 		_finish_turn()
 
 
@@ -1605,7 +1322,7 @@ func _finish_turn() -> void:
 	queue.advance(who)
 	_hide_action_menu()
 	_clear_pending()
-	_clear_hints()
+	fx.clear_hints()
 	_refresh_all()
 	_check_over()
 	# GameMaster 的【回合边界】：调度型效果（轨道空爆）在这里暂停回合并执行，
@@ -1666,11 +1383,11 @@ func _gm_step() -> void:
 				_fire_cannon_ai(u, false)
 	for p in due:
 		if p.skill_id == "grenade":
-			_explode_grenade(p)
+			sink.explode_grenade(p)
 		if p.skill_id == "orbital_strike":
 			_log("  [GM] ☄ %s 的轨道火力到点，暂停回合开始覆盖" % p.caster_name)
 			_set_gm_busy(true)
-			await _run_orbital_barrage(p)
+			await skills_mod.run_orbital_barrage(p)
 			_set_gm_busy(false)
 
 
@@ -1683,7 +1400,7 @@ func _set_gm_busy(on: bool) -> void:
 	if on:
 		_hide_action_menu()
 		_clear_pending()
-		_clear_hints()
+		fx.clear_hints()
 	else:
 		pass
 
@@ -1756,57 +1473,6 @@ func _show_result(win: bool) -> void:
 ## 清账期删除 —— 全仓零引用（死代码）。胜者界面的「继续」按钮走的是 `ui_restart()` /
 ## `BattleUI` 自己的回调，不需要这个中转。
 
-## 点格子类目标（俯冲轰炸这类 aim=cell 的技能，以及以后"点地格"的普攻）：
-## 越界/超程会提示重新点；合法就交给统一入口。单独成函数便于自检直接调用。
-func _cell_target_ok(cell: Vector2i) -> bool:
-	if active == null:
-		return false
-	var dcell_sk := Skills.get_def(_aim_skill_id)
-	var base0 := _cc(active.cell)
-	var ctr0 := _cc(cell)
-	var dd_max := float(dcell_sk.get("range_max", 20.0)) \
-		if not dcell_sk.is_empty() else float(active.rng_max)
-	if not _in_bounds(cell):
-		_log("  ✗ 目标格在地图外，重新点一个")
-		return false
-	if base0.distance_to(ctr0) > dd_max:
-		_log("  ✗ 超出射程（%.1f > %.0f 格），重新点一个" % [base0.distance_to(ctr0), dd_max])
-		return false
-	return true
-
-
-## 点格子类目标的一次点击（用户口径第 84 轮：粉色可选格 + **两次点击确认**）。
-## 返回 true = 这次点击真的把技能放出去了。第一次点只出黄勾，第二次点同一格才确认。
-func _click_cell_target(cell: Vector2i) -> bool:
-	if not _cell_targeting:
-		return false
-	if not _same_pending("cell", cell):
-		if not _cell_target_ok(cell):          # 越界/超程：不画勾，提示重新点
-			return false
-		_set_pending("cell", cell)             # 第一次点：出黄勾，等第二次确认
-		_refresh_all()
-		return false
-	_clear_pending()
-	return _confirm_cell_target(cell)
-
-
-func _confirm_cell_target(cell: Vector2i) -> bool:
-	if active == null:
-		return false
-	if not _cell_target_ok(cell):
-		return false
-	_cell_targeting = false
-	cell_targets = {}
-	var sid0 := _aim_skill_id
-	_aim_skill_id = ""
-	# sid 为空 = 点格子类普攻；否则是该技能
-	var ok0: bool = _perform_skill(active, sid0, _cc(cell), cell) if sid0 != "" \
-		else _perform_basic(active, _cc(cell), null, null, false, true)
-	if not ok0:
-		_show_action_menu()
-	return ok0
-
-
 func _show_action_menu() -> void:
 	if active == null:
 		return                              # 没有当前行动者就没有菜单（以前会拿 null 去算可达格）
@@ -1817,7 +1483,7 @@ func _show_action_menu() -> void:
 	phase = Phase.MENU
 	reachable = _compute_reachable(active)
 	attackable = {}
-	_draw_hints()
+	fx.draw_hints()
 	_action_menu.visible = true
 	_place_menu_near(active)
 	# 刚移动过就不允许休息（用户规则）；且已行动过就不能再动
@@ -1867,7 +1533,7 @@ func _menu_move() -> void:
 	reachable = _compute_reachable(active)
 	attackable = {}
 	_clear_pending()
-	_draw_hints()
+	fx.draw_hints()
 	_refresh_all()
 
 func _menu_attack() -> void:
@@ -1895,8 +1561,8 @@ func _menu_attack() -> void:
 			attackable = {}
 			cell_targets = Targeting.disc_cells(_cc(active.cell),
 				float(active.rng_max), PW, PH, PX, PY)
-			_clear_hints()
-			_draw_hints()
+			fx.clear_hints()
+			fx.draw_hints()
 			_log("  🎯 选择【%s】落点：%d 格内共 %d 个可选格（粉色高亮）" % [
 				AttackProfile.describe(active), active.rng_max, cell_targets.size()])
 			_refresh_all()
@@ -1905,8 +1571,8 @@ func _menu_attack() -> void:
 			reachable = {}
 			# 只显示"当前位置能打到的格子"（紫色高亮）
 			attackable = Targeting.attack_range_cells_rect(active, PX, PY, PW, PH)
-			_prune_air_cells()       # 近战：够不着的空中单位那格不亮（第 96 轮）
-			_draw_hints()
+			attack.prune_air_cells()       # 近战：够不着的空中单位那格不亮（第 96 轮）
+			fx.draw_hints()
 			_refresh_all()
 
 func _menu_rest() -> void:
@@ -1976,7 +1642,7 @@ func _confirm_attack(break_armor: bool) -> void:
 	_attack_menu.visible = false
 	_attack_target = null
 	if t != null and t.is_alive():
-		_attack_target_unit(t, break_armor)
+		attack.attack_target_unit(t, break_armor)
 
 ## 进入拖拽瞄准（普攻与技能共用同一套手感；具体打什么由调用方决定）
 func _begin_aim() -> void:
@@ -1990,7 +1656,7 @@ func _begin_aim() -> void:
 	_arrow_root.visible = true
 	reachable = {}
 	attackable = {}
-	_clear_hints()
+	fx.clear_hints()
 	_refresh_all()
 
 
@@ -2109,14 +1775,14 @@ func _fire() -> void:
 	if skill_id != "":
 		_aim_skill_id = ""
 		_skill_info_text = ""
-		if not _perform_skill(thrower, skill_id, fpos, Vector2i(int(floor(fpos.x)), int(floor(fpos.y)))):
+		if not skills_mod.perform_skill(thrower, skill_id, fpos, Vector2i(int(floor(fpos.x)), int(floor(fpos.y)))):
 			_show_action_menu()
 		return
 
 	# ── 普攻：交给唯一的普攻入口（近战/弓箭/连发/投掷/火箭齐射都在里面分派）──
 	# 用户口径：投掷手是"玩家操作决定上下限"的角色，**一定要允许失误**：
 	# 这里不做任何射程/边界检查 —— 打偏、打出界都照打（炮弹飞到边界处消失）。
-	if not _perform_basic(thrower, fpos):
+	if not attack.perform_basic(thrower, fpos):
 		_show_action_menu()
 
 
@@ -2129,65 +1795,9 @@ func _spawn_shell(caster: Unit, to: Vector2, ends_turn: bool,
 		pre: float = 0.0, group: String = "", blast_r: float = Ordnance.DEFAULT_BLAST_R) -> Projectile:
 	return sink.spawn_shell(caster, to, ends_turn, pre, group, blast_r)
 
-func _spawn_marker(caster: Unit, to: Vector2) -> Projectile:
-	return sink.spawn_marker(caster, to)
-
-func _fire_skill_at(sh: Ordnance.Shot, fpos: Vector2) -> void:
-	sink.fire_skill_at(sh, fpos)
-
-
 ## 箭矢在这一段路径里撞到了什么。返回 {unit: Unit} / {placeable: Placeable} / {}
 
-func _arrow_hit_check(p: Projectile, prev: Vector3, cur: Vector3) -> Dictionary:
-	return sink.arrow_hit_check(p, prev, cur)
-
-
-## ── 弹道物的后果处理：弹道物理只上报，具体做什么全在这里（用户口径）──
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装：_ready 里注册给 field / gm）
-func _on_projectile_event(event: String, p: Projectile, extra = null) -> void:
-	sink.on_projectile_event(event, p, extra)
-
-
-## 一发弹道物彻底消失之后的收尾：编组计数，或者按发射单结束回合
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装）
-func _after_projectile_gone(sh: Ordnance.Shot) -> void:
-	sink.after_projectile_gone(sh)
-
-
-## 炮弹类【被箭击落】的统一收尾（用户口径第 83/84/96 轮）：
-##   · 炮弹 / 火箭 -> 就地空爆（一格球三维判定，真的造成伤害）
-##   · 巡飞弹       -> 战斗部就地炸开
-##   · 枪榴弹       -> **整发作废：模型直接消失**（第 96 轮用户口径）
-##                     不落地、不立模型、不登记 GM 计时、不爆炸 —— 和轨道空爆的召唤球一个待遇。
-## 注意（第 87 轮）：**飞行中撞到角色不走这里**，那是"在命中处落地"（_land_shell）。
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装：probe_arena 直接调它）
-func _shell_intercepted(p: Projectile, why: String) -> void:
-	sink.shell_intercepted(p, why)
-
-
-## 半空被打爆的炮弹：落点就是它当时的位置。
-## 用户口径：三维判定 + 爆炸范围恒定为一格球（半径 0.5）——在头顶上炸但飞得高就没伤害。
-## why：日志措辞（现在只有一种：在半空被打爆），伤害口径固定。
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装：playtest 直接调它）
-func _air_burst(p: Projectile, why: String = "被打爆") -> void:
-	sink.air_burst(p, why)
-
-
 ## 落地事件（弹道物理上报）
-func _on_proj_landed(p: Projectile) -> void:
-	sink.on_proj_landed(p)
-
-
-## 炮弹类【落地结算】的**唯一入口**（用户口径第 87 轮）：
-## 正常落地（EV_LANDED）和"飞行中撞到角色"（EV_HIT_BODY，落点 = 命中处）都走这里 ——
-## 所以"撞到人"跟"落地"的伤害口径永远一致，不会又出现"某一路忘了结算"。
-## at = 落点（浮点，格坐标）；调用时这一发已经消亡，伤害/破片全靠发射单。
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装）；入口唯一性不变：
-##   本类里已无第二条落地结算路径，_on_projectile_event 的两条分支都转发到 sink.land_shell
-func _land_shell(p: Projectile, at: Vector2) -> void:
-	sink.land_shell(p, at)
-
-
 # ── 给自检/试玩用的薄封装（真实实现都在 field 里）──
 
 func clear_projectiles() -> void:
@@ -2196,15 +1806,6 @@ func clear_projectiles() -> void:
 
 func live_projectiles() -> int:
 	return 0 if field == null else field.live_count()
-
-func _proj_collision(p: Projectile) -> Projectile:
-	return sink.proj_collision(p)
-
-## 火箭落地：从落点随机两个方向生成 2 枚破片（破片口径与手榴弹一致：不分敌我）
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装）
-func _rocket_fragments(caster: Unit, at: Vector2) -> void:
-	sink.rocket_fragments(caster, at)
-
 
 ## 移动中开火：自检用（试玩第 40 节读它来验证"从当前位置出膛 + 落点按位移平移"）
 var _salvo_dbg: Dictionary = {}
@@ -2232,31 +1833,9 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 var _grenade_models: Dictionary = {}      # 格 -> Node3D（模型，不可交互）
 
 
-## 落地后立一个手榴弹模型（椭球 + 顶部削平长方体 + 经纬线凹槽），并让 GM 开始计时。
-## 用户口径第 87 轮：**落地就和投出者解耦** —— GM 的计时器（Pending.decoupled）不再
-## 属于投出者，萨尼铁塔扔完就阵亡也照常爆炸；模型引用挂在 Pending 上，
-## 爆炸时按引用回收（同格两发也不会互相顶掉模型）。
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装：playtest 直接调它）
-func _spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
-	sink.spawn_grenade_model(cell, p)
-
-
 ## 球状闪光（用户口径：只要球状闪光，不要红圈）
 ## ★ 实现在 view/view_fx.gd；_last_flash 留在本类（playtest 直接读它，见 playtest.gd:1816）
 var _last_flash: Node3D = null
-
-
-## ↓ 实现已搬到 view/view_fx.gd（保留同名薄包装）
-func _flash_sphere(center: Vector3, radius: float = 1.5, life: float = 0.38) -> void:
-	fx.flash_sphere(center, radius, life)
-
-
-## 爆炸：向 8 个方向各射出一枚破片（不分敌我，会伤到自己人）
-## 用户口径第 87 轮：这一发**已经和投出者解耦** —— 投出者死了也照炸，
-## 而且模型一定回收（按 Pending 上的引用收，不靠格子字典，同格两发不会互相顶掉）。
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装：playtest 直接调它）
-func _explode_grenade(p: GameMaster.Pending) -> void:
-	sink.explode_grenade(p)
 
 
 ## ── 圣萨尼：她的回合开始时，复活"她回合前最后一个阵亡的可操作队友"，每条命一次 ──
@@ -2277,11 +1856,6 @@ func _holy_sani_check(u: Unit) -> void:
 ## 破片是 `ProjectileSink.rocket_fragments()` / `explode_grenade()` 里**直接**
 ## `Ordnance.make_fragment(...)` 造的，从来没走过这个中转。（实现仍在
 ## `view/projectile_sink.gd` 里，只是它自己也没被调用 —— 见那里的注释。）
-
-
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装；调用方只剩 sink.on_projectile_event）
-func _resolve_arrow_hit(sh: Ordnance.Shot, what: Dictionary) -> void:
-	sink.resolve_arrow_hit(sh, what)
 
 
 ## ── 箭矢弹反（杰拉尔德）：暂停时间 -> 3 次按键 -> 反弹 or 结算伤害 ──────────
@@ -2354,15 +1928,7 @@ func _on_arrow_qte_done(ok: bool, victim: Unit, sh: Ordnance.Shot, bonus_milli: 
 ## 队头已经消失或飞出射界就剔除，接着看下一个。规则全在 GameMaster.sentry_tick 里。
 ## 实现已搬到 src/view/sentry_runner.gd；下面两个是**同名薄包装**（测试直接调它们）。
 
-func _tick_sentry_queue(delta: float) -> void:
-	sentry.tick(delta)
-
-
 ## 放出一支哨兵箭（GM 的队列决定什么时候、打哪里）
-func _sentry_fire(sh: GameMaster.Shot) -> void:
-	sentry.fire(sh)
-
-
 ## ── 箭矢（远程普攻 / 哨兵共用）──────────────────────────────────────────────
 ## 弓箭是**纯物理**的：恒定速度、真实抛物线、机头永远朝着速度方向（平抛出去）。
 ## 伤害与落点都由发射者给（放在发射单里），弹道物本身不知道伤害。
@@ -2373,22 +1939,12 @@ func _spawn_arrow(attacker: Unit, from: Vector3, to: Vector3, target: Unit,
 	field.register(p)
 	return p
 
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装：playtest 直接调它）
-func _resolve_mortar_impact(attacker: Unit, center: Vector2i) -> void:
-	sink.resolve_mortar_impact(attacker, center)
-
-
 ## 一次炮击的结算（浮点圆心）。普攻炮击与地毯式轰炸共用这一份逻辑：
 ##   · 同时造成【破甲伤害】（= 攻方破甲值）与【力量伤害】
 ##   · 力量伤害无视 50% 物理抗性
 ##   · 圆沾到格子就算命中（所以圆心到格中心距离 <= BLAST_RADIUS + 0.5）
 ## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装：radius 省略时由本类的
 ##   BLAST_RADIUS 兜底，签名与默认值逐字未变）
-
-func _resolve_blast(attacker: Unit, ctr: Vector2,
-		pre_opts: Dictionary = {}, radius: float = BLAST_RADIUS) -> void:
-	sink.resolve_blast(attacker, ctr, pre_opts, radius)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 技能：地毯式轰炸（投掷手 / 空爆迫击炮）
@@ -2401,39 +1957,6 @@ func _resolve_blast(attacker: Unit, ctr: Vector2,
 #   · 每发威力 = 普攻（破甲 + 力量，无视 50% 物抗，不分敌我）
 #   · 每个落点画红圈
 # ══════════════════════════════════════════════════════════════════════════════
-
-func _start_carpet_bomb(caster: Unit, center: Vector2) -> void:
-	var d := Skills.get_def("carpet_bomb")
-	if caster == null or not caster.is_alive():
-		pass
-		return
-	if caster.energy_points() < int(d["cost"]):
-		_show_action_menu()
-		return
-	caster.spend_energy(int(d["cost"]))
-	caster.has_acted = true
-	caster.has_moved = true
-	_push_unit_stats(caster)
-	_aim_skill_id = ""
-	_skill_info_text = ""
-
-	var origin := Vector2(float(caster.cell.x) + 0.5, float(caster.cell.y) + 0.5)
-	var pts := Skills.carpet_points(d, center, center - origin, rng)
-	var names: Array[String] = []
-	for p in pts:
-		names.append("(%.1f,%.1f)" % [p.x, p.y])
-	_log("%s 呼叫【%s】：%d 个落点 %s" % [caster.name, d["name"], pts.size(), " → ".join(names)])
-	# 7 发炮弹：间隔 gap_sec 逐一起飞（用 Projectile.pre 做延迟），
-	# 于是它们全是"物理弹道物"——可以被箭击落、可以被哨兵盯上、出界就地消失。
-	# 速度恒定 Ordnance.SHELL_TILES_PER_SEC，由近及远距离递增 -> 自然就是"由近及远逐个落地"。
-	var gap := float(d["gap_sec"])
-	# 全部打进同一个编组：7 发全落地/全消失之后才结束回合
-	var gid := "carpet_%d" % gm.turn_count + str(Time.get_ticks_msec())
-	_proj_groups[gid] = pts.size()
-	for i in pts.size():
-		# 地毯式轰炸的爆炸范围用【轨道炮击同款】（比普攻小的那个版本）
-		_spawn_shell(caster, pts[i], false, float(i) * gap, gid, CARPET_BLAST_R)
-
 
 ## 角色挨打后的统一收尾：闪白、刷新指示器、判定阵亡
 
@@ -2461,7 +1984,7 @@ func _start_crash(u: Unit) -> void:
 	u.tags.erase("diving")
 	u.tags.erase("dive_ready")
 	u.body_y = -1.0                 # 坠机 = 从悬停高度往下掉
-	_dive_clear(u)
+	skills_mod.dive_clear(u)
 	_log("  💥 %s 力量归零 —— 坠机！" % u.name)
 	var from_h: float = u.visual.position.y if u.visual != null else u.hover
 	var tw := create_tween()
@@ -2472,7 +1995,7 @@ func _start_crash(u: Unit) -> void:
 func _crash_impact(u: Unit) -> void:
 	var cfg := Level.heli()
 	var center := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
-	_flash_sphere(Vector3(center.x, 0.6, center.y), 2.0, 0.45)
+	fx.flash_sphere(Vector3(center.x, 0.6, center.y), 2.0, 0.45)
 	var opts := Combat.opts({
 		"power": int(cfg["crash_power"]) * 1000,
 		"armor_break": int(cfg["crash_break"]) * 1000,
@@ -2512,66 +2035,6 @@ func _clamp_cell(c: Vector2i) -> Vector2i:
 	return Vector2i(clampi(c.x, PX, PX + PW - 1), clampi(c.y, PY, PY + PH - 1))
 
 
-func _dive_marker(cell: Vector2i, on: bool) -> void:
-	var key := "shared"
-	if on:
-		if _dive_markers.has(key) and is_instance_valid(_dive_markers[key]):
-			(_dive_markers[key] as Node3D).queue_free()
-		var root := Node3D.new()
-		root.position = Vector3(float(cell.x) + 0.5, 0.0, float(cell.y) + 0.5)
-		var red := StandardMaterial3D.new()
-		red.albedo_color = Color(1.0, 0.22, 0.18, 0.62)
-		red.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		red.emission_enabled = true
-		red.emission = Color(1.0, 0.16, 0.12)
-		red.emission_energy_multiplier = 2.0
-		var disc := MeshInstance3D.new()
-		var cy := CylinderMesh.new()
-		cy.top_radius = 0.45
-		cy.bottom_radius = 0.45
-		cy.height = 0.04
-		disc.mesh = cy
-		disc.position = Vector3(0, 0.05, 0)
-		disc.material_override = red
-		root.add_child(disc)
-		# 细红光柱（用户口径：投弹指示点用红色，不要紫色激光柱）
-		var beam := MeshInstance3D.new()
-		var bcy := CylinderMesh.new()
-		bcy.top_radius = 0.045
-		bcy.bottom_radius = 0.045
-		bcy.height = 3.0
-		beam.mesh = bcy
-		beam.position = Vector3(0, 1.5, 0)
-		beam.material_override = red
-		root.add_child(beam)
-		add_child(root)
-		_dive_markers[key] = root
-		_log("  🎯 已标记俯冲目标 (%d, %d)（橙色圆盘）—— 下一次轮到它会俯冲过去" % [cell.x, cell.y])
-	elif _dive_markers.has(key):
-		if is_instance_valid(_dive_markers[key]):
-			(_dive_markers[key] as Node3D).queue_free()
-		_dive_markers.erase(key)
-
-
-func _dive_clear(u: Unit) -> void:
-	if u.tags.has("dive_ready"):
-		u.tags.erase("dive_ready")
-	_dive_marker(Vector2i.ZERO, false)
-
-
-## 玩家/AI 选定目标格 -> 进入准备状态
-func _cast_dive(u: Unit, cell: Vector2i) -> void:
-	var d := Skills.get_def("dive_bomb")
-	if u.energy_points() < int(d["cost"]):
-		return                                   # 拒绝类文案不进日志（用户口径）
-	u.spend_energy(int(d["cost"]))
-	u.tags["dive_ready"] = cell
-	_push_unit_stats(u)
-	_dive_marker(cell, true)
-	_log("  🚁 %s 进入【俯冲准备】：目标 (%d, %d)，距离 %d 格" % [
-		u.name, cell.x, cell.y, Ai.manhattan(u.cell, cell)])
-
-
 ## 轮到它的回合：开始【爬升轰炸】（返回 true 表示本回合由它接管）
 ## 用户口径（第 86 轮）：不再俯冲下去，而是**均匀爬升到不会自伤的高度** ——
 ## 爬到目标上方（升到 climb_h）-> 停 0.5 秒 -> 投弹（弹下落 1 秒）-> 原路返回并降回悬停高度。
@@ -2580,7 +2043,7 @@ func _dive_begin(u: Unit) -> bool:
 		return false
 	var cfg := Level.heli()
 	var target: Vector2i = u.tags["dive_ready"]
-	_dive_clear(u)
+	skills_mod.dive_clear(u)
 	u.tags["diving"] = true
 	_dive = {
 		"u": u, "phase": "up",
@@ -2690,7 +2153,7 @@ func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
 	var sample := pos
 	if u.visual != null:
 		sample = Vector2(u.visual.position.x, u.visual.position.z)
-	_sentry_lock(u, sample)
+	sentry.lock(u, sample)
 
 
 ## 投弹：投掷手普攻模型直径翻倍、**半径 3 格的三维球**、40 破甲 + 20 力量、不触发哨兵。
@@ -2700,7 +2163,7 @@ func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
 func _drop_bomb(u: Unit, at: Vector2) -> void:
 	var cfg := Level.heli()
 	var radius := float(cfg["drop_blast_r"])
-	_flash_sphere(Vector3(at.x, 0.8, at.y), radius, 0.42)
+	fx.flash_sphere(Vector3(at.x, 0.8, at.y), radius, 0.42)
 	var opts := Combat.opts({
 		"power": int(cfg["drop_power"]) * 1000,
 		"armor_break": int(cfg["drop_break"]) * 1000,
@@ -2724,7 +2187,7 @@ func _drop_bomb(u: Unit, at: Vector2) -> void:
 		var r2 := Combat.deal_to_placeable(pl, opts)
 		_log("  [道具] %s：%s" % [pl.name, Combat.describe(r2, pl.pr, 0.0)])
 		_after_damage_to_placeable(pl)
-	_show_impact(at)
+	fx.show_impact(at)
 
 
 ## 受伤后的被动钩子表：被动表里声明 on_damaged = true 的，在这里依次执行。
@@ -2739,7 +2202,7 @@ func _init_passive_hooks() -> void:
 
 
 func _after_damage_to_unit(u: Unit) -> void:
-	_flash(u)
+	fx.flash(u)
 	# 用户口径：受伤触发的被动（例：直升机力量掉到阈值以下坠机）必须挂在
 	# "受伤"这条主路径上才真的会触发 —— 以前只挂在俯冲里，正常挨打永远不触发。
 	for id in Passives.damaged_hooks(u):
@@ -2935,12 +2398,6 @@ func _sync_unit_visibility() -> void:
 			u.visual.visible = true
 
 
-## 落地后的 red circle：标出 impact 范围（浮点落点，用户口径）
-## ↓ 实现已搬到 view/view_fx.gd（_impact_tw 这个淡出动画的句柄也一并搬过去了）
-func _show_impact(center: Vector2, y: float = 0.05) -> void:
-	fx.show_impact(center, y)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # 普攻统一入口（用户要求：三条入口不许各写一套 if）
 #
@@ -2966,77 +2423,24 @@ static func _unit_pos(u: Unit) -> Vector2:
 	return GridMath.unit_pos(u)
 
 
-## 【唯一】普攻入口。返回 false = 这一击没打出去（精力不够 / 目标非法）。
-##   aim         : 落点（浮点格坐标）。近战/锁敌时传目标中心即可
-##   target      : 锁定的角色（可空）
-##   placeable   : 锁定的沙盒道具（可空）
-##   guard_acted : true = 本回合已出手就拒绝（玩家路径，防"一回合打两次"）
-## ↓ 实现已搬到 view/basic_attack.gd（三段顺序与第 96 轮"近战拒绝"口径一并搬过去，
-##   见 BasicAttack.perform_basic 的文档注释与 body）。保留同名薄包装：三条入口与
-##   playtest / probe 都直接调这个名字。
-func _perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Placeable = null,
-		break_armor: bool = false, guard_acted: bool = false) -> bool:
-	return attack.perform_basic(u, aim, target, placeable, break_armor, guard_acted)
-
-
 ## 近战：贴上去直接结算（打角色走 Damage.strike，打沙盒走道具那条）
-func _basic_melee(u: Unit, t: Unit, pl: Placeable, ba: bool) -> bool:
-	return attack.basic_melee(u, t, pl, ba)
-
-
 ## 弓箭：恒定速度抛物线，命中靠碰撞判定（可能打空）。
 ## 高度轴（第 83 轮）：瞄角色就瞄【身体中心】—— 悬停 2 格的直升机要瞄 2.5 高，
 ## 否则箭从它下面穿过去（以前判定不看高度，看着就像穿模）。
-func _basic_arrow(u: Unit, aim: Vector2, t: Unit, pl: Placeable, ba: bool) -> bool:
-	return attack.basic_arrow(u, aim, t, pl, ba)
-
-
 ## 连发（萨尼铁塔）：发数 / 间隔 / 散布全来自模板。
 ## 注意：连发是协程（要等间隔出膛），这里不能 await 它的返回值，直接放走即可。
-func _basic_burst(u: Unit, aim: Vector2, t: Unit, pl: Placeable, ba: bool, prof: Dictionary) -> bool:
-	return attack.basic_burst(u, aim, t, pl, ba, prof)
-
-
 ## 投掷炮弹：落点吃拖拽结果，**出界也照打**（用户口径：投掷手一定要允许失误）
-func _basic_shell(u: Unit, aim: Vector2) -> bool:
-	return attack.basic_shell(u, aim)
-
-
 ## 火箭齐射（直升机）：耗精力、左右开弓、发射完即结束回合，全部在 _rocket_salvo 里
-func _basic_salvo(u: Unit, aim: Vector2) -> bool:
-	return attack.basic_salvo(u, aim)
-
-
 ## 连发实现。间隔依次出膛，**每发各自判定命中**，
 ## 落点吃"玩家侧线性散布"（r = 距离/12，12 格 ≈ 1 格）——所以选中目标也不一定打中。
 ## ↓ 这个函数体内有 await（协程），包装里也必须 await，否则调用方拿不到真正的返回值。
-func _volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
-		break_armor: bool, prof: Dictionary) -> bool:
-	return await attack.volley_bullets(u, aim, t, pl, break_armor, prof)
-
-
 ## 点目标前的最后一道闸（口径与 _perform_basic 里的拒绝完全一致）：
 ## 近战够不着空中的单位 —— 第 96 轮用户口径「近战攻击不应该能瞄准直升机」。
-func _can_aim_unit(t: Unit) -> bool:
-	return attack.can_aim_unit(t)
-
-
 ## 近战的高亮格：空中单位（够不着）那一格不点亮。
 ## 例外：那格上还站着可打的沙盒道具时保留（同一格里道具照样能砍）。
-func _prune_air_cells() -> void:
-	attack.prune_air_cells()
-
-
 ## 点目标路径（玩家）：唯一差别是"已经出手过就不再响应"。
 ## 打不出（精力不足）时把行动菜单还给他，别把回合卡住。
-func _attack_target_unit(t: Unit, break_armor: bool) -> void:
-	attack.attack_target_unit(t, break_armor)
-
-
 ## 锁定沙盒元素（用户口径：双方英雄都能打木刺/土堆）
-func _attack_target_placeable(pl: Placeable) -> void:
-	attack.attack_target_placeable(pl)
-
 func _apply_attack(attacker: Unit, t: Unit, break_armor: bool,
 		silent: bool = false, bonus_milli: int = 0, power_mult: float = 1.0,
 		power_override: int = -1, break_override: int = -1) -> void:
@@ -3068,8 +2472,8 @@ func _process(delta: float) -> void:
 
 ## 直升机的每帧表现（悬浮高度 / 旋翼自转 / 俯冲姿态）—— 队友交付的 HeliFx
 ## 只对直升机调用，其它单位零开销（HeliFx.tick 内部第一行就返回）
-	_tick_color_cycle(delta)
-	_tick_pending_pulse(delta)
+	fx.tick_color_cycle(delta)
+	fx.tick_pending_pulse(delta)
 	_sync_menu_position()          # 菜单跟着角色走
 	_tick_queue_anim(delta)
 	field.step(delta)              # 弹道物理：推进 / 碰撞 / 上报结果（顺带把进入射界的送进哨兵队列）
@@ -3077,7 +2481,7 @@ func _process(delta: float) -> void:
 	if _qte_active:
 		return                     # 弹反 QTE 进行中：这一帧剩下的都别做（时间已暂停）
 	_tick_loiter_launchers(delta)  # 巡飞弹发射器：12Hz 采样"正在移动的角色"
-	_tick_sentry_queue(delta)      # 哨兵：每 150ms 放一支箭打队头
+	sentry.tick(delta)      # 哨兵：每 150ms 放一支箭打队头
 	_tick_unit_walk(delta)         # 走路中的哨兵检测
 	sentry_range.sync(gm.sentries) # 射界高亮跟着哨兵状态走
 	_sync_unit_visibility()        # 兜底：活着就必须看得见
@@ -3170,7 +2574,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			# 点格子类目标：技能（俯冲轰炸）或"点格子"类普攻
 			# 用户口径（第 84 轮）：粉色可选格 + **两次点击确认**（第一次出黄勾）
 			if _cell_targeting:
-				_click_cell_target(cell)
+				skills_mod.click_cell_target(cell)
 				return
 			# 用户口径：远程和近战【选单位都要确认】—— 第一次点只出黄勾，第二次才弹攻击菜单
 			# 沙盒元素（木刺/土堆）也可以被锁定，流程一样：第一次出勾，第二次打
@@ -3178,12 +2582,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			if pl_t != null and attackable.has(cell):
 				if _same_pending("place", cell):
 					_clear_pending()
-					_attack_target_placeable(pl_t)
+					attack.attack_target_placeable(pl_t)
 				else:
 					_set_pending("place", cell, null)
 					_refresh_all()
 				return
-			if t != null and t.side != active.side and attackable.has(cell) and _can_aim_unit(t):
+			if t != null and t.side != active.side and attackable.has(cell) and attack.can_aim_unit(t):
 				if _same_pending("attack", cell):
 					_clear_pending()
 					_show_attack_menu(t)
@@ -3311,7 +2715,7 @@ func _do_move(u: Unit, cell: Vector2i) -> void:
 	# 移动后重开菜单：此时"休息"会被禁用（移动过不能休息）
 	_show_action_menu()
 	_place_menu_near(u)
-	_draw_hints()
+	fx.draw_hints()
 	_refresh_all()
 
 
@@ -3328,12 +2732,6 @@ func _tick_unit_walk(_delta: float) -> void:
 		if vis == null or not vis.is_walking():
 			continue
 		sentry.lock(u, Vector2(vis.position.x, vis.position.z))
-
-
-## 角色进入射界 -> 入队尾（真的射箭由 150ms 节奏的队列决定，不再"立刻一发"）
-## 薄包装：实现已搬到 src/view/sentry_runner.gd（测试直接调它）
-func _sentry_lock(u: Unit, pos: Vector2) -> void:
-	sentry.lock(u, pos)
 
 
 ## BFS 求一条从当前格到目标格的路径（4 邻格，避开其他单位与阻挡移动的道具）
@@ -3439,58 +2837,21 @@ func _compute_reachable(u: Unit) -> Dictionary:
 # 高亮
 # ══════════════════════════════════════════════════════════════════════════════
 
-## ↓ 以下高亮相关实现全部搬到 view/view_fx.gd，这里只保留同名薄包装
-##   （playtest / probe_v14 有上千处 _s.xxx 私有访问，名字必须保留）
-func _clear_hints() -> void:
-	fx.clear_hints()
-
-
 ## 注：原 _pending_cell_mark() 全仓零引用（死代码），随本次搬迁一并删除；
 ## 它用到的 PendingMark / _cycle_mat 仍留在 ViewFx（彩色流动机制的备用件）。
-func _cycle_mat() -> StandardMaterial3D:
-	return fx.cycle_mat()
-
-
 ## 每帧推进所有"待确认"高亮的颜色：hue 随时间匀速增长 -> 连续渐变
-
-func _tick_color_cycle(delta: float) -> void:
-	fx.tick_color_cycle(delta)
-
 
 ## 设定"待确认"时要染色的角色（可为 null 取消）
 
-func _set_pending_actor(u: Unit) -> void:
-	fx.set_pending_actor(u)
-
-func _draw_hints() -> void:
-	fx.draw_hints()
-
-
 ## 待确认可视化：一个常驻的橙色方框 + 一根上下脉动的光柱。
 ## 只创建一次，之后每帧只改颜色/缩放，避免"重建导致看不见"。
-
-func _update_pending_visual() -> void:
-	fx.update_pending_visual()
-
 
 ## 待确认的【黄勾】：两段笔画（短 + 长）组成的 ✓，外加一圈加法混合的柔光。
 ## 用户口径：发亮的黄勾、必须正对摄像机（不能斜）—— 每帧抄摄像机的 basis。
 ## 只画勾，不填充格子；格子本身的橙框仍然由 _pending_mats 负责。
 
-func _build_check_mark() -> void:
-	fx.build_check_mark()
-
-
 ## 黄勾朝向：永远和屏幕平行（正对摄像机），并且轻轻呼吸
-func _face_check_mark() -> void:
-	fx.face_check_mark()
-
-
 ## 每帧让待确认标记呼吸：格子橙框在橙<->黄之间脉动，黄勾同步呼吸并保持正对摄像机
-
-func _tick_pending_pulse(delta: float) -> void:
-	fx.tick_pending_pulse(delta)
-
 
 ## 鼠标当前指向的格子（无有效指向返回 null）
 
@@ -3509,13 +2870,7 @@ func _hover_cell() -> Variant:
 		return null
 	return c
 
-func _hint_cell(cell: Vector2i, col: Color) -> void:
-	fx.hint_cell(cell, col)
-
 ## 角色被击中时的白闪（实现在 view/view_fx.gd）
-func _flash(u: Unit) -> void:
-	fx.flash(u)
-
 static func _fmt(milli: int) -> String:
 	if milli % 1000 == 0:
 		return str(milli / 1000)
@@ -3786,7 +3141,7 @@ func ui_attack() -> void:
 
 
 func ui_skill() -> void:
-	_menu_skill()
+	skills_mod.menu_skill()
 
 
 func ui_rest() -> void:
@@ -3827,7 +3182,7 @@ func ui_set_zoom(v: float) -> void:
 
 
 func ui_pick_skill(id: String) -> void:
-	_choose_skill(id)
+	skills_mod.choose_skill(id)
 
 
 func ui_confirm_attack(break_armor: bool) -> void:
@@ -3959,7 +3314,7 @@ func t_show_action_menu() -> void:
 	_show_action_menu()
 
 func t_attack_target_unit(t: Unit, break_armor: bool) -> void:
-	_attack_target_unit(t, break_armor)
+	attack.attack_target_unit(t, break_armor)
 
 func t_menu_attack() -> void:
 	_menu_attack()
@@ -3984,7 +3339,7 @@ func t_set_attack_menu(v: PanelContainer) -> void:
 	_attack_menu = v
 
 func t_draw_hints() -> void:
-	_draw_hints()
+	fx.draw_hints()
 
 func t_revive_hero(u: Unit) -> void:
 	_revive_hero(u)
@@ -4060,13 +3415,13 @@ func t_set_cell_targeting(v: bool) -> void:
 	_cell_targeting = v
 
 func t_choose_skill(id: String) -> void:
-	_choose_skill(id)
+	skills_mod.choose_skill(id)
 
 func t_clamp_cell(c: Vector2i) -> Vector2i:
 	return _clamp_cell(c)
 
 func t_click_cell_target(cell: Vector2i) -> bool:
-	return _click_cell_target(cell)
+	return skills_mod.click_cell_target(cell)
 
 func t_do_move(u: Unit, cell: Vector2i) -> void:
 	_do_move(u, cell)
@@ -4120,7 +3475,7 @@ func t_btn_break() -> Button:
 	return _btn_break
 
 func t_can_aim_unit(t: Unit) -> bool:
-	return _can_aim_unit(t)
+	return attack.can_aim_unit(t)
 
 func t_can_place_at(c: Vector2i) -> bool:
 	return _can_place_at(c)
@@ -4135,7 +3490,7 @@ func t_dive_begin(u: Unit) -> bool:
 	return _dive_begin(u)
 
 func t_dive_clear(u: Unit) -> void:
-	_dive_clear(u)
+	skills_mod.dive_clear(u)
 
 func t_finish_placement() -> void:
 	_finish_placement()
@@ -4165,7 +3520,7 @@ func t_ranged_blocked_at(c: Vector2i, by_thrower: bool) -> bool:
 	return _ranged_blocked_at(c, by_thrower)
 
 func t_resolve_mortar_impact(attacker: Unit, center: Vector2i) -> void:
-	_resolve_mortar_impact(attacker, center)
+	sink.resolve_mortar_impact(attacker, center)
 
 func t_same_pending(kind: String, cell: Vector2i) -> bool:
 	return _same_pending(kind, cell)
@@ -4189,7 +3544,7 @@ func t_aim_range(t: float) -> float:
 	return _aim_range(t)
 
 func t_air_burst(p: Projectile, why: String = "被打爆") -> void:
-	_air_burst(p, why)
+	sink.air_burst(p, why)
 
 func t_arrow_len_for_t(t: float) -> float:
 	return _arrow_len_for_t(t)
@@ -4201,7 +3556,7 @@ func t_set_arrow_root(v: Node3D) -> void:
 	_arrow_root = v
 
 func t_attack_target_placeable(pl: Placeable) -> void:
-	_attack_target_placeable(pl)
+	attack.attack_target_placeable(pl)
 
 func t_blocked_cells() -> Dictionary:
 	return _blocked_cells()
@@ -4210,10 +3565,10 @@ func t_btn_next() -> Button:
 	return _btn_next
 
 func t_cast_dive(u: Unit, cell: Vector2i) -> void:
-	_cast_dive(u, cell)
+	skills_mod.cast_dive(u, cell)
 
 func t_cast_sentry(caster: Unit) -> void:
-	_cast_sentry(caster)
+	skills_mod.cast_sentry(caster)
 
 func t_charge_from_drag(px: float) -> float:
 	return _charge_from_drag(px)
@@ -4234,7 +3589,7 @@ func t_dive_tick(delta: float) -> void:
 	_dive_tick(delta)
 
 func t_explode_grenade(p: GameMaster.Pending) -> void:
-	_explode_grenade(p)
+	sink.explode_grenade(p)
 
 func t_find_arrow_qte() -> ArrowQTE:
 	return _find_arrow_qte()
@@ -4252,7 +3607,7 @@ func t_next_turn() -> void:
 	await _next_turn()
 
 func t_on_proj_landed(p: Projectile) -> void:
-	_on_proj_landed(p)
+	sink.on_proj_landed(p)
 
 func t_panel() -> PanelContainer:
 	return _panel
@@ -4261,7 +3616,7 @@ func t_path_to(u: Unit, goal: Vector2i) -> Array[Vector2i]:
 	return _path_to(u, goal)
 
 func t_perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
-	return _perform_skill(u, sid, aim, cell)
+	return skills_mod.perform_skill(u, sid, aim, cell)
 
 func t_pick_place_kind(nm: String) -> void:
 	_pick_place_kind(nm)
@@ -4276,10 +3631,10 @@ func t_set_skill_info_text(v: String) -> void:
 	_skill_info_text = v
 
 func t_spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
-	_spawn_grenade_model(cell, p)
+	sink.spawn_grenade_model(cell, p)
 
 func t_spawn_grenade_shot(u: Unit, aim: Vector2, sid: String) -> Projectile:
-	return _spawn_grenade_shot(u, aim, sid)
+	return skills_mod.spawn_grenade_shot(u, aim, sid)
 
 func t_tick_loiter_fuse() -> void:
 	_tick_loiter_fuse()
@@ -4312,16 +3667,16 @@ func t_check_root() -> Node3D:
 	return _check_root
 
 func t_clear_pylons() -> void:
-	_clear_pylons()
+	skills_mod.clear_pylons()
 
 func t_confirm_attack(break_armor: bool) -> void:
 	_confirm_attack(break_armor)
 
 func t_confirm_cell_target(cell: Vector2i) -> bool:
-	return _confirm_cell_target(cell)
+	return skills_mod.confirm_cell_target(cell)
 
 func t_face_check_mark() -> void:
-	_face_check_mark()
+	fx.face_check_mark()
 
 func t_fire_cannon_ai(u: Unit, ends_turn: bool = true) -> void:
 	_fire_cannon_ai(u, ends_turn)
@@ -4346,10 +3701,10 @@ func t_pending_mats() -> Array:
 
 func t_perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Placeable = null,
 		break_armor: bool = false, guard_acted: bool = false) -> bool:
-	return _perform_basic(u, aim, target, placeable, break_armor, guard_acted)
+	return attack.perform_basic(u, aim, target, placeable, break_armor, guard_acted)
 
 func t_proj_collision(p: Projectile) -> Projectile:
-	return _proj_collision(p)
+	return sink.proj_collision(p)
 
 func t_qte_active() -> bool:
 	return _qte_active
@@ -4361,16 +3716,16 @@ func t_salvo_u() -> Unit:
 	return _salvo_u
 
 func t_shell_intercepted(p: Projectile, why: String) -> void:
-	_shell_intercepted(p, why)
+	sink.shell_intercepted(p, why)
 
 func t_spawn_marker(caster: Unit, to: Vector2) -> Projectile:
-	return _spawn_marker(caster, to)
+	return sink.spawn_marker(caster, to)
 
 func t_start_carpet_bomb(caster: Unit, center: Vector2) -> void:
-	_start_carpet_bomb(caster, center)
+	skills_mod.start_carpet_bomb(caster, center)
 
 func t_sync_unit_visibility() -> void:
 	_sync_unit_visibility()
 
 func t_tick_pending_pulse(delta: float) -> void:
-	_tick_pending_pulse(delta)
+	fx.tick_pending_pulse(delta)
