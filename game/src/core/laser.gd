@@ -81,6 +81,30 @@ static func clip_by_terrain(a: Vector2, b: Vector2, placeables: Array[Placeable]
 # 命中判定（三维）
 # ══════════════════════════════════════════════════════════════════════════════
 
+## 光束会不会**扫到这个沙盒元素**（第 100 轮用户口径：激光对沙盒元素也要有伤害）。
+##
+## 判定 = **水平覆盖**：光束经过它占用的任意一格即命中（步子 0.05 格，与 `clip_by_terrain` 同一套）。
+## 为什么不做高度轴：`Placeable` 在数据里根本没有"高度"（只有占地格子），而阻挡判定
+## `clip_by_terrain` 本来就是二维的 —— 两处必须同口径，否则会出现"土堆拦住了光束、
+## 自己却不吃伤害"这种自相矛盾。
+## **挡路的（土堆）与被穿过的（木刺）都算命中**：前者光束停在它那一格、后者光束继续走；
+## 这与箭矢那条老路一致（箭被土堆拦下时，那一发就是打在土堆上的）。
+static func hits_placeable(a: Vector3, b: Vector3, pl: Placeable) -> bool:
+	if pl == null or not pl.is_alive():
+		return false
+	var p0 := Vector2(a.x, a.z)
+	var p1 := Vector2(b.x, b.z)
+	var total := p0.distance_to(p1)
+	if total <= 0.0001:
+		return pl.covers(Vector2i(int(floor(p0.x)), int(floor(p0.y))))
+	var steps: int = maxi(1, int(ceil(total / 0.05)))
+	for i in range(steps + 1):
+		var p := p0.lerp(p1, float(i) / float(steps))
+		if pl.covers(Vector2i(int(floor(p.x)), int(floor(p.y)))):
+			return true
+	return false
+
+
 ## 光束会不会打到这个角色。
 ##
 ## 三维口径：光束是 `a -> b` 的线段；角色是**竖直圆柱**
@@ -141,27 +165,43 @@ static func _dist_point_to_seg_2d(p: Vector2, s0: Vector2, s1: Vector2) -> float
 # 帧伤结算（光束结束时**统一结算一次**）
 # ══════════════════════════════════════════════════════════════════════════════
 
-## frames_by_id 是 {角色 instance_id: 被光束覆盖的物理帧数}；
+## frames_by_id 是 {目标 instance_id: 被光束覆盖的物理帧数} —— 角色与**沙盒元素**共用这一张表
+## （实例 id 全局唯一，不会撞）；
 ## dmg_per_frame 由【激光 id】决定（`"reaper_laser"` = 2 点/帧）。
-## 伤害走 `Damage.magic_hit`（只吃魔抗、无视护甲），返回 Array[Damage.Hit]。
-## 已经阵亡 / 不在 units 里的目标：这一份帧伤作废（不给尸体结算）。
+## 伤害走 `Damage.magic_hit` / `Damage.magic_hit_placeable`（只吃魔抗、无视护甲），
+## 返回 Array[Damage.Hit]。
+## 已经阵亡 / 不在 units / 不在 placeables 里的目标：这一份帧伤作废（不给尸体结算）。
+##
+## 第 100 轮：加了 `placeables`（可选，缺省空 = 行为与以前逐字相同）。
+## 沙盒元素走同一条"帧数 × 每帧伤害"的口径 —— 包括**魔抗免疫**的（用户口径：
+## "还是要进造伤公式转一圈"）：公式算完自然为 0，但那条 Hit 照样返回、日志照样写。
 static func settle(units: Array[Unit], frames_by_id: Dictionary, dmg_per_frame: int,
-		rng) -> Array[Damage.Hit]:
+		rng, placeables: Array[Placeable] = []) -> Array[Damage.Hit]:
 	var out: Array[Damage.Hit] = []
 	if frames_by_id.is_empty() or dmg_per_frame <= 0:
 		return out
-	var by_id := {}
+	var units_by_id := {}
 	for u in units:
 		if u != null and u.is_alive():
-			by_id[u.get_instance_id()] = u
+			units_by_id[u.get_instance_id()] = u
+	var pls_by_id := {}
+	for pl in placeables:
+		if pl != null and pl.is_alive():
+			pls_by_id[pl.get_instance_id()] = pl
 	for key in frames_by_id.keys():
-		var u: Unit = by_id.get(key, null)
-		if u == null:
-			continue
 		var frames := int(frames_by_id[key])
 		if frames <= 0:
 			continue
-		var h := Damage.magic_hit(null, u, frames * dmg_per_frame, rng, "激光")
-		if h != null:
-			out.append(h)
+		var points := frames * dmg_per_frame
+		var u: Unit = units_by_id.get(key, null)
+		if u != null:
+			var h := Damage.magic_hit(null, u, points, rng, "激光")
+			if h != null:
+				out.append(h)
+			continue
+		var pl: Placeable = pls_by_id.get(key, null)
+		if pl != null:
+			var h2 := Damage.magic_hit_placeable(pl, points, "激光")
+			if h2 != null:
+				out.append(h2)
 	return out

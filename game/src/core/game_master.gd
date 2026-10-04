@@ -518,21 +518,45 @@ func reaper_advance_cycle(u: Unit) -> int:
 	return cur
 
 
-## 6 格范围被动：**每个回合边界**结算一次（由 _gm_step 调）。
-## 返回受影响的单位（供日志/测试）。
-## 口径见 core/reaper.gd 的 `passive_targets`：中心距离 ≤ 6、不把 body_r=3 算进去、**不分敌我**。
-func reaper_passive_tick(units: Array[Unit]) -> Array[Unit]:
-	var out: Array[Unit] = []
+## ── Reaper 6 格范围被动（第 100 轮口径）────────────────────────────────────
+## 用户口径：「只对敌对角色触发；进入范围则触发进入队列，离开范围则出队列；
+##   每回合（**每游戏回合**，不是每 Reaper 回合）对队列所有人造伤」。
+##
+## **进出范围队列**照 Sentry 的成例（`sentries` / `add_sentry` / `clear_sentry_for`）：
+## 哨兵维护"谁在射界内"，这里维护"谁在 6 格内"—— 都是进出即变更、判定不重算。
+var reaper_in_range: Dictionary = {}          # 单位名 -> Unit
+
+
+## 每帧调用：**只更新"谁在 6 格内"这一个集合，不造伤**。
+## 工作量 = 遍历全部单位判一次浮点距离 O(n)（n ≤ 12），这是最便宜的一步；
+## "每回合对所有人造伤"则要额外对每个人跑一遍伤害公式（含命中判定）。
+## 造伤被推迟到回合边界、且**只对集合成员**做；集合为空时（保底机制很可能一直用不到）开销为 0。
+func reaper_range_update(units: Array[Unit]) -> void:
 	for r in units:
 		if not is_reaper(r) or not r.is_alive():
 			continue
-		for u in Reaper.passive_targets(r, units):
-			u.take_armor_damage(Reaper.PASSIVE_ARMOR_MILLI)
-			# 10 点力量伤害 = **魔法伤害**（没有物理伤害来源，不走物抗/闪避）。
-			# 10 点力量 = **魔法伤害**（只吃魔抗、无视护甲）。⚠ 第 3 个参数是**点**不是千分比，
-			# 所以是 PASSIVE_POWER_MILLI / 1000；rng 只占位（魔法伤害是确定性的）。
-			Damage.magic_hit(r, u, Reaper.PASSIVE_POWER_MILLI / 1000, null)
-			out.append(u)
+		var seen := {}
+		for u in Reaper.passive_targets(r, units):     # 已是"只敌对角色 + 6 格内"
+			seen[u.name] = true
+			reaper_in_range[u.name] = u                # 进入 -> 入队（已在队则刷新引用）
+		for k in reaper_in_range.keys():
+			if not seen.has(k):
+				reaper_in_range.erase(k)               # 离开 / 阵亡 / 离场 -> 出队
+
+
+## 每**游戏回合**（回合边界）造伤一次，**只遍历集合成员**。返回受影响的单位。
+func reaper_passive_tick(units: Array[Unit], rng: RngService = null) -> Array[Unit]:
+	reaper_range_update(units)                         # 边界上补一次，保证开局/刚进场也准
+	var out: Array[Unit] = []
+	var opts := Reaper.passive_opts(rng)
+	for u in reaper_in_range.values():
+		if u == null or not u.is_alive():              # 尸体兜底
+			continue
+		u.take_armor_damage(Reaper.PASSIVE_ARMOR_MILLI)     # 20 点护甲（打护甲池）
+		# 10 点力量 = **物理伤害**（第 100 轮）：先减护甲、再过物抗、**有命中判定**。
+		# 物理线"未命中"是固有行为 —— 按公式来，不为"保证扣血"绕开。
+		Combat.deal_to_unit(u, opts)
+		out.append(u)
 	return out
 
 

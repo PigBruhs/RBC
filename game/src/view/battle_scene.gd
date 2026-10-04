@@ -892,7 +892,7 @@ func _finish_turn() -> void:
 ## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _gm_step() -> void:
 	await ai.gm_step()
-	gm.reaper_passive_tick(units)        # Reaper 6 格范围被动（GM 负责，每个回合边界一次）
+	gm.reaper_passive_tick(units, rng)        # Reaper 6 格被动：每游戏回合（回合边界）造伤一次        # Reaper 6 格范围被动（GM 负责，每个回合边界一次）
 
 
 ## GameMaster 演出开关：锁住所有角色操作与 >> 按钮
@@ -1473,6 +1473,7 @@ func _damage_placeable(attacker: Unit, p: Placeable, silent: bool = false) -> vo
 # ══════════════════════════════════════════════════════════════════════════════
 
 func _process(delta: float) -> void:
+	gm.reaper_range_update(units)        # Reaper 6 格：每帧只更进出集合（不造伤）
 	air.dive_tick(delta)
 	air.tick_heli_fx(delta)
 	air.tick_loiter_steer(delta)      # 巡飞弹：Q/E 制导（改的是这一帧的方向）
@@ -2756,7 +2757,7 @@ func t_reaper_clear_laser_log() -> void:
 
 
 func t_reaper_passive_tick() -> Array[Unit]:
-	return gm.reaper_passive_tick(units)
+	return gm.reaper_passive_tick(units, rng)
 
 
 # ── Reaper 模型（reaper_model.gd）的测试门面 ─────────────────────────────────

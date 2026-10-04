@@ -1583,23 +1583,28 @@ func _initialize() -> void:
 	_chk(Passives.focus_stacks(gerald) == 0, "阵亡应清空蓄势层数")
 	print("    杰拉尔德阵亡：还要等 %d 个回合 ｜ 归位格 %s ｜ 可见=%s" % [
 		_s.gm.revive_countdown(gerald), gerald.home_cell, gerald.visual.visible])
-	_chk(_s.gm.revive_countdown(gerald) == GameMaster.HERO_REVIVE_TURNS,
-		"英雄阵亡后要等 %d 个回合" % GameMaster.HERO_REVIVE_TURNS)
+	_chk(_s.gm.revive_countdown(gerald) == Level.respawn_turns("Gerald"),
+		"英雄阵亡后要等 %d 个回合（场景元数据，第 100 轮）" % Level.respawn_turns("Gerald"))
 	_chk(not gerald.visual.visible, "阵亡期间模型收起")
 	_chk(Level.hero_cells(gerald.side).has(gerald.home_cell),
 		"归位格必须是关卡给的英雄格（两公主之间）")
-	for i in GameMaster.HERO_REVIVE_TURNS - 1:
+	# ⚠ 重生等待回合走**场景元数据**（第 100 轮：直升机 20、其余角色 15），
+	#   不要再写死 `GameMaster.HERO_REVIVE_TURNS`（那是全局缺省 10）——
+	#   写死的话"等到第 10 个回合"这句就永远等不到人，后面 5 条断言会连锁变红。
+	var wait_turns: int = Level.respawn_turns("Gerald")
+	for i in wait_turns - 1:
 		_s.gm.dispatch_turn_boundary()
 		for u in _s.gm.due_revives():
 			_s.t_revive_hero(u)
-	_chk(not gerald.is_alive(), "没到 10 个回合还不能复活")
+	_chk(not gerald.is_alive(), "没到 %d 个回合还不能复活" % wait_turns)
 	_s.gm.dispatch_turn_boundary()
 	for u in _s.gm.due_revives():
 		_s.t_revive_hero(u)
-	print("    10 个回合后：力量 %s/%s 护甲 %s/%s 位置 %s 可见=%s" % [
+	print("    %d 个回合后：力量 %s/%s 护甲 %s/%s 位置 %s 可见=%s" % [
+		wait_turns,
 		gerald.power_cur / 1000.0, gerald.power_max / 1000.0,
 		gerald.armor_cur / 1000.0, gerald.armor_max / 1000.0, gerald.cell, gerald.visual.visible])
-	_chk(gerald.is_alive(), "10 个回合后应满血复活")
+	_chk(gerald.is_alive(), "%d 个回合后应满血复活" % wait_turns)
 	_chk(gerald.power_cur == gerald.power_max and gerald.armor_cur == gerald.armor_max,
 		"复活是满血满护甲")
 	_chk(Level.hero_cells(gerald.side).has(gerald.cell), "复活位置在两公主之间的英雄格")

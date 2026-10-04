@@ -135,7 +135,9 @@ func fade_out() -> void:
 # 推进与结算
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 宿主每个物理帧调一次：把本帧覆盖到的角色累加进 frames_by_id。
+## 宿主每个物理帧调一次：把本帧覆盖到的目标累加进 frames_by_id。
+## **角色与沙盒元素共用这一张表**（实例 id 全局唯一）：第 100 轮用户口径 ——
+## 激光对沙盒元素也要有伤害，所以光路上的道具与角色一样按帧累计。
 ## `delta` 折算成 60Hz 的"帧"（Laser.FRAME_HZ），所以掉帧不会改变每秒伤害；
 ## 不足一帧的余量存在 `_carry` 里，下一帧继续攒（不会因为 1/120 秒的帧而永远攒不出 1 帧）。
 func tick(delta: float) -> void:
@@ -158,16 +160,31 @@ func tick(delta: float) -> void:
 			frames_by_id[key] = int(frames_by_id.get(key, 0)) + whole
 			acc -= float(whole)
 		_carry[key] = acc
+	# 沙盒元素（第 100 轮）：挡路的土堆与被穿过的木刺都算 —— 判据在 Laser.hits_placeable
+	var placeables: Array[Placeable] = _st.placeables
+	for pl in placeables:
+		if pl == null or not pl.is_alive():
+			continue
+		if not Laser.hits_placeable(a, b, pl):
+			continue
+		var pkey := pl.get_instance_id()
+		var pacc: float = float(_carry.get(pkey, 0.0)) + per
+		var pwhole := int(floor(pacc))
+		if pwhole > 0:
+			frames_by_id[pkey] = int(frames_by_id.get(pkey, 0)) + pwhole
+			pacc -= float(pwhole)
+		_carry[pkey] = pacc
 
 
 ## **统一结算一次**（同一束光只结算一次），然后把 alive = false。
-## 伤害 = 帧数 × 每帧伤害，走魔法伤害（只吃魔抗、无视护甲）。
+## 伤害 = 帧数 × 每帧伤害，走魔法伤害（只吃魔抗、无视护甲）；角色与沙盒元素都结算。
 func settle() -> Array[Damage.Hit]:
 	if not alive or _st == null:
 		return []
 	var units: Array[Unit] = _st.units
+	var placeables: Array[Placeable] = _st.placeables
 	var rng = _st.rng
-	var out: Array[Damage.Hit] = Laser.settle(units, frames_by_id, dmg_per_frame, rng)
+	var out: Array[Damage.Hit] = Laser.settle(units, frames_by_id, dmg_per_frame, rng, placeables)
 	alive = false
 	fade_out()
 	return out
@@ -239,10 +256,14 @@ class Runner extends RefCounted:
 		beams.clear()
 		return out
 
-	## 结算之后必须走的收尾：写日志 + 受伤被动钩子（含阵亡判定）
+	## 结算之后必须走的收尾：写日志 + 受伤被动钩子（角色）/ 道具收尾（沙盒元素）
 	func _report(hits: Array[Damage.Hit]) -> Array[Damage.Hit]:
 		for h in hits:
 			_st._log(h.text)
 			if h.unit != null:
 				_st._after_damage_to_unit(h.unit)
+			elif h.placeable != null:
+				# 第 100 轮：激光也会打沙盒元素（魔抗免疫的那三个走公式后是 0，
+				# 但日志照样写；真被打掉时这里负责碎片/摧毁表现）
+				_st._after_damage_to_placeable(h.placeable)
 		return hits

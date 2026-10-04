@@ -186,8 +186,19 @@ func _initialize() -> void:
 			p0 / 1000, near5.power_cur / 1000])
 		print("      7 格处：护甲 %d->%d，力量 %d->%d" % [a1 / 1000, far7.armor_cur / 1000,
 			p1 / 1000, far7.power_cur / 1000])
+		# 护甲段是**确定值**（直接打护甲池）：20 点
 		_chk(a0 - near5.armor_cur == Reaper.PASSIVE_ARMOR_MILLI, "5 格内应掉 20 点护甲")
-		_chk(p0 - near5.power_cur == Reaper.PASSIVE_POWER_MILLI, "5 格内应掉 10 点力量")
+		# ⚠ 力量段是**物理力量线**（第 100 轮用户口径「6格被动是物理伤害」）：
+		#   先减护甲、再过物抗、**有命中判定** —— 所以它合法地可能是 0（ROLL 未命中）。
+		#   断言"必扣 10"是错的（那是旧的魔法伤害口径）。
+		#   这里断言：掉血量 ∈ {0, 命中后的期望值}，且**绝不超过**名义值 10 点。
+		var pw_drop: int = p0 - near5.power_cur
+		var expect_hit: int = Rules.points_to_milli(int(floor(10.0 * (1000 - near5.pr) / 1000.0)))
+		_chk(pw_drop == 0 or pw_drop == expect_hit,
+			"5 格内力量掉 0（未命中）或 %d（命中后过物抗 %d‰），实际 %d" % [
+				expect_hit / 1000, near5.pr, pw_drop / 1000])
+		_chk(pw_drop <= Reaper.PASSIVE_POWER_POINTS * 1000,
+			"力量掉血不超过名义值 10 点（实际 %d）" % (pw_drop / 1000))
 		_chk(far7.armor_cur == a1, "7 格外不该掉护甲")
 		_chk(far7.power_cur == p1, "7 格外不该掉力量")
 

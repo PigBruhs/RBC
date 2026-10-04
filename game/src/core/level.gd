@@ -47,6 +47,9 @@ const DEFS := {
 			["萨尼铁塔 (E)", 1, 22, 25], ["俯冲轰炸直升机（不要问那么多） (E)", 1, 21, 25], ["老国王 (E)", 1, 45, 20],
 			["公主·左 (E)", 1, 42, 25], ["公主·右 (E)", 1, 42, 15],
 		],
+		# 重生回合（第 100 轮用户口径）：**直升机 20 回合，其余角色 15 回合**
+		"respawn_default": 15,
+		"respawn_turns": {"俯冲轰炸直升机（不要问那么多）": 20},
 		"river_rows": [],                       # 没有河
 		"bridge_cols": [],
 		# 胜负条件（各场景独立声明；这里是测试场）
@@ -80,8 +83,10 @@ const DEFS := {
 			["萨尼铁塔 (E)", 1, 8, 22], ["俯冲轰炸直升机（不要问那么多） (E)", 1, 12, 22], ["老国王 (E)", 1, 10, 40],
 			["公主·左 (E)", 1, 5, 37], ["公主·右 (E)", 1, 15, 37],
 		],
-		# 场景特有的重生回合数（缺省 = 10）
-		"respawn_turns": {"俯冲轰炸直升机（不要问那么多）": 25},
+		# 场景特有的重生回合数 + 统一口径（第 100 轮用户口径）：
+		# **所有场景**都是「直升机 20 回合、其余角色 15 回合」
+		"respawn_default": 15,
+		"respawn_turns": {"俯冲轰炸直升机（不要问那么多）": 20},
 		"river_rows": [19, 20, 21],             # 3 格宽、跨满 21 格
 		"bridge_cols": [[4, 5], [15, 16]],      # 左起 4 格 / 右起 4 格，各宽 2
 		# 胜负条件（各场景独立声明；这里与测试场同为"击毙对方老国王"）
@@ -131,7 +136,9 @@ const DEFS := {
 			["萨尼铁塔", 0, 9, 41], ["俯冲轰炸直升机（不要问那么多）", 0, 9, 42],
 			["Reaper", 1, 62, 40],
 		],
-		"respawn_turns": {},
+		# 重生回合（第 100 轮用户口径）：**直升机 20 回合，其余角色 15 回合**
+		"respawn_default": 15,
+		"respawn_turns": {"俯冲轰炸直升机（不要问那么多）": 20},
 		"river_rows": [],
 		"bridge_cols": [],
 		# 胜负条件：非对称（玩家老国王死 = 败；Reaper 死 = 胜）
@@ -300,14 +307,21 @@ static func respawn_cells(side: int, id: String = "") -> Array:
 	return hero_cells(side, id)
 
 
-## 这个角色在本场景要等几个回合重生（场景元数据；缺省 10）
+## 这个角色在本场景要等几个回合重生。
+## 优先看本场景的 `respawn_turns` 精确匹配（再退到基础名，敌方镜像 "… (E)" 靠它命中）；
+## 没有就退回本场景的 `respawn_default`；再没有才用全局缺省 `GameMaster.HERO_REVIVE_TURNS`。
+## 第 100 轮用户口径：**所有场景**统一为「直升机 20 回合、其余角色 15 回合」——
+## 所以每个场景都显式写了 `respawn_default: 15` + 直升机 20，不再靠全局那个 10。
 static func respawn_turns(unit_name: String, id: String = "") -> int:
-	var m: Dictionary = def(id).get("respawn_turns", {})
+	var d: Dictionary = def(id)
+	var m: Dictionary = d.get("respawn_turns", {})
 	if m.has(unit_name):
 		return int(m[unit_name])
 	var base := Unit.base_name(unit_name)          # 敌方镜像 "… (E)" 靠基础名命中
 	if m.has(base):
 		return int(m[base])
+	if d.has("respawn_default"):
+		return int(d["respawn_default"])
 	return GameMaster.HERO_REVIVE_TURNS
 
 

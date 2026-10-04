@@ -593,10 +593,16 @@ func _initialize() -> void:
 		"普攻射程 6-40（投掷手的两倍）", fails)
 	_expect(Unit.base_name(heli_name) == heli_name, "全角括号不会被当后缀剥掉", fails)
 	_expect(Unit.base_name(heli_name + " (E)") == heli_name, "敌方镜像用 (E) 后缀", fails)
-	# 场景元数据：竞技场 25 回合重生，测试场缺省 10
-	_expect(Level.respawn_turns(heli_name, "arena") == 25, "皇室竞技场：直升机重生要 25 个回合", fails)
-	_expect(Level.respawn_turns(heli_name, "field") == GameMaster.HERO_REVIVE_TURNS,
-		"测试场没有覆盖 -> 用缺省 10 回合", fails)
+	# 重生回合（第 100 轮用户口径）：**所有场景**统一为「直升机 20 回合、其余角色 15 回合」
+	for lv100 in ["field", "arena", "reaper"]:
+		_expect(Level.respawn_turns(heli_name, lv100) == 20,
+			"%s：直升机重生要 20 个回合（第 100 轮）" % lv100, fails)
+		_expect(Level.respawn_turns("Gerald", lv100) == 15,
+			"%s：其余角色 15 个回合（第 100 轮）" % lv100, fails)
+		_expect(Level.respawn_turns("萨尼铁塔", lv100) == 15,
+			"%s：萨尼铁塔也是 15 个回合" % lv100, fails)
+	_expect(Level.respawn_turns(heli_name + " (E)", "arena") == 20,
+		"敌方镜像也命中（base_name 兜底）", fails)
 	# 两个场景都要收录（本体 + 镜像）
 	for lv in ["field", "arena"]:
 		var names: Array = []
@@ -652,9 +658,7 @@ func _initialize() -> void:
 	print("    位置映射：t=0 -> %.2f 格 ｜ t=0.5 -> %.2f 格 ｜ t=1 -> %.2f 格" % [rd0, rdh, rd1])
 	_expect(absf(rd0) < 0.001 and absf(rd1 - 20.0) < 0.01, "火箭从起点飞到终点", fails)
 	_expect(rdh < 10.0, "前半段飞得更慢（变速生效）", fails)
-	# 场景元数据：镜像名靠 base_name 命中 25
-	_expect(Level.respawn_turns(heli_name + " (E)", "arena") == 25,
-		"敌方镜像的重生回合数也走场景元数据（base_name 兜底）", fails)
+	# 场景元数据：镜像名靠 base_name 命中（第 100 轮：直升机 20）
 
 	# ── AI 会用新技能（防回归：这两条曾被一次并发写入冲掉）──
 	print("\n── AI 技能选择 ──")

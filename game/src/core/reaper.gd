@@ -48,10 +48,11 @@ const FRAME_DMG_MILLI := 2000
 ## 攻击前预警：环变红多久（用户口径：2 秒）
 const WARN_SEC := 2.0
 
-## 范围被动：6 格内每回合 20 点护甲 + 10 点力量（GM 在回合边界执行）
+## 范围被动：6 格内每回合 20 点护甲 + 10 点**物理**力量（GM 在回合边界执行）
 const PASSIVE_RANGE := 6.0
 const PASSIVE_ARMOR_MILLI := 20000
 const PASSIVE_POWER_MILLI := 10000
+const PASSIVE_POWER_POINTS := 10          # Combat.opts 收的是**点**
 
 
 static func step_name(s: int) -> String:
@@ -232,8 +233,9 @@ static func slice_specs(reaper: Unit, target_pos: Vector2, steps: int, tgt: Unit
 ## 判定口径：**中心到中心的浮点距离 ≤ 6**（**不把 body_r=3 算进去**）。
 ## 理由：a) 与哨兵判界完全同一套口径（`GridMath.unit_pos` + 浮点距离），可预测、好解释；
 ##       b) 若把 3 算进去，实际生效半径会变成 9，玩家看到的"6 格"和实际不符（用户口径写的是 6 格）。
-## **不分敌我**：这是环境性范围伤害（"6 格内每回合"），连 Reaper 自己的召唤物一起打 ——
-## 理由：用户没写例外，而"环境伤害有友伤"与激光"会打到自己人"的既定口径一致；也让召唤流不能无脑堆怪。
+##
+## **第 100 轮口径改动**：**只对敌对角色触发** —— Reaper 是敌方，所以只打玩家方（含公主/老国王，
+## 它们也是玩家方角色、也是可被打的目标）。**不再伤自己的召唤物**（上一轮是"不分敌我"）。
 static func passive_targets(reaper: Unit, units: Array[Unit]) -> Array[Unit]:
 	var out: Array[Unit] = []
 	if reaper == null or not reaper.is_alive():
@@ -242,6 +244,16 @@ static func passive_targets(reaper: Unit, units: Array[Unit]) -> Array[Unit]:
 	for u in units:
 		if u == null or not u.is_alive() or u == reaper:
 			continue
+		if u.side == reaper.side:                 # 只打敌对角色（跳过自己的召唤物）
+			continue
 		if rp.distance_to(GridMath.unit_pos(u)) <= PASSIVE_RANGE:
 			out.append(u)
 	return out
+
+
+## 物理力量伤害的 opts（第 100 轮：6 格被动是**物理伤害**）。
+## 照 `Combat.opts` 的 shapes 走：先减护甲、再过物抗、**有命中判定**。
+## ⚠ 物理线可能"未命中"（`Rules.resolve` 的 ROLL 分支）—— 这是固有行为，不绕开公式。
+## 破甲给 0：这条被动只有力量那一段。
+static func passive_opts(rng: RngService) -> Dictionary:
+	return Combat.opts({"power": PASSIVE_POWER_POINTS, "armor_break": 0, "rng": rng})

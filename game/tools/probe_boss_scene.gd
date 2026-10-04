@@ -152,11 +152,14 @@ func _initialize() -> void:
 			_chk(pw_diff == Rules.points_to_milli(10),
 				"5 格处掉 10 点力量（%s: %d -> %d，差 %d）" % [mover.name, pw0 / 1000, mover.power_cur / 1000, pw_diff / 1000])
 		else:
-			# 没有理想目标（池子小 / 有魔抗）：只验"确实被扣了、且不超过名义值"
+			# 没有理想目标（池子小 / 有魔抗）：只验"没超上限"。
+			# ⚠ 第 100 轮：6 格被动的力量那半改成**物理力量线**（用户口径「6格被动是物理伤害」）→
+			#   先减护甲、再过物抗、**有命中判定**，所以**合法地可能是 0**（ROLL 未命中）。
+			#   所以这里**不能**断言 pw_diff > 0。护甲那半仍是确定值（直接打护甲池）。
 			_chk(ar_diff > 0 and ar_diff <= Rules.points_to_milli(20),
 				"5 格处掉了护甲且不超过 20 点（%s: 差 %d）" % [mover.name, ar_diff / 1000])
-			_chk(pw_diff > 0 and pw_diff <= Rules.points_to_milli(10),
-				"5 格处掉了力量且不超过 10 点（%s: 差 %d）" % [mover.name, pw_diff / 1000])
+			_chk(pw_diff >= 0 and pw_diff <= Rules.points_to_milli(10),
+				"5 格处力量掉 0（未命中）到 10 点之间（%s: 差 %d）" % [mover.name, pw_diff / 1000])
 		_place_at(mover, Vector2i(reaper.cell.x - 7, reaper.cell.y))
 		await process_frame
 		var d_far: float = GridMath.unit_pos(reaper).distance_to(GridMath.unit_pos(mover))

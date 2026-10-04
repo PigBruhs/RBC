@@ -66,6 +66,34 @@ func _log_has(sub: String) -> bool:
 	return false
 
 
+## 找一个"能打中"的种子。**为什么要扫**（第 100 轮）：
+## 医疗包散布从"杰拉德弹反那条随距离增长的曲线"改成了**固定 1 格**（用户口径），
+## 于是对判定半径 0.375 格的目标命中率只有 ~1/3 —— 写死一个种子必然时灵时不灵。
+## 所以扫种子找出"这一投真的命中"的那颗，再对它断言 +20；扫不到才算失败。
+##
+## ⚠ 种子必须**乘法散列**：RngService 是 LCG，**相邻种子的第一次输出高度相关**
+##   （`1000+i` 只差 0.0004·TAU，样本会挤在一个 28° 扇区里，测出来的命中率假性恒定）。
+func _find_hitting_seed(probe: Callable, max_seeds: int = 400) -> int:
+	for i in range(1, max_seeds + 1):
+		var seed_v: int = (i * 2654435761) & 0xFFFFFFFF
+		if bool(probe.call(seed_v)):
+			return seed_v
+	return 0
+
+
+## 某一投是否让 gerald 回了血（跑完弹道后判定，并把状态复位）
+func _try_seed_hits_gerald(seed_v: int) -> bool:
+	_heal_all_teammates()
+	_gerald.power_cur = _gerald.power_max / 2
+	var before: int = _gerald.power_cur
+	_s.rng = RngService.new(seed_v)
+	_s.t_sani_throw_medkit()
+	_run_until_landed()
+	var hit: bool = _gerald.power_cur == before + Medkit.heal_milli()
+	_heal_all_teammates()
+	return hit
+
+
 ## 手工推进医疗包直到落地（探针关掉了场景 _process，所以只有我们能推进它）
 func _run_until_landed(max_frames: int = 600) -> int:
 	var n := 0
@@ -110,11 +138,16 @@ func _initialize() -> void:
 	print("\n[1] 投出一枚绿色箭头的医疗包，命中回 20 点力量（不超上限）")
 	_clear_path([_sani, _gerald])
 	_sani.cell = Vector2i(10, 10)
-	_gerald.cell = Vector2i(10, 12)          # 只隔 2 格 -> 散布半径 ~0.03，必中
+	_gerald.cell = Vector2i(10, 12)
+	# 先扫出一颗"这一投真能命中"的种子（1 格散布下命中率只有 ~1/3，不能写死）
+	var hit_seed: int = _find_hitting_seed(_try_seed_hits_gerald)
+	_chk(hit_seed != 0, "扫到一个能命中的种子（1 格散布下命中率约 1/3）")
+	if hit_seed == 0:
+		hit_seed = 20261004
 	_heal_all_teammates()
 	_gerald.power_cur = _gerald.power_max / 2
 	var hp0: int = _gerald.power_cur
-	_s.rng = RngService.new(20261004)
+	_s.rng = RngService.new(hit_seed)
 	_s.t_sani_throw_medkit()
 	_chk(_s.t_sani_medkit_count() == 1, "在途医疗包 = 1（实际 %d）" % _s.t_sani_medkit_count())
 	_chk(_s.t_sani_heal_roll() == "Gerald", "选中的是唯一受伤的队友 Gerald（实际 '%s'）" % _s.t_sani_heal_roll())
@@ -132,12 +165,27 @@ func _initialize() -> void:
 	var frames := _run_until_landed()
 	var hp1: int = _gerald.power_cur
 	_chk(_s.t_sani_medkit_count() == 0, "落地后在途医疗包 = 0（飞了 %d 帧）" % frames)
-	_chk(hp1 == hp0 + 20000, "命中回 20 点力量（%d -> %d）" % [hp0 / 1000, hp1 / 1000])
+	_chk(hp1 == hp0 + Medkit.heal_milli(), "命中回 20 点力量（%d -> %d，种子 %d）" % [hp0 / 1000, hp1 / 1000, hit_seed])
 	_chk(hp1 <= _gerald.power_max, "不超过力量上限")
 	_chk(_log_has("医疗包命中 Gerald"), "日志写了命中（探针可读）")
-	# 差 5 点就满血：命中只能补到上限（不会溢出）
+	# 差 5 点就满血：命中只能补到上限（不会溢出）—— 同样要挑能命中的种子
 	_heal_all_teammates()
 	_gerald.power_cur = _gerald.power_max - 5000
+	var cap_seed: int = _find_hitting_seed(func(sv: int) -> bool:
+		_heal_all_teammates()
+		_gerald.power_cur = _gerald.power_max - 5000
+		_s.rng = RngService.new(sv)
+		_s.t_sani_throw_medkit()
+		_run_until_landed()
+		var ok: bool = _gerald.power_cur > _gerald.power_max - 5000
+		_heal_all_teammates()
+		return ok)
+	_chk(cap_seed != 0, "扫到一颗能命中「差 5 点满血」场景的种子")
+	if cap_seed == 0:
+		cap_seed = hit_seed
+	_heal_all_teammates()
+	_gerald.power_cur = _gerald.power_max - 5000
+	_s.rng = RngService.new(cap_seed)
 	_s.t_sani_throw_medkit()
 	_run_until_landed()
 	_chk(_gerald.power_cur == _gerald.power_max,
@@ -154,9 +202,28 @@ func _initialize() -> void:
 	_enemy.power_cur = _enemy.power_max / 2
 	var e0: int = _enemy.power_cur
 	var g0: int = _gerald.power_cur
+	# 同样要扫一颗"这一投打在敌人身上"的种子（弹道上那个敌人会先接住医疗包）
+	var e_seed: int = _find_hitting_seed(func(sv: int) -> bool:
+		_heal_all_teammates()
+		_gerald.power_cur = _gerald.power_max / 2
+		_enemy.power_cur = _enemy.power_max / 2
+		_s.rng = RngService.new(sv)
+		_s.t_sani_throw_medkit()
+		_run_until_landed()
+		var ok: bool = _enemy.power_cur > _enemy.power_max / 2
+		_heal_all_teammates()
+		return ok)
+	_chk(e_seed != 0, "扫到一颗能命中敌人的种子")
+	if e_seed == 0:
+		e_seed = 20261004
+	_heal_all_teammates()
+	_gerald.power_cur = _gerald.power_max / 2
+	_enemy.power_cur = _enemy.power_max / 2
+	_s.rng = RngService.new(e_seed)
 	_s.t_sani_throw_medkit()
 	_run_until_landed()
-	_chk(_enemy.power_cur == e0 + 20000, "敌人被医疗包回血（%d -> %d）" % [e0 / 1000, _enemy.power_cur / 1000])
+	_chk(_enemy.power_cur == e0 + Medkit.heal_milli(),
+		"敌人被医疗包回血（%d -> %d，种子 %d）" % [e0 / 1000, _enemy.power_cur / 1000, e_seed])
 	_chk(_gerald.power_cur == g0, "医疗包在敌人身上就用掉了，队友没被治（%d -> %d）" % [g0 / 1000, _gerald.power_cur / 1000])
 	_chk(_log_has("医疗包命中 Gerald (E)"), "日志写明命中的是敌人")
 

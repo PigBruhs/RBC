@@ -44,6 +44,14 @@ func _beam_drop(u: Unit, frames: int) -> int:
 	return before - u.power_cur
 
 
+## 场上按名字找一个沙盒道具（激光对道具造伤要用）
+func _find_placeable(nm: String) -> Placeable:
+	for pl in _s.placeables:
+		if pl != null and pl.name.begins_with(nm) and pl.is_alive():
+			return pl
+	return null
+
+
 func _initialize() -> void:
 	_s = (load("res://src/view/battle_scene.tscn") as PackedScene).instantiate()
 	root.add_child(_s)
@@ -212,8 +220,72 @@ func _initialize() -> void:
 	var f_s := int(_s.t_laser_frames(beam_s).get(gid, 0))
 	_chk(f_s == 10, "斜射（末端 = 目标身体中心）-> 10 帧命中（实际 %d）" % f_s)
 	_s.t_settle_all_lasers()
-	print("    ⚠ 口径提醒：Reaper.beam_spec 目前把 to.y 也写成 6.0（水平线）；")
-	print("      按三维判定它扫不到地面单位（身体只有 [0,1]）—— to.y 要落到目标身上（如 Targeting.aim_height(t)）。")
+
+	# ══════════════════════════════════════════════════════════════════════════
+	# 【第 100 轮】激光对沙盒元素也要造伤
+	#   用户口径：「激光对沙盒元素也要有伤害，当然我记得很久之前我给其中某个给了魔抗免疫，
+	#             那么是没伤害的（当然**你还是得进造伤公式转一圈**）」
+	#   ⚠ 核对后的事实：**木刺 / 土堆 / 巡飞弹发射器三个的魔抗都是 immune(1000)** ——
+	#     所以按现有数据激光对三者都是 0 伤害；但**公式路径必须存在且可验证**。
+	# ══════════════════════════════════════════════════════════════════════════
+	print("\n[数据事实] 三个沙盒元素的魔抗")
+	var pl_rows := {}
+	for d in UnitData.PLACEABLES:
+		pl_rows[String(d["name"])] = d
+	for pn in ["木刺", "土堆", "巡飞弹发射器"]:
+		var row: Dictionary = pl_rows.get(pn, {})
+		_chk(int(row.get("mr", -1)) == 1000,
+			"%s 的魔抗 = immune(1000)（实际 %d）" % [pn, int(row.get("mr", -1))])
+
+	print("\n[1] 免疫目标：**走一遍公式**、结果是 0（不是提前 return）")
+	var spike100: Placeable = _find_placeable("木刺")
+	if spike100 == null:
+		_chk(false, "场上找得到木刺")
+	else:
+		_chk(spike100.mr == 1000, "木刺 mr = 1000（实际 %d）" % spike100.mr)
+		var hp_before: int = spike100.power_cur
+		var h_imm: Damage.Hit = Damage.magic_hit_placeable(spike100, 40, "激光")
+		_chk(h_imm != null, "免疫目标也返回了 Hit（证明没有提前 return）")
+		if h_imm != null:
+			_chk(h_imm.result.power_dmg == 0, "伤害 = 0（实际 %d）" % h_imm.result.power_dmg)
+			_chk(h_imm.result.branch == Rules.Branch.NO_DAMAGE, "分支 = NO_DAMAGE")
+			_chk(h_imm.text.contains("0 点魔法伤害"),
+				"文案写明 0 点：%s" % h_imm.text.strip_edges())
+		_chk(spike100.power_cur == hp_before, "力量池没掉（%d -> %d）" % [hp_before / 1000, spike100.power_cur / 1000])
+
+	print("\n[2] 命中判定：光路上的道具命中、不在光路上的不命中")
+	# ⚠ 顺序要紧：**先做命中判定，再造伤** —— 木刺只有 40 点力量，一发 40 点的激光会把它打空，
+	#   而 `hits_placeable` / `magic_hit_placeable` 都要求 `is_alive()`，死了就什么都测不到
+	#   （第一版就是这么红的：mr=500 那条读到 0，命中判定也失败）。
+	if spike100 == null:
+		_chk(false, "场上找得到木刺")
+		_finish()
+		return
+	var sc := Vector2(float(spike100.cell.x) + 0.5, float(spike100.cell.y) + 0.5)
+	_chk(Laser.hits_placeable(Vector3(sc.x - 3.0, Laser.BASE_HEIGHT, sc.y),
+		Vector3(sc.x + 3.0, 0.5, sc.y), spike100), "光束穿过道具所在格 -> 命中")
+	_chk(not Laser.hits_placeable(Vector3(sc.x - 3.0, Laser.BASE_HEIGHT, sc.y + 5.0),
+		Vector3(sc.x + 3.0, 0.5, sc.y + 5.0), spike100), "光束离它 5 格远 -> 不命中")
+
+	print("\n[3] 按魔抗缩放（mr=500 -> 减半，池子先补满再量）")
+	var mr_save: int = spike100.mr
+	spike100.power_cur = spike100.power_max           # 补满，保证测的是"扣多少"而不是"打空了"
+	spike100.mr = 500
+	var hp0c: int = spike100.power_cur
+	Damage.magic_hit_placeable(spike100, 40, "激光")
+	_chk(hp0c - spike100.power_cur == Rules.points_to_milli(20),
+		"mr=500 时 40 点只掉 20（实际 %d）" % ((hp0c - spike100.power_cur) / 1000))
+
+	print("\n[4] mr=0 -> 40 点全额（放最后：这一发会把它打空）")
+	spike100.power_cur = spike100.power_max
+	spike100.mr = 0
+	var hp0b: int = spike100.power_cur
+	var h_ok: Damage.Hit = Damage.magic_hit_placeable(spike100, 40, "激光")
+	_chk(h_ok != null and h_ok.result.power_dmg == Rules.points_to_milli(40),
+		"mr=0 时 40 点全额生效（%d -> %d）" % [hp0b / 1000, spike100.power_cur / 1000])
+	spike100.mr = mr_save
+	spike100.power_cur = spike100.power_max           # 还原，别影响后面的用例
+	print("    （已还原 mr = %d，力量池补满）" % spike100.mr)
 
 	_finish()
 

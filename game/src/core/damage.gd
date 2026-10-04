@@ -239,9 +239,9 @@ static func magic_hit(attacker: Unit, target: Unit, points: int, rng, label: Str
 	if target == null or not target.is_alive() or points <= 0:
 		return null
 	var eff: int = clampi(target.mr, 0, 1000)
-	var pts: int = 0
-	if eff < 1000:
-		pts = int(floor(float(points) * float(1000 - eff) / 1000.0))
+	# ⚠ 公式**无条件走一遍**（用户口径第 100 轮：不能"看到魔抗免疫就 return" ——
+	#   免疫时 `points × 0 / 1000 = 0`，结果自然为 0，但这一步确实算过了）
+	var pts: int = int(floor(float(points) * float(1000 - eff) / 1000.0))
 	var h := Hit.new()
 	h.unit = target
 	h.pr_before = target.pr                  # 魔法伤害不看物抗，这里只是给日志留个上下文
@@ -257,6 +257,40 @@ static func magic_hit(attacker: Unit, target: Unit, points: int, rng, label: Str
 	h.died = not target.is_alive()
 	var tail := "（被魔抗完全抵消）" if eff >= 1000 else ""
 	h.text = "  ✦ %s命中 %s：%d 点魔法伤害（魔抗 %d‰）%s" % [label, target.name, pts, eff, tail]
+	return h
+
+
+## ── 魔法伤害（沙盒元素版，第 100 轮用户口径："激光对沙盒元素也要有伤害"）──────────
+## 与 `magic_hit` 同一套公式，只是目标换成 `Placeable`（它的池子 API 与 Unit 同级：
+## `mr` / `power_cur` / `power_max` / `take_power_damage` / `is_alive`，只用它已有的，没新造）。
+##
+## 为什么不走 `Combat.deal_to_placeable`：那条路吃的是**物抗 pr**（力量线），
+## 而魔法伤害的轴是**魔抗 mr** —— 用 pr 会算错轴。所以这里与 `magic_hit` 一样，
+## 照 `Combat.deal_to_unit` 的 `fixed_power` 分支自己折算（只过抗性、不碰护甲池）。
+##
+## ⚠ 用户口径："**你还是得进造伤公式转一圈**" —— 所以**不对"魔抗免疫"提前 return**：
+## 公式先算完（免疫 → 0），Hit 照样返回、日志照样写"0 点魔法伤害（魔抗 1000‰）"。
+static func magic_hit_placeable(pl: Placeable, points: int, label: String = "激光") -> Hit:
+	if pl == null or not pl.is_alive() or points <= 0:
+		return null
+	var eff: int = clampi(pl.mr, 0, 1000)
+	# 公式照走（免疫时结果为 0）
+	var pts: int = int(floor(float(points) * float(1000 - eff) / 1000.0))
+	var h := Hit.new()
+	h.placeable = pl
+	h.pr_before = pl.pr
+	h.ignore_res = 0.0
+	h.result = Combat.Result.new()
+	h.result.power_dmg = Rules.points_to_milli(maxi(0, pts))
+	h.result.hit = pts > 0
+	if eff >= 1000:
+		h.result.branch = Rules.Branch.NO_DAMAGE
+		h.result.note = "被魔抗完全抵消"
+	if pts > 0:
+		pl.take_power_damage(Rules.points_to_milli(pts))
+	h.died = not pl.is_alive()
+	var tail := "（被魔抗完全抵消）" if eff >= 1000 else ""
+	h.text = "  ✦ %s命中 [道具] %s：%d 点魔法伤害（魔抗 %d‰）%s" % [label, pl.name, pts, eff, tail]
 	return h
 
 
