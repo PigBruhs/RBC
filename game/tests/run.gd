@@ -1389,6 +1389,22 @@ func _initialize() -> void:
 	if not king_e98.is_empty():
 		_expect(king_e98.get("power", 0) == 150 and king_e98.get("pr", -1) == 400, "敌方老国王镜像同步（150 / 中抗）", fails)
 
+	# ── Reaper 战的 Boss 本体数据（用户口径：999 力 / 99 甲 / 圆柱 3×12）──
+	var rp_row: Dictionary = by_name.get("Reaper", {})
+	_expect(int(rp_row.get("power", 0)) == 999, "Reaper 力量(血量) = 999（实际 %d）" % int(rp_row.get("power", 0)), fails)
+	_expect(int(rp_row.get("armor", 0)) == 99, "Reaper 护甲 = 99（实际 %d）" % int(rp_row.get("armor", 0)), fails)
+	_expect(int(rp_row.get("pr", -1)) == 800, "Reaper 物抗 = 高(800)", fails)
+	_expect(int(rp_row.get("body_r", 0)) == 3 and int(rp_row.get("body_h", 0)) == 12,
+		"Reaper 碰撞圆柱 = 半径 3 / 高 12", fails)
+	# 召唤：**一次三个**，两个模板各三个（用户口径："召唤一次是三个人，有两个模板，每次随机一个模板"）
+	_expect(Reaper.SUMMON_KITS.size() == 2, "召唤模板有 2 个（实际 %d）" % Reaper.SUMMON_KITS.size(), fails)
+	for kit5 in Reaper.SUMMON_KITS:
+		var knames: Array = kit5.get("names", [])
+		_expect(knames.size() == 3, "模板「%s」一次召 3 个人（实际 %d）" % [kit5.get("id", "?"), knames.size()], fails)
+	_expect(Reaper.SUMMON_KITS[1]["names"] == ["萨尼铁塔", "萨尼铁塔", "萨尼铁塔"],
+		"模板 B = 三名萨尼铁塔", fails)
+	_expect(Reaper.SUMMON_KITS[0]["names"].size() == 3, "模板 A 也是三名（2 无技能近战 + 1 带哨兵远程）", fails)
+
 	# ── 场景胜负条件（第 97 轮：胜负条件写进场景元数据，各场景相互独立）──
 	print("\n── 场景胜负条件（第 97 轮）──")
 	var v_king := Unit.from_data(by_name["老国王"])

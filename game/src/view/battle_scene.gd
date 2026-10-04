@@ -2695,45 +2695,44 @@ func _reaper_do_summon(u: Unit) -> void:
 		_log("      + %s @ %s（阵营 %d）" % [s.name, str(s.cell), s.side])
 
 
-## 横扫 / 竖切共用：红环预警 2 秒 → 逐条发（打桩）/ 发真激光 → 蓝环
+## 横扫 / 竖切共用：红环预警 2 秒 → **一根动态光柱扫过去** → 蓝环
+##
+## 第 100 轮用户口径（否定了旧实现）：不再是"N 条离散静态光束"（合起来看是一大片静态区域），
+## 而是**同一根光柱连续存在整个动画**、落点每帧沿弧移动（左 → 目标 → 右）；
+## 光柱直径 0.5 格；伤害 = 动画期间被它碰到的帧数（有友伤，不做阵营过滤）。
+## 几何与参数化全在 `Reaper.beam_arc_spec` / `Reaper.arc_point`（core，可无头测）。
 func _reaper_laser_volley(u: Unit, slice: bool) -> void:
 	var tgt := Reaper.nearest_enemy(u, units)
 	if tgt == null:
 		_log("  ⚠ 场上没有敌人，Reaper 这一击落空")
 		return
-	var tp := GridMath.unit_pos(tgt)
 	_set_reaper_ring(u, Color.RED)
 	_log("  👁 环变红，预警 %.1f 秒（目标 %s）" % [Reaper.WARN_SEC, tgt.name])
 	await get_tree().create_timer(Reaper.WARN_SEC).timeout
-	var steps := 12
-	var secs: float = Reaper.SLICE_SEC if slice else Reaper.SWEEP_SEC
-	var specs: Array = Reaper.slice_specs(u, tp, steps, tgt) if slice \
-			else Reaper.sweep_specs(u, tp, steps, tgt)
-	_log("  👁 %s：%d 条光束，总 %.1f 秒" % ["竖切" if slice else "横扫", specs.size(), secs])
-	for sp in specs:
-		_spawn_reaper_laser(u, sp)
-		await get_tree().create_timer(secs / float(steps)).timeout
+	var spec := Reaper.beam_arc_spec(u, GridMath.unit_pos(tgt), tgt, slice)
+	_spawn_reaper_laser(u, spec)
+	_log("  👁 %s：**一根动态光柱**（R=%.1f 格，扫过弧长 %.1f 格，总 %.1f 秒）" % [
+		"竖切" if slice else "横扫", float(spec["r"]), float(spec["half_len"]) * 2.0, float(spec["sec"])])
+	# 等动画跑完（+0.35 秒收尾：最后一帧的碰撞与光束消失都看得见）
+	await get_tree().create_timer(float(spec["sec"]) + 0.35).timeout
 	_set_reaper_ring(u, REAPER_RING_IDLE)
 
 
-## 真激光（docs-keeper task-15 已交付）：直接调宿主门面 t_spawn_laser。
-## ⚠️ 打桩期的"自制命中判定 + 直接扣血"**已删除** —— 真激光会在 _process 里每帧累计、
-##    寿命到/被打断时统一结算；留着会**双倍结算**（docs-keeper 报过）。
-##    命中判定在 laser.gd（三维线段 vs 单位竖直圆柱，半径走 Targeting.unit_body_r）。
-##    `_reaper_laser_log` 只留给探针观测"本该发射什么"。
-func _spawn_reaper_laser(u: Unit, sp: Dictionary) -> void:
-	_reaper_laser_log.append(sp)
-	t_spawn_laser("reaper_laser", sp["from"], sp["to"])
+## 真激光（动态光柱）：一根 beam 活满整个动画，落点每帧由 LaserBeam 沿弧推进。
+##   · `life = 总时长` -> 动画一结束 `Runner.tick` 就**统一结算**（帧数 × 每帧伤害）
+##   · `_reaper_laser_log` 留给探针观测"这一击发了什么"（现在每击只有 1 条）
+func _spawn_reaper_laser(u: Unit, spec: Dictionary) -> LaserBeam:
+	_reaper_laser_log.append(spec)
+	var beam: LaserBeam = t_spawn_laser("reaper_laser", spec["from"], Reaper.arc_point(spec, 0.0))
+	if beam != null:
+		beam.arc_spec = spec
+		beam.arc_sec = float(spec["sec"])
+		beam.life = beam.arc_sec
+	return beam
 
 
-## 点到线段的距离（判定"这一格有没有被这条光束扫到"）
-static func _point_seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
-	var ab := b - a
-	var l2 := ab.length_squared()
-	if l2 < 0.0001:
-		return p.distance_to(a)
-	var t := clampf((p - a).dot(ab) / l2, 0.0, 1.0)
-	return p.distance_to(a + ab * t)
+## 注：旧的打桩辅助 `_point_seg_dist()`（"这一格有没有被这条光束扫到"）随打桩实现一起删除 ——
+## 现在命中判定只有一处：`Laser.hits_unit` / `Laser.hits_placeable`（core，可无头测）。
 
 
 # ── 测试/探针门面（t_*）：Reaper 相关 ──

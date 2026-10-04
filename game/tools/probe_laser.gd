@@ -68,7 +68,9 @@ func _initialize() -> void:
 
 	print("\n[0] 类型登记与契约常量")
 	_chk(Laser.BASE_HEIGHT == 6.0, "Laser.BASE_HEIGHT = 6.0（Reaper 蓝环离地 6 格）")
-	_chk(Laser.HIT_R == 0.5, "Laser.HIT_R = 0.5（光束判定半径）")
+	# 第 101 轮：用户口径「光柱理解为**直径 0.5 格**的圆柱」→ 判定半径 0.25（原 0.5）
+	_chk(absf(Laser.HIT_R - 0.25) < 0.0001 and absf(Laser.HIT_R * 2.0 - 0.5) < 0.0001,
+		"Laser.HIT_R = 0.25（= 直径 0.5 格，实际 %.3f）" % Laser.HIT_R)
 	_chk(Laser.dmg_per_frame_of("reaper_laser") == 2, "reaper_laser 的帧伤 = 2 点/帧")
 	_chk(Laser.dmg_per_frame_of("没登记的 id") == Laser.DEFAULT_DMG_PER_FRAME,
 		"未登记的 id 走缺省帧伤 = %d" % Laser.DEFAULT_DMG_PER_FRAME)

@@ -56,7 +56,10 @@ func _initialize() -> void:
 	var reaper: Unit = reapers[0] if not reapers.is_empty() else null
 	if reaper != null:
 		_chk(reaper.side == UnitData.Side.ENEMY, "Reaper 属于敌方阵营")
-		_chk(reaper.power_cur == Rules.points_to_milli(300), "Reaper 血量 300（实际 %d）" % (reaper.power_cur / 1000))
+		_chk(reaper.power_cur == Rules.points_to_milli(999),
+			"Reaper 血量 999（用户第 101 轮口径，实际 %d）" % (reaper.power_cur / 1000))
+		_chk(reaper.armor_cur == Rules.points_to_milli(99),
+			"Reaper 护甲 99（用户第 101 轮口径，实际 %d）" % (reaper.armor_cur / 1000))
 		_chk(reaper.body_r > 2.9 and reaper.body_height > 11.9,
 			"Reaper 碰撞圆柱 3 / 12（实际 %.2f / %.2f）" % [reaper.body_r, reaper.body_height])
 

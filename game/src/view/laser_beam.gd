@@ -44,6 +44,14 @@ var ignore_units: Array[Unit] = []
 var hit_tags: Array[String] = []
 var sentry_trigger: bool = false
 
+## ── 动态光柱（第 100 轮 · Reaper）────────────────────────────────────────────
+## 非空时 = 这根 beam 的**落点每帧沿弧移动**（规格来自 `Reaper.beam_arc_spec`）；
+## 空 = 静态光束（行为与第 98/99 轮完全一致）。
+## **整个动画只有这一根 beam**（用户否定了"N 条离散静态光束"那种一大片的效果）。
+var arc_spec: Dictionary = {}
+var arc_t: float = 0.0              # 动画进度 0..1
+var arc_sec: float = 0.0            # 总时长（秒）
+
 var _st = null                       # 宿主 battle_scene（动态类型，见文件头）
 var _node: MeshInstance3D = null      # 光束表现（细长圆柱）
 var _mat: StandardMaterial3D = null
@@ -135,7 +143,21 @@ func fade_out() -> void:
 # 推进与结算
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 宿主每个物理帧调一次：把本帧覆盖到的目标累加进 frames_by_id。
+## 动态光柱：按本帧进度重算落点（再按地形截断），并刷新表现。
+## 落点 = `Reaper.arc_point(arc_spec, t)`；t 与寿命同步推进（t 到 1 时 age 正好到 life，
+## 由 `Runner.tick` 统一结算）。每帧都做一遍 `clip_by_terrain` —— 既有口径不丢。
+func _advance_arc(delta: float) -> void:
+	if arc_spec.is_empty():
+		return
+	arc_t = clampf(arc_t + delta / maxf(arc_sec, 0.01), 0.0, 1.0)
+	var e := Reaper.arc_point(arc_spec, arc_t)
+	var flat := Laser.clip_by_terrain(Vector2(a.x, a.z), Vector2(e.x, e.z),
+		_st.placeables, _st.GW, _st.GH)
+	b = Vector3(flat.x, e.y, flat.y)
+	refresh()
+
+
+## 宿主每个物理帧调一次：**先把落点推进一帧**，再把本帧覆盖到的目标累加进 frames_by_id。
 ## **角色与沙盒元素共用这一张表**（实例 id 全局唯一）：第 100 轮用户口径 ——
 ## 激光对沙盒元素也要有伤害，所以光路上的道具与角色一样按帧累计。
 ## `delta` 折算成 60Hz 的"帧"（Laser.FRAME_HZ），所以掉帧不会改变每秒伤害；
@@ -144,6 +166,7 @@ func tick(delta: float) -> void:
 	if not alive or _st == null:
 		return
 	age += delta
+	_advance_arc(delta)          # ★ 动态光柱：本帧先把落点沿弧挪一点，再判命中
 	var per: float = delta * Laser.FRAME_HZ
 	if per <= 0.0:
 		return

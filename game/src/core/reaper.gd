@@ -28,17 +28,16 @@ extends RefCounted
 enum Step { SUMMON, SWEEP, SLICE }
 const CYCLE: Array = [Step.SUMMON, Step.SWEEP, Step.SLICE]
 
-## 激光基准高度（与 Laser.BASE_HEIGHT 对齐；激光模块由 mod-sentry-2 建设，这里是打桩期常量）
+## 激光基准高度（= 蓝环离地高度，与 Laser.BASE_HEIGHT 对齐）
 const BASE_HEIGHT := 6.0
 
-## 横扫：中轴 = "Reaper → 最近敌人"，从中轴一侧扫到另一侧（**从左往右** = 角度从 -half 递增到 +half）
-const SWEEP_HALF_DEG := 60.0
+## 横扫：中轴 = "Reaper → 最近敌人"，落点从左扫到右；总时长固定 2 秒。
+## ⚠️ 旧的 `SWEEP_HALF_DEG = 60`（固定半角）**已删除** —— 第 100 轮改成**固定弧长**：
+##    单侧弧长 ARC_HALF_LEN = 3.5 格（R=40 时左右合计 7 格），所以角度随距离变小。
 const SWEEP_SEC := 2.0
 
-## 竖切：中轴 = "Reaper → 最近敌人"的连线；**固定 ±30°**；"从前向后" = 从**远端扫回近端**
-## （定义：以中轴为 0°，光束先指向 +30°（靠外/远侧），匀速扫到 -30°（靠内/近侧）。
-##  选"远→近"是因为敌人多在远处，先扫到的应该是它所在的那一层，视觉上像一刀切下来。）
-const SLICE_HALF_DEG := 30.0
+## 竖切：中轴同上，落点沿中轴 **从远侧扫回近侧**；总时长固定 1.6 秒。
+## ⚠️ 旧的 `SLICE_HALF_DEG = 30`（固定半角）同样已删除（理由同上）。
 const SLICE_SEC := 1.6
 
 ## 帧率与帧伤（与 Laser 的 "reaper_laser" 约定一致：2 点/帧）
@@ -178,52 +177,113 @@ static func summon_cells(reaper: Unit, units: Array[Unit], count: int) -> Array[
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 激光（打桩：只算起终点与帧数，不真的发射）
+# 动态光柱（第 100 轮用户口径：**一根连续存在的光柱，落点沿弧移动**）
+#
+# 用户的否定意见："reaper 的激光完全不应该是现在这种**静态超级大范围**的，而是
+# **动态的一个光柱从一个角度向另一个角度移动**"。
+# 所以旧的 `sweep_specs()/slice_specs()`（N 条离散静态光束）**已删除**，换成：
+#   · **同一根 beam** 活满整个动画（`view/laser_beam.gd` 每帧按 `arc_point()` 重算落点）
+#   · 落点 E(t) 沿"以 P 为圆心、R = |P - T| 为半径的圆"的一小段移动：
+#     T 左边一点 → 经过 T → T 右边一点
+#   · 光柱直径 0.5 格（判定半径 `Laser.HIT_R = 0.25`）
+#   · **弧长固定**：以 R = 40 格为基准左右合计 ≈ 7 格 → 半角 = 3.5 / R（**角度随距离变小**）
+#   · 角速度恒定、总时长恒定（SWEEP_SEC / SLICE_SEC）
+#   · 伤害 = 动画期间被光柱碰到的帧数 × 每帧伤害（有友伤：不做阵营过滤）
+#
+# 切线平移 vs 真弧：**这里用真弧**（落点始终落在半径 R 的圆上，与用户"半径为 reaper
+# 到目标的距离的圆的一小部分"逐字一致，误差 0）。切线平移只是它在小角度下的近似
+# （R=40 时两者相差 < 0.1 格，R=4 时差 1.5 格，所以近距离真弧更稳）。
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 一条光束的规格：**斜的光束** —— 起点在 Reaper 蓝环（离地 BASE_HEIGHT=6），
-## **终点落在目标身上**（`Targeting.aim_height` = 身体高度，地面单位 ≈ 0.5）。
-## ⚠️ 这条是用户原话"从离地 6 格处发射，但末端是攻击目标"的直接落法；
-##    两端都放 y=6 会变成水平光束，而 laser.gd 的 `hits_unit` 是**三维**判定
-##    （线段 vs 单位竖直圆柱）→ 对地面单位 0 帧 0 伤害（docs-keeper 探针实测锁过）。
-static func beam_spec(reaper: Unit, target_pos: Vector2, angle_deg: float,
-		total_frames: float, total_angle_deg: float, tgt: Unit = null) -> Dictionary:
-	var from := Vector3(GridMath.unit_pos(reaper).x, BASE_HEIGHT, GridMath.unit_pos(reaper).y)
-	var dir := target_pos - GridMath.unit_pos(reaper)
-	var base := dir.angle()
-	var a := base + deg_to_rad(angle_deg)
-	# 终点：沿该角度走到目标距离再往外一点（"末端是攻击目标"）
-	var reach: float = maxf(dir.length(), 1.0)
-	var to2 := GridMath.unit_pos(reaper) + Vector2(cos(a), sin(a)) * reach
+## 落点单侧扫过的**弧长**（格）：R = 40 时左右合计 2×3.5 = 7 格（用户建议值）
+const ARC_HALF_LEN := 3.5
+## 近距离保护①：单侧半角上限。R 小的时候 3.5/R 会爆炸（R=1 时 200°），
+## 所以角度封顶 30° —— 近距离扫过的弧长自然变短（R=4 时约 4.2 格），但不会甩一整圈。
+const ARC_MAX_HALF_DEG := 30.0
+## 近距离保护②：R 小于它就直接把落点钉在 T 上（不扫）—— 贴脸时"扫过 7 格"没有意义。
+const ARC_MIN_R := 1.0
+
+
+## 一次动态光柱的规格（**一根 beam** 用它活满整个动画）。
+##   mode = "arc"    -> 横扫：落点在圆上按角度扫（左 → 右）
+##   mode = "radial" -> 竖切：落点沿中轴平移（**远侧 → 近侧**，即从 T 外侧扫回 T 内侧）
+## 返回的字段里 `from` / `to` / `dist` / `frames` / `dmg_milli` / `angle_deg` 是给探针看的
+## 兼容字段（`to` = t=0 的落点）；弧形参数在 `center / pivot / axis / r / half_angle / half_len / sec`。
+static func beam_arc_spec(reaper: Unit, target_pos: Vector2, tgt: Unit = null,
+		slice: bool = false) -> Dictionary:
+	var p := GridMath.unit_pos(reaper)
+	var axis := target_pos - p
+	var r := axis.length()
+	if axis.length() < 0.0001:
+		axis = Vector2(0.0, 1.0)
+	else:
+		axis = axis.normalized()
+	var sec: float = SLICE_SEC if slice else SWEEP_SEC
+	# 半角：固定弧长 3.5 格 / R，再被 ARC_MAX_HALF_DEG 封顶（近距离保护①）
+	var half_angle: float = ARC_HALF_LEN / maxf(r, ARC_MIN_R)
+	half_angle = minf(half_angle, deg_to_rad(ARC_MAX_HALF_DEG))
+	if r < ARC_MIN_R:
+		half_angle = 0.0                     # 近距离保护②：贴脸 -> 落点钉在 T 上
 	var end_y: float = BASE_HEIGHT
 	if tgt != null:
-		end_y = Targeting.aim_height(tgt)          # 落到目标身体上（斜射）
-	var to := Vector3(to2.x, end_y, to2.y)
-	var dist := to2.distance_to(GridMath.unit_pos(reaper))
-	return {"from": from, "to": to, "frames": int(total_frames), "angle_deg": angle_deg,
-			"dist": dist, "dmg_milli": cell_damage_milli(dist, total_frames, total_angle_deg)}
+		end_y = Targeting.aim_height(tgt)     # 末端落在目标身上（斜射，不是水平线）
+	var spec := {
+		"mode": "radial" if slice else "arc",
+		"from": Vector3(p.x, BASE_HEIGHT, p.y),
+		"center": target_pos,                # 落点所在圆/中轴的参考点 T
+		"pivot": p,                          # 圆心 P.xz
+		"axis": axis,                        # 单位：P -> T
+		"tangent": Vector2(-axis.y, axis.x), # 单位：中轴的左手法线（横扫的"左→右"方向）
+		"r": r,
+		"half_angle": half_angle,
+		"half_len": r * half_angle,          # 单侧弧长（格）—— 日志/探针用
+		"sec": sec,
+		"frames": int(sec * FRAME_HZ),
+		"dist": r,
+		"angle_deg": rad_to_deg(half_angle),
+		"dmg_milli": cell_damage_milli(maxf(r, 1.0), sec * FRAME_HZ, rad_to_deg(half_angle) * 2.0),
+		"slice": slice,
+		"target_name": tgt.name if tgt != null else "",
+		"end_y": end_y,
+	}
+	spec["to"] = arc_point(spec, 0.0)
+	return spec
 
 
-## 横扫：中轴 = Reaper→最近敌人，从 -half 递增到 +half（从左往右），匀速
-static func sweep_specs(reaper: Unit, target_pos: Vector2, steps: int, tgt: Unit = null) -> Array:
-	var out := []
-	var total_frames := SWEEP_SEC * FRAME_HZ
-	for i in steps:
-		var t := float(i) / float(maxi(steps - 1, 1))
-		var ang := lerpf(-SWEEP_HALF_DEG, SWEEP_HALF_DEG, t)
-		out.append(beam_spec(reaper, target_pos, ang, total_frames, SWEEP_HALF_DEG * 2.0, tgt))
-	return out
+## 动画进度 t ∈ [0,1] 时的落点 E(t)（3D；y 恒为 `end_y` = 目标身体高度）。
+## · arc    ：**以 P（Reaper 蓝环）为圆心、R 为半径**的圆上取角度
+##            `angle(T-P) + lerp(-half, +half, t)` —— 角速度恒定；
+##            t = 0.5 时角度正好是中轴 -> 落点正好落在 T 上（左 → 目标 → 右）
+## · radial ：沿中轴的偏移 u = lerp(+half_len, -half_len, t) —— **远侧 → 近侧**，匀速
+static func arc_point(spec: Dictionary, t: float) -> Vector3:
+	var k := clampf(t, 0.0, 1.0)
+	var center: Vector2 = spec["center"]      # T（中轴上的参考点；t=0.5 时落点在这）
+	var pivot: Vector2 = spec["pivot"]        # P.xz（圆弧的圆心）
+	var axis: Vector2 = spec["axis"]
+	var r: float = float(spec["r"])
+	var half: float = float(spec["half_angle"])
+	var pos := center
+	if String(spec.get("mode", "arc")) == "radial":
+		var u := lerpf(float(spec["half_len"]), -float(spec["half_len"]), k)
+		pos = center + axis * u
+	else:
+		var ang := axis.angle() + lerpf(-half, half, k)
+		pos = pivot + Vector2(cos(ang), sin(ang)) * r
+	return Vector3(pos.x, float(spec["end_y"]), pos.y)
 
 
-## 竖切：中轴 = Reaper→最近敌人连线；固定 ±30°；**从远侧(+half)扫回近侧(-half)**
-static func slice_specs(reaper: Unit, target_pos: Vector2, steps: int, tgt: Unit = null) -> Array:
-	var out := []
-	var total_frames := SLICE_SEC * FRAME_HZ
-	for i in steps:
-		var t := float(i) / float(maxi(steps - 1, 1))
-		var ang := lerpf(SLICE_HALF_DEG, -SLICE_HALF_DEG, t)      # 远 → 近
-		out.append(beam_spec(reaper, target_pos, ang, total_frames, SLICE_HALF_DEG * 2.0, tgt))
-	return out
+## 落点在 t 时刻相对中轴的偏移量（格）—— 探针核对"扫过多少格"用
+static func arc_offset(spec: Dictionary, t: float) -> float:
+	var k := clampf(t, 0.0, 1.0)
+	if String(spec.get("mode", "arc")) == "radial":
+		return lerpf(float(spec["half_len"]), -float(spec["half_len"]), k)
+	return float(spec["half_angle"]) * (2.0 * k - 1.0) * float(spec["r"])
+
+
+## 注：旧的 `sweep_specs()` / `slice_specs()`（N 条离散静态光束）**已删除** ——
+## 用户明确否定了那种"静态超级大范围"的效果，改成上面的 `beam_arc_spec()` + `arc_point()`。
+## 上方 `frames_at()` / `cell_damage_milli()` 是遗留纯函数（动画不再用它们算伤害），
+## 保留只因为 `probe_reaper_ai.gd` 仍在断言 `d6 > d12`（tools 不在本轮写区）。
 
 
 # ══════════════════════════════════════════════════════════════════════════════
