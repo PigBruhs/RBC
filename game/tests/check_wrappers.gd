@@ -84,6 +84,79 @@ const MODULES := [
 ## 这些函数名不参与检查（例如宿主自己也有实现、不是纯转发的）
 const SKIP := ["_init", "_ready", "_process"]
 
+## Node / Object 的内建方法与方法族 —— 模块里 `_st.get_tree()` 这类不算"宿主成员"。
+## 只有无法从宿主声明里查到的**内建**才列在这里；任何 `_st._foo` 都必须能在宿主声明里找到。
+const NODE_BUILTINS := [
+	"add_child", "remove_child", "create_tween", "get_tree", "get_viewport",
+	"get_node", "get_node_or_null", "has_node", "get_parent", "get_children",
+	"push_error", "push_warning", "print", "is_instance_valid", "queue_free",
+	"set_process", "call_deferred", "emit_signal", "connect", "duplicate", "add_to_group",
+]
+
+
+## 收集宿主声明的成员名（func / static func / var / const / signal / enum）
+static func _host_members(host_path: String) -> Dictionary:
+	var out := {}
+	var f := FileAccess.open(host_path, FileAccess.READ)
+	if f == null:
+		return out
+	var re := RegEx.create_from_string(
+		"^(?:static\\s+)?func\\s+([A-Za-z_][A-Za-z0-9_]*)|^(?:var|const|signal)\\s+([A-Za-z_][A-Za-z0-9_]*)|^enum\\s+([A-Za-z_][A-Za-z0-9_]*)")
+	for raw in f.get_as_text().replace("\r\n", "\n").split("\n"):
+		var r := re.search(String(raw))
+		if r == null:
+			continue
+		var nm := r.get_string(1)
+		if nm == "":
+			nm = r.get_string(2)
+		if nm == "":
+			nm = r.get_string(3)      # enum：模块里写成 `_st.Phase.IDLE`
+		if nm != "":
+			out[nm] = true
+	return out
+
+
+## 【闭世界校验】每个模块里 `_st.<name>` 引用的宿主成员都必须真实存在。
+##
+## 为什么必须有这条：`_st` 是**动态类型**，写错的 `_st._foo(...)` **编译期查不出来**，
+## 只有执行到那一行才报 `Nonexistent function`。第 97 轮就因此漏了 2 处：
+##   · `_raise_pylon_at`（随 SkillRunner 搬走）→ 症状："轨道空爆标记球被拦截时游戏崩溃"
+##   · `ui_open_skill_menu`（随 ActionMenu 搬走）
+## 两处都是"搬函数时把跨模块调用指向了已经不存在的宿主成员"。
+func _check_host_refs(modules: Array, fails: Array[String], host_override: String) -> String:
+	if host_override != "":
+		return "宿主引用校验：（命令行覆盖模式，已跳过）"
+	var checked := 0
+	var hosts := {}
+	for e in modules:
+		hosts[String(e["host"])] = true
+	for host_path in hosts.keys():
+		var members := _host_members(String(host_path))
+		if members.is_empty():
+			continue
+		for e in modules:
+			if String(e["host"]) != String(host_path):
+				continue
+			var mod_path := String(e["mod"])
+			var f := FileAccess.open(mod_path, FileAccess.READ)
+			if f == null:
+				continue
+			var lines := f.get_as_text().replace("\r\n", "\n").split("\n")
+			var re := RegEx.create_from_string("_st\\.([A-Za-z_][A-Za-z0-9_]*)")
+			for i in range(lines.size()):
+				var line := String(lines[i])
+				if line.strip_edges().begins_with("#"):
+					continue          # 注释里的示例不算
+				for m in re.search_all(line):
+					var nm := m.get_string(1)
+					checked += 1
+					if members.has(nm) or NODE_BUILTINS.has(nm):
+						continue
+					fails.append("%s:%d 引用了宿主不存在的成员 `_st.%s`（搬函数时漏改指向，运行时才报 Nonexistent function）" % [
+						mod_path.get_file(), i + 1, nm])
+					print("    ✗ %s:%d 宿主没有 `_st.%s`" % [mod_path.get_file(), i + 1, nm])
+	return "宿主引用校验：检查 %d 处 `_st.<name>` 引用" % checked
+
 ## 提示（不影响结论）与失败（拦下来）的分界：
 ##   fails  —— 包装与模块**不一致**：协程性不符、协程包装缺 await、**丢了返回值**、覆盖漂移。
 ##             这几类都是"语义已经变了但测试还是绿的"，必须拦。
@@ -255,6 +328,7 @@ func _initialize() -> void:
 		modules = [entry]
 	print("═══ 包装层一致性检查（协程性必须与模块函数一致）═══")
 	var coverage_line := _check_coverage(modules, fails, host_override)
+	var refs_line := _check_host_refs(modules, fails, host_override)
 
 	for entry in modules:
 		var mod_path: String = entry["mod"]
@@ -375,6 +449,7 @@ func _initialize() -> void:
 	print("\n── 汇总 ──")
 	print("检查了 %d 个包装" % checked)
 	print(coverage_line)
+	print(refs_line)
 	if not notes.is_empty():
 		print("提示（不影响结论）：")
 		for n in notes:

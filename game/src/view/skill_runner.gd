@@ -33,7 +33,8 @@ func menu_skill() -> void:
 		return
 	# 多技能：先把「行动」菜单收起来，再弹技能列表（否则两层菜单会叠在一起）
 	_st._hide_action_menu()
-	_st.ui_open_skill_menu(ids)
+	# ui_open_skill_menu 随 ActionMenu 一起搬走了 —— 跨模块调用要指向新家
+	_st.action_menu.ui_open_skill_menu(ids)
 
 
 

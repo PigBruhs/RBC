@@ -63,7 +63,10 @@ func fire_skill_at(sh: Ordnance.Shot, fpos: Vector2) -> void:
 	_st._orbital_marks.append(fpos)
 	# 光柱挂在这一发身上：允许多个在途打击同时存在（用户要求）
 	var pend: GameMaster.Pending = _st.gm.pending[_st.gm.pending.size() - 1]
-	pend.pylon = _st._raise_pylon_at(fpos)
+	# 光柱归技能模块（它原本在 battle_scene 里，第 97 轮随 SkillRunner 一起搬走）——
+	# 跨模块调用必须指向**新家**，不能还调宿主上那个已经搬走的 `_raise_pylon_at`
+	# （否则运行时报 Nonexistent function，而编译期查不出来）。
+	pend.pylon = _st.skills_mod.raise_pylon_at(fpos)
 	_st._log("%s 使用【%s】：标记落点 (%d, %d)，剩余 %d" %
 		[caster.name, d["name"], cell.x, cell.y, caster.energy_points()])
 	_st._log("  ⏳ 轨道火力已锁定：%d 个回合后落下 %d 发（GameMaster 计时：%s）" % [

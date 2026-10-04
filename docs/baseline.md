@@ -13,6 +13,7 @@
 | 3 | `tools/probe_arena.gd` | 竞技场探针 | ✅ 失败 0 项（含复活点落位、枪榴弹被击落整发消失） |
 | 4 | `tools/probe_r89.gd` | 火箭探针 | ✅ 3 项检查，失败 0 项 |
 | 5 | `tools/probe_r92.gd` | 制导探针 | ✅ 11 项检查，失败 0 项 |
+| 5b | `tools/probe_marker.gd` | **轨道空爆标记探针** | ✅ 9 项检查，失败 0 项（专测"标记球落地 → 立光柱"；**这条链路原先没有断言，带着一个崩溃进了第 97 轮收口版本**） |
 | 6 | `tools/sim_ai.gd --games=2 --seed=1` | AI 自动演算 | ✅ 2/2 局打完（第 1 局敌方胜 / 边界 89 ｜ 第 2 局玩家方胜 / 边界 72） |
 | 7 | `python tools/make_unit_data.py` | 数据流水线 | ✅ **幂等**：重跑后 `game/src/core/unit_data.gd` 哈希不变 |
 
@@ -56,6 +57,8 @@ $exe = "tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 & $exe --headless --path game --script res://tools/probe_r89.gd --quit-after 200000
 # 5 制导探针
 & $exe --headless --path game --script res://tools/probe_r92.gd --quit-after 200000
+# 5b 轨道空爆标记（标记球落地 -> 立光柱）
+& $exe --headless --path game --script res://tools/probe_marker.gd --quit-after 60000
 # 6 AI 演算（慢，收尾用）
 & $exe --headless --path game --script res://tools/sim_ai.gd --quit-after 600000 -- --games=2 --seed=1
 # 7 重新生成数据
@@ -166,8 +169,21 @@ $exe = "tools\godot\Godot_v4.7.2-stable_win64_console.exe"
    **不要**用 `git show <rev>:<path> > file` 再对文件取哈希（PowerShell 重定向会 LF→CRLF、可能加 BOM，必然误报）。
 4. 实验要**单因子**：一次只改一个变量。改两个因子就无法归因 —— 这一轮因此得出过错误结论，事后撤回。
 
-### 新增 `class_name` 之后
+**宿主引用校验（闭世界）**：模块里每一处 `_st.<name>` 都必须能在宿主的
+`func` / `var` / `const` / `signal` / `enum` 声明里找到（Node 内建方法在白名单里）。
+**为什么必须有这条**：`_st` 是**动态类型**，写错的 `_st._foo(...)` **编译期查不出来**，
+只有执行到那一行才报 `Nonexistent function`。第 97 轮就因此漏了两处 ——
+`_raise_pylon_at`（随 SkillRunner 搬走）与 `ui_open_skill_menu`（随 ActionMenu 搬走），
+前者在正常游玩时会崩（"轨道空爆标记球被拦截"）。现在这条校验覆盖 **1000+ 处引用**。
 
+**模块之间的调用无法静态校验**（`_st.skills_mod.xxx` 这类），只能靠行为探针兜底 ——
+所以新增了 `tools/probe_marker.gd`（9 项）专测"标记球落地 → 立光柱"这条曾经没被断言的链路。
+
+### 门禁 3：功能探针（`tools/probe_*.gd`）
+
+```powershell
+& $exe --headless --path game --script res://tools/probe_marker.gd --quit-after 60000
+```n
 `.godot/global_script_class_cache.cfg` 需要重建，否则 `--script` 直跑会报 `Identifier "Xxx" not declared`：
 
 ```powershell
