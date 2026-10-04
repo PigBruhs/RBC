@@ -1064,6 +1064,87 @@ func _initialize() -> void:
 	var rk_plain := Ordnance.make_rocket(hb, Vector3(5.5, 2.0, 5.5), Vector2(9.5, 5.5), true)
 	_expect(rk_plain.shot.opts.is_empty(), "不给 rng 的旧调用方式仍然可用（空 opts）", fails)
 
+	# ── 巡飞弹 + 发射器（第 90 轮）──
+	print("\n── 巡飞弹（第 90 轮）──")
+	_expect(absf(Loiter.SPEED - 3.0) < 0.001 and absf(Loiter.HEIGHT - 1.5) < 0.001
+		and absf(Loiter.MAX_DIST - 32.0) < 0.001 and absf(Loiter.BODY_R - 0.5) < 0.001
+		and absf(Loiter.BLAST_R - 1.0) < 0.001,
+		"巡飞弹：速度 3 格/秒、定高 1.5、飞 32 格、直径 1 格的球、造伤直径 2 格", fails)
+	_expect(absf(Loiter.POWER - 40.0) < 0.001 and absf(Loiter.BREAK - 40.0) < 0.001
+		and absf(Loiter.IGNORE_RES - 0.5) < 0.001,
+		"巡飞弹伤害 = 40 破甲 + 40 力量（炮击：无视 50% 物抗）", fails)
+	_expect(Ballistics.is_shell_class(Projectile.KIND_LOITER)
+		and Ballistics.intercept_result(Projectile.KIND_LOITER) == "burst"
+		and Ballistics.body_impact(Projectile.KIND_LOITER) == "land",
+		"巡飞弹是炮弹类：可被箭击落、惊动哨兵、撞人=在命中处引爆", fails)
+	var lc := Unit.from_data(by_name[heli_name])
+	var lp := Ordnance.make_loiter(-1, "巡飞弹发射器", Vector2(5.5, 5.5), 0.0, RngService.new(9))
+	_expect(lp != null and lp.steering and absf(lp.hit_r - 0.5) < 0.001,
+		"巡飞弹：可制导 + 碰撞半径 0.5（直径一格）", fails)
+	lp.step(1.0)
+	_expect(absf(lp.pos().x - 8.5) < 0.001 and absf(lp.pos().y - 5.5) < 0.001
+		and absf(lp.height() - 1.5) < 0.001,
+		"朝 +x 飞 1 秒 -> 水平走 3 格、高度恒 1.5（不受重力）", fails)
+	_expect(not lp.finished(), "才飞 3 格，不该到引爆距离", fails)
+	lp.flown = Loiter.MAX_DIST - 0.01
+	lp.step(0.5)
+	_expect(lp.finished(), "飞满 %d 格就 finished（自动引爆）" % int(Loiter.MAX_DIST), fails)
+	_expect(lp.shot != null and not lp.shot.opts.is_empty()
+		and int(lp.shot.opts["power"]) == int(Loiter.POWER * 1000),
+		"发射单里带着战斗部参数（40 力量快照）", fails)
+	# 近炸引信 / 造伤范围用的是同一个球
+	var lu := Unit.from_data(by_name["Gerald"])
+	lu.cell = Vector2i(5, 5)
+	lu.hover = 0.0
+	lu.body_y = -1.0
+	_expect(Loiter.ball_touches_unit(Vector3(5.5, 1.5, 5.5), lu),
+		"正下方 1.5 格高度的球够得到地面角色（dy 0.5 < 半径 1）", fails)
+	var lu2 := Unit.from_data(by_name["Gerald"])
+	lu2.cell = Vector2i(7, 5)
+	_expect(not Loiter.ball_touches_unit(Vector3(5.5, 1.5, 5.5), lu2),
+		"隔壁 2 格够不到（直径两格的球）", fails)
+	# ── 制导手感（Q/E）──
+	print("\n── 巡飞弹制导（Q/E）──")
+	_expect(absf(Loiter.want_rate(0.0) - Loiter.TURN_MIN) < 0.001,
+		"刚按下：角速度 = 下限 %.0f°/秒" % Loiter.TURN_MIN, fails)
+	_expect(absf(Loiter.want_rate(1.0) - (Loiter.TURN_MIN + Loiter.TURN_RAMP)) < 0.001,
+		"按住 1 秒：角速度涨到 %.0f°/秒（越按越快）" % (Loiter.TURN_MIN + Loiter.TURN_RAMP), fails)
+	_expect(absf(Loiter.want_rate(100.0) - Loiter.TURN_MAX) < 0.001,
+		"按住很久：封顶 %.0f°/秒（有上限）" % Loiter.TURN_MAX, fails)
+	var w1 := Loiter.step_rate(0.0, 100.0, 0.1)
+	_expect(w1 > 0.0 and w1 < 100.0, "惯性：角速度是渐进逼近，不是瞬间到位（0.1s -> %.1f）" % w1, fails)
+	var w_run := 0.0
+	for i in 60:
+		w_run = Loiter.step_rate(w_run, Loiter.want_rate(float(i) / 60.0), 1.0 / 60.0)
+	_expect(w_run > Loiter.TURN_MIN * 2.0 and w_run <= Loiter.want_rate(1.0),
+		"按住 1 秒：角速度从下限爬到 %.1f°/秒（目标 %.0f，带惯性滞后）" % [
+			w_run, Loiter.want_rate(1.0)], fails)
+	var w_stop := Loiter.step_rate(Loiter.TURN_MAX, 0.0, 0.2)
+	_expect(w_stop > 0.0 and w_stop < Loiter.TURN_MAX, "松手：带着惯性滑回 0（不是立刻停）", fails)
+	# 屏幕平面上的转向：yaw 0 时屏幕右 = +x、屏幕下 = +z
+	var ax := Loiter.screen_axes(0.0)
+	_expect(absf(ax[0].x - 1.0) < 0.001 and absf(ax[0].y) < 0.001
+		and absf(ax[1].y - 1.0) < 0.001,
+		"相机 yaw 0：屏幕右 = +x、屏幕下 = +z", fails)
+	var h_r := Loiter.steer(0.0, ax[0], ax[1], 90.0, 1.0)
+	var h_l := Loiter.steer(0.0, ax[0], ax[1], -90.0, 1.0)
+	_expect(absf(h_r - PI * 0.5) < 0.001 and absf(h_l + PI * 0.5) < 0.001,
+		"朝屏幕右飞：+90° 转头 = 屏幕顺时针（右转），-90° = 左转", fails)
+	# 发射方向 = 目标方向 ±45°
+	var cone_ok := true
+	for i in 200:
+		var hh := Loiter.launch_heading(Vector2(0, 0), Vector2(10, 0), RngService.new(i + 1))
+		if absf(rad_to_deg(hh)) > Loiter.CONE_DEG + 0.001:
+			cone_ok = false
+	_expect(cone_ok, "初始方向永远在目标方向 ±%d° 内（面向目标的 90° 角）" % int(Loiter.CONE_DEG), fails)
+	# 发射器数据（来自 bc_stat.md 的表）
+	var lpl: Dictionary = {}
+	for d in UnitData.PLACEABLES:
+		if String(d["name"]) == Loiter.LAUNCHER_NAME:
+			lpl = d
+	_expect(int(lpl.get("power", 0)) == 20 and bool(lpl.get("block_move", false)),
+		"巡飞弹发射器：血量 20、阻挡移动（表格里那一行）", fails)
+
 	# ── 汇总 ──
 	print("── 规则自检 ──")
 	if fails.is_empty():

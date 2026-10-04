@@ -440,16 +440,192 @@ func _tick_queue_anim(delta: float) -> void:
 		ui.refresh_debug()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 巡飞弹 + 沙盒发射器（用户口径第 90 轮）
+#
+#   · 发射器：射程 12 格，**只打"进入范围的正在移动的角色"**（站着的不打），
+#     每 5 个 GM 回合边界只能发射一枚；方向 = 目标方向 ±45° 内随机。
+#   · 巡飞弹：定高 1.5、恒速 3 格/秒、直径一格的球；玩家用 Q/E 制导；
+#     造伤范围直径两格的球（40 破甲 + 40 力量）；近炸引信 / 飞满 32 格自动引爆。
+# ══════════════════════════════════════════════════════════════════════════════
+var _loiter_control: Projectile = null     # 玩家正在制导的那一发
+var _loiter_sample: float = 0.0            # 发射器采样计时
+var _unit_seen: Dictionary = {}            # Unit -> 上次采样到的浮点位置（判"在动"）
+
+
+## 发射器（沙盒元素）采样：只挑"正在移动且在 12 格内"的角色，最近优先
+func _tick_loiter_launchers(delta: float) -> void:
+	if phase == Phase.PLACE or game_over:
+		return
+	_loiter_sample += delta
+	if _loiter_sample < 1.0 / Loiter.SAMPLE_HZ:
+		return
+	_loiter_sample = 0.0
+	var moving := _moving_units()
+	for pl in placeables:
+		if not pl.is_alive() or not Loiter.is_launcher(pl):
+			continue
+		if gm.turn_count < int(pl.tags.get("loiter_next", 0)):
+			continue                                     # 5 个回合边界冷却
+		var ctr := Vector2(float(pl.cell.x) + 0.5, float(pl.cell.y) + 0.5)
+		var best: Unit = null
+		var best_d := 1e9
+		for u in moving:
+			var d: float = ctr.distance_to(_unit_pos(u))
+			if d > Loiter.LAUNCH_RANGE:
+				continue
+			if d < best_d:
+				best_d = d
+				best = u
+		if best == null:
+			continue
+		_fire_loiter(pl, ctr, best)
+
+
+## 这一帧哪些角色"在动"：走路 Tween 在跑，或者浮点位置和上次采样差了 MOVE_EPS
+func _moving_units() -> Array[Unit]:
+	var out: Array[Unit] = []
+	for u in units:
+		if not u.is_alive():
+			continue
+		var pos := _unit_pos(u)
+		var last = _unit_seen.get(u, pos)
+		_unit_seen[u] = pos
+		var vis := u.visual as UnitVisual
+		var walked := vis != null and vis.is_walking()
+		if walked or pos.distance_to(last) > Loiter.MOVE_EPS:
+			out.append(u)
+	return out
+
+
+func _fire_loiter(pl: Placeable, ctr: Vector2, tgt: Unit) -> void:
+	var heading := Loiter.launch_heading(ctr, _unit_pos(tgt), rng)
+	var p := Ordnance.make_loiter(-1, pl.name, ctr, heading, rng)
+	p.ignore_placeable = pl                    # 别一出膛就被自己的发射器触发了引信
+	field.register(p)
+	pl.tags["loiter_next"] = gm.turn_count + Loiter.LAUNCH_COOLDOWN_TURNS
+	if _loiter_control == null or not _loiter_control.alive:
+		_loiter_control = p
+	var d: float = ctr.distance_to(_unit_pos(tgt))
+	_log("  🚀 %s 发射【巡飞弹】→ 目标 %s（%.1f 格，初始方向 %.0f°，中心线偏 %+.0f°）｜ Q/E 制导" % [
+		pl.name, tgt.name, d, rad_to_deg(heading),
+		rad_to_deg(heading) - rad_to_deg((_unit_pos(tgt) - ctr).angle())])
+
+
+## 近炸引信（每帧）：造伤范围内出现任意角色 / 沙盒元素就引爆。
+## 飞满 32 格自动引爆不在这里 —— 那走弹道的落地事件（_land_shell）。
+func _tick_loiter_fuse() -> void:
+	if field == null:
+		return
+	for it in field.items.duplicate():
+		var p: Projectile = it["p"]
+		if p.kind != Projectile.KIND_LOITER or not p.alive:
+			continue
+		var ctr := p.pos3()
+		var why := ""
+		for u in units:
+			if u.is_alive() and Loiter.ball_touches_unit(ctr, u):
+				why = u.name
+				break
+		if why == "":
+			for pl in placeables:
+				if pl.is_alive() and pl != p.ignore_placeable and Loiter.ball_touches_placeable(ctr, pl):
+					why = pl.name
+					break
+		if why == "":
+			continue
+		_log("  💥 巡飞弹近炸引信：造伤范围内出现 %s → 引爆" % why)
+		p.kill("fuse")
+		_loiter_burst(p, ctr)
+
+
+## 巡飞弹引爆：**直径两格的三维球**（角色按"现在真的在哪"的高度判）+ 沙盒元素按沾格判。
+## 不分敌我（沙盒武器），40 破甲 + 40 力量，无视 50% 物抗。
+func _loiter_burst(p: Projectile, ctr: Vector3) -> void:
+	var sh: Ordnance.Shot = p.shot
+	var opts: Dictionary = sh.opts if sh != null else {}
+	if opts.is_empty():
+		opts = Loiter.opts(rng)
+	_flash_sphere(ctr, Loiter.BLAST_R * 1.7, 0.42)
+	_log("  💥 巡飞弹引爆 (%.1f, %.1f) 高度 %.2f：直径 %.0f 格的球，%d 破甲 + %d 力量（不分敌我）" % [
+		ctr.x, ctr.z, ctr.y, Loiter.BLAST_R * 2.0, int(Loiter.BREAK), int(Loiter.POWER)])
+	var hits: Array = Damage.air_burst(null, ctr, opts, units, null, Loiter.BLAST_R)
+	hits.append_array(Damage.blast(null, Vector2(ctr.x, ctr.z), Loiter.BLAST_R, opts,
+		[] as Array[Unit], placeables, null, -1, true))
+	if hits.is_empty():
+		_log("  （造伤范围内没有目标）")
+	for h in hits:
+		_log(h.text)
+		if h.unit != null:
+			_after_damage_to_unit(h.unit)
+		else:
+			_after_damage_to_placeable(h.placeable)
+
+
+## Q/E 制导（用户口径第 90 轮）：Q = 左转、E = 右转。
+## 按得越久转得越快（Loiter.want_rate 有上下限），松手带惯性滑回 0（Loiter.step_rate）。
+## **Q/E 在这之外没有别的用途**（只有弹反 QTE 内部会用，那时整棵树是暂停的）。
+func _tick_loiter_steer(delta: float) -> void:
+	var p := _loiter_pick_control()
+	if p == null:
+		return
+	var left := Input.is_key_pressed(KEY_Q)
+	var right := Input.is_key_pressed(KEY_E)
+	var dir := 0.0
+	if left and not right:
+		dir = -1.0
+	elif right and not left:
+		dir = 1.0
+	_loiter_steer_apply(p, dir, delta)
+
+
+## 真正施加转向：dir = -1 左转（Q）/ +1 右转（E）/ 0 松手。
+## 单独抽出来是为了让无头测试能"按住 Q/E"（headless 里造不出真实按键）。
+func _loiter_steer_apply(p: Projectile, dir: float, delta: float) -> void:
+	if p == null or not p.alive:
+		return
+	if dir < 0.0:
+		p.hold_l += delta
+		p.hold_r = 0.0
+	elif dir > 0.0:
+		p.hold_r += delta
+		p.hold_l = 0.0
+	else:
+		p.hold_l = 0.0
+		p.hold_r = 0.0
+	var hold := 0.0
+	if dir < 0.0:
+		hold = p.hold_l
+	elif dir > 0.0:
+		hold = p.hold_r
+	var want := dir * Loiter.want_rate(hold)
+	p.turn_w = Loiter.step_rate(p.turn_w, want, delta)
+	if absf(p.turn_w) > 0.01:
+		var axes := Loiter.screen_axes(_cam_yaw)
+		p.heading = Loiter.steer(p.heading, axes[0], axes[1], p.turn_w, delta)
+
+
+## 玩家当前制导的那一发巡飞弹（上一发没了就自动接管下一发）
+func _loiter_pick_control() -> Projectile:
+	if _loiter_control != null and _loiter_control.alive:
+		return _loiter_control
+	_loiter_control = null
+	if field == null:
+		return null
+	for it in field.items:
+		var p: Projectile = it["p"]
+		if p.kind == Projectile.KIND_LOITER and p.alive:
+			_loiter_control = p
+	return _loiter_control
+
+
 func _camera_process(delta: float) -> void:
 	var move := Vector2.ZERO
 	if Input.is_key_pressed(KEY_W): move.y -= 1.0
 	if Input.is_key_pressed(KEY_S): move.y += 1.0
 	if Input.is_key_pressed(KEY_A): move.x -= 1.0
 	if Input.is_key_pressed(KEY_D): move.x += 1.0
-	var height := 0.0
-	if Input.is_key_pressed(KEY_Q): height += 1.0
-	if Input.is_key_pressed(KEY_E): height -= 1.0
-	if move == Vector2.ZERO and is_zero_approx(height):
+	if move == Vector2.ZERO:
 		return
 	# 平移方向取自相机自身的朝向（投影到地面），所以按 W 就是"画面上方"，
 	# 不会像之前那样按固定 45° 轴换算导致上下左右反向。
@@ -462,7 +638,6 @@ func _camera_process(delta: float) -> void:
 	if right.length() > 0.001:
 		right = right.normalized()
 	_cam_focus += (fwd * move.y + right * move.x) * speed
-	_cam_height = clampf(_cam_height + height * 6.0 * delta, -8.0, 24.0)
 	# 平移只允许在【可行动区域】附近（空场没什么好看的，别让相机漂到 100×100 中间去）
 	_cam_focus.x = clampf(_cam_focus.x, float(PX) - 8.0, float(PX + PW) + 8.0)
 	_cam_focus.z = clampf(_cam_focus.z, float(PY) - 8.0, float(PY + PH) + 8.0)
@@ -1481,6 +1656,11 @@ func _placeable_info(p: Placeable) -> String:
 	txt += "[color=#ffd866]说明：[/color]"
 	if p.name == "木刺":
 		txt += "尖桩拒马，挡住地面单位；但箭矢可以从上方越过，不阻挡远程。"
+	elif Loiter.is_launcher(p):
+		txt += "巡飞弹发射器：射程 %d 格，只打**进入范围的正在移动的角色**，" % int(Loiter.LAUNCH_RANGE)
+		txt += "每 %d 个回合边界发射一枚；发射方向 = 目标方向 ±%d° 内随机。" % [
+			Loiter.LAUNCH_COOLDOWN_TURNS, int(Loiter.CONE_DEG)]
+		txt += "巡飞弹可以被玩家用 Q/E 制导（左/右转弯），近炸引信 + 飞满 %d 格自动引爆。" % int(Loiter.MAX_DIST)
 	else:
 		txt += "土堆够高，能挡住箭矢；但投掷手的抛物线攻击不受影响。"
 	return txt
@@ -2075,6 +2255,10 @@ func _after_projectile_gone(sh: Ordnance.Shot) -> void:
 func _shell_intercepted(p: Projectile, why: String) -> void:
 	if p == null:
 		return
+	if p.kind == Projectile.KIND_LOITER:
+		# 巡飞弹被箭打掉：整发战斗部就地炸开（造伤范围还是它自己的直径两格球）
+		_loiter_burst(p, p.pos3())
+		return
 	if Ballistics.intercept_result(p.kind) == "drop":
 		# 用户口径第 89 轮：走 _land_shell —— 在**河面/空场上空**被打掉的枪榴弹
 		# 直接作废（不立模型、不登记 GM），以前会把模型立在河面上。
@@ -2126,6 +2310,11 @@ func _on_proj_landed(p: Projectile) -> void:
 ## 所以"撞到人"跟"落地"的伤害口径永远一致，不会又出现"某一路忘了结算"。
 ## at = 落点（浮点，格坐标）；调用时这一发已经消亡，伤害/破片全靠发射单。
 func _land_shell(p: Projectile, at: Vector2) -> void:
+	if p.kind == Projectile.KIND_LOITER:
+		# 巡飞弹是"空中自爆"（近炸引信 / 飞满 32 格 / 被击落）：落河、空场照样炸，
+		# 它不是"落进水里"，是炸在那里（用户口径第 90 轮）。
+		_loiter_burst(p, Vector3(at.x, Loiter.HEIGHT, at.y))
+		return
 	var sh: Ordnance.Shot = p.shot
 	var land_cell := Vector2i(int(floor(at.x)), int(floor(at.y)))
 	# 用户口径：炮弹 / 召唤球落进河里直接消失（河里不拦弹道，只是落进去就没了）
@@ -3322,6 +3511,7 @@ func _damage_placeable(attacker: Unit, p: Placeable, silent: bool = false) -> vo
 func _process(delta: float) -> void:
 	_dive_tick(delta)
 	_tick_heli_fx(delta)
+	_tick_loiter_steer(delta)      # 巡飞弹：Q/E 制导（改的是这一帧的方向）
 
 
 ## 直升机的每帧表现（悬浮高度 / 旋翼自转 / 俯冲姿态）—— 队友交付的 HeliFx
@@ -3331,8 +3521,10 @@ func _process(delta: float) -> void:
 	_sync_menu_position()          # 菜单跟着角色走
 	_tick_queue_anim(delta)
 	field.step(delta)              # 弹道物理：推进 / 碰撞 / 上报结果（顺带把进入射界的送进哨兵队列）
+	_tick_loiter_fuse()            # 巡飞弹近炸引信：走完这一帧再看谁进了造伤范围
 	if _qte_active:
 		return                     # 弹反 QTE 进行中：这一帧剩下的都别做（时间已暂停）
+	_tick_loiter_launchers(delta)  # 巡飞弹发射器：12Hz 采样"正在移动的角色"
 	_tick_sentry_queue(delta)      # 哨兵：每 150ms 放一支箭打队头
 	_tick_unit_walk(delta)         # 走路中的哨兵检测
 	sentry_range.sync(gm.sentries) # 射界高亮跟着哨兵状态走
@@ -3370,12 +3562,6 @@ func _unhandled_input(event: InputEvent) -> void:
 						_attack_menu.visible = false
 					_clear_pending()
 					_show_action_menu()
-				return
-			KEY_Q:
-				if phase == Phase.MENU: _menu_attack()
-				return
-			KEY_E:
-				if phase == Phase.MENU: _menu_rest()
 				return
 		return
 

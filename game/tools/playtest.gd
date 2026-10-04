@@ -2846,6 +2846,126 @@ func _initialize() -> void:
 	_chk(p89_nb.power_cur < p89_nb_hp, "坠机炮击照常结算到旁边的角色身上")
 	_s.clear_projectiles()
 
+	# ── 54. 巡飞弹发射器 + 巡飞弹（第 90 轮）──
+	print("\n[54] 巡飞弹发射器与巡飞弹")
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()
+	_s.phase = _s.Phase.IDLE
+	_s.active = null
+	_s._place_kind = "巡飞弹发射器"
+	_chk(int(_s.place_left.get("巡飞弹发射器", 0)) > 0, "沙盒里有巡飞弹发射器（数量来自表格）")
+	_s.place_left["巡飞弹发射器"] = 2
+	_s._place_at(Vector2i(10, 10))
+	var p90_lp: Placeable = null
+	for p90_pl in _s.placeables:
+		if Loiter.is_launcher(p90_pl):
+			p90_lp = p90_pl
+	print("    发射器：%s 于 %s ｜ 力量 %d ｜ 射程 %.0f ｜ 冷却 %d 回合" % [
+		p90_lp.name if p90_lp != null else "-", p90_lp.cell if p90_lp != null else "-",
+		p90_lp.power_cur / 1000 if p90_lp != null else 0,
+		Loiter.LAUNCH_RANGE, Loiter.LAUNCH_COOLDOWN_TURNS])
+	_chk(p90_lp != null and p90_lp.power_cur == Rules.points_to_milli(20), "发射器血量 20")
+	# 场上只留一个"会动的"目标：先全体挪到角落，再让它挪一下位置
+	var p90_tgt: Unit = _unit_by("Gerald", 1)
+	for p90_u in _s.units:
+		p90_u.cell = Vector2i(2, 44)
+		if p90_u.visual != null:
+			p90_u.visual.position = Vector3(2.5, p90_u.hover, 44.5)
+	p90_tgt.power_cur = p90_tgt.power_max
+	p90_tgt.armor_cur = p90_tgt.power_max
+	p90_tgt.cell = Vector2i(10, 16)                 # 距发射器 6 格（射程内）
+	p90_tgt.visual.position = Vector3(10.5, 0.0, 16.5)
+	_s._tick_loiter_launchers(0.2)                  # 第一次采样：只是记下位置
+	var p90_n0: int = _count_kind(Projectile.KIND_LOITER)
+	_s._tick_loiter_launchers(0.2)                  # 位置没变 -> 不算"在动"
+	_chk(_count_kind(Projectile.KIND_LOITER) == p90_n0,
+		"站着不动的角色不会触发发射器（只打运动中的）")
+	# 动一下（浮点位置变了）-> 下一帧采样就该发射
+	p90_tgt.cell = Vector2i(10, 15)
+	p90_tgt.visual.position = Vector3(10.5, 0.0, 15.5)
+	_s._debug_log.clear()
+	_s._tick_loiter_launchers(0.2)
+	var p90_mun: Projectile = null
+	for p90_it in _s.field.items:
+		var p90_pp: Projectile = p90_it["p"]
+		if p90_pp.kind == Projectile.KIND_LOITER:
+			p90_mun = p90_pp
+	print("    移动后：巡飞弹 %s ｜ GM 回合 %d ｜ 冷却到 %s" % [
+		"有" if p90_mun != null else "无", _s.gm.turn_count, p90_lp.tags.get("loiter_next", "-")])
+	_chk(p90_mun != null, "角色在射程内移动 -> 发射器发射巡飞弹")
+	if p90_mun != null:
+		var p90_want: float = Vector2(p90_tgt.visual.position.x - p90_lp.visual.position.x,
+			p90_tgt.visual.position.z - p90_lp.visual.position.z).angle()
+		var p90_off: float = absf(rad_to_deg(wrapf(p90_mun.heading - p90_want, -PI, PI)))
+		print("    初始方向偏中心线 %.1f°（上限 %.0f°）｜ 高度 %.2f ｜ 碰撞半径 %.2f" % [
+			p90_off, Loiter.CONE_DEG, p90_mun.height(), p90_mun.hit_r])
+		_chk(p90_off <= Loiter.CONE_DEG + 0.01, "初始方向在目标方向 ±45° 内")
+		_chk(absf(p90_mun.height() - Loiter.HEIGHT) < 0.001 and absf(p90_mun.hit_r - 0.5) < 0.001,
+			"巡飞弹定高 1.5 格、碰撞半径 0.5（直径一格）")
+		_chk(int(p90_lp.tags.get("loiter_next", -1)) == _s.gm.turn_count + Loiter.LAUNCH_COOLDOWN_TURNS,
+			"发射后登记冷却：%d 个回合边界" % Loiter.LAUNCH_COOLDOWN_TURNS)
+	# 冷却期间再动也不给第二发
+	p90_tgt.cell = Vector2i(10, 14)
+	p90_tgt.visual.position = Vector3(10.5, 0.0, 14.5)
+	_s._tick_loiter_launchers(0.2)
+	_chk(_count_kind(Projectile.KIND_LOITER) == 1, "冷却没到 -> 不许再发射（每 5 个回合一枚）")
+	# ── Q/E 制导：越按越快 + 有上下限 + 松手带惯性 ──
+	if p90_mun != null:
+		_s._loiter_control = p90_mun
+		var p90_h0: float = p90_mun.heading
+		_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)          # 刚按下
+		var p90_d1: float = absf(wrapf(p90_mun.heading - p90_h0, -PI, PI))
+		for p90_i in 30:
+			_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)      # 按住半秒
+		var p90_h1: float = p90_mun.heading
+		_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)
+		var p90_d2: float = absf(wrapf(p90_mun.heading - p90_h1, -PI, PI))
+		var p90_w: float = p90_mun.turn_w
+		var p90_h2: float = p90_mun.heading
+		_s._loiter_steer_apply(p90_mun, 0.0, 1.0 / 60.0)          # 松手
+		var p90_w_off: float = p90_mun.turn_w
+		var p90_d_off: float = absf(wrapf(p90_mun.heading - p90_h2, -PI, PI))
+		print("    Q/E 制导：第一帧转 %.3f° ｜ 按住半秒后每帧 %.3f° ｜ 角速度 %.1f°/秒 ｜ 松手后 %.1f°/秒（还在转 %.3f°）" % [
+			rad_to_deg(p90_d1), rad_to_deg(p90_d2), p90_w, p90_w_off, rad_to_deg(p90_d_off)])
+		_chk(p90_d2 > p90_d1 * 1.5, "按得越久转得越快（第一帧 %.3f° -> 半秒后 %.3f°）" % [
+			rad_to_deg(p90_d1), rad_to_deg(p90_d2)])
+		_chk(p90_w <= Loiter.TURN_MAX + 0.001, "角速度有上限（%.1f <= %.0f）" % [p90_w, Loiter.TURN_MAX])
+		_chk(p90_w_off > 0.0 and p90_d_off > 0.0, "松手带惯性：角速度还在，继续转一点再停")
+		_chk(absf(p90_w_off) < absf(p90_w), "松手后角速度在衰减（%.1f -> %.1f）" % [p90_w, p90_w_off])
+		# ── 近炸引信：把一个角色挪到造伤范围里 ──
+		var p90_vic: Unit = _unit_by("Alette", 1)
+		p90_vic.power_cur = p90_vic.power_max
+		p90_vic.armor_cur = 0
+		p90_vic.cell = Vector2i(int(floor(p90_mun.pos().x)), int(floor(p90_mun.pos().y)))
+		p90_vic.visual.position = Vector3(p90_mun.pos().x, 0.0, p90_mun.pos().y)
+		var p90_vhp: int = p90_vic.power_cur
+		_s._debug_log.clear()
+		_s._tick_loiter_fuse()
+		var p90_fuse := false
+		for p90_lg in _s._debug_log:
+			if String(p90_lg).contains("近炸引信"):
+				p90_fuse = true
+		print("    近炸引信：触发=%s ｜ 目标力量 %d -> %d ｜ 巡飞弹还在=%s" % [
+			p90_fuse, p90_vhp / 1000, p90_vic.power_cur / 1000, p90_mun.alive])
+		_chk(p90_fuse and not p90_mun.alive, "造伤范围内出现角色 -> 近炸引信引爆")
+		_chk(p90_vic.power_cur < p90_vhp, "巡飞弹造伤落到范围里的角色身上（40 破甲 + 40 力量）")
+	# ── 飞满 32 格自动引爆 ──
+	_s.clear_projectiles()
+	var p90_far := Ordnance.make_loiter(-1, "巡飞弹发射器", Vector2(2.5, 40.5), 0.0, _s.rng)
+	p90_far.flown = Loiter.MAX_DIST - 0.01
+	_s.field.register(p90_far)
+	_s._debug_log.clear()
+	for p90_i2 in 5:
+		_s.field.step(1.0 / 60.0)
+	var p90_boom := false
+	for p90_lg2 in _s._debug_log:
+		if String(p90_lg2).contains("巡飞弹引爆"):
+			p90_boom = true
+	print("    飞满 %d 格：引爆=%s ｜ 还在场上=%s" % [
+		int(Loiter.MAX_DIST), p90_boom, p90_far.alive])
+	_chk(p90_boom and not p90_far.alive, "飞满 32 格自动引爆（不会一直飞）")
+	_s.clear_projectiles()
+
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
 		print("✅ v3 试玩链路全部通过")

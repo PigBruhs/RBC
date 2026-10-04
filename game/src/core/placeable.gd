@@ -23,6 +23,8 @@ var pr: int = 0                       # 物抗档（0/200/400/800/1000）
 var mr: int = 0                       # 魔抗档
 var block_move: bool = true           # 是否阻挡移动
 var block_ranged: bool = true         # 是否阻挡远程（投掷手不吃这条）
+## 运行时状态（例：巡飞弹发射器的冷却 = 下一次可发射的 GM 回合边界）
+var tags: Dictionary = {}
 
 var visual: Node3D = null             # 表现层引用（由 battle_scene 注入）
 

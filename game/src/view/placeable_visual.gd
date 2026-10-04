@@ -46,6 +46,8 @@ func setup(p: Placeable) -> void:
 	match p.name:
 		"木刺":
 			_build_spikes()
+		"巡飞弹发射器":
+			_build_launcher()
 		_:
 			_build_mound()
 	_build_preview()
@@ -103,6 +105,35 @@ func _build_spikes() -> void:
 		var rail := BoxMesh.new()
 		rail.size = Vector3(0.62, 0.05, 0.07)
 		_add(rail, Vector3(0.0, 0.030, z), Vector3.ZERO, wood)
+
+
+## 巡飞弹发射器（第 90 轮）：底座箱 + 一根上仰的发射管 + 管口的青色光环（一眼认出能发射）
+func _build_launcher() -> void:
+	var metal := _mat(Color(0.30, 0.33, 0.38), 0.5)
+	var dark := _mat(Color(0.18, 0.20, 0.24), 0.7)
+	var base := BoxMesh.new()
+	base.size = Vector3(0.62, 0.16, 0.62)
+	_add(base, Vector3(0, 0.08, 0), Vector3.ZERO, dark)
+	var leg := BoxMesh.new()
+	leg.size = Vector3(0.34, 0.26, 0.16)
+	_add(leg, Vector3(0, 0.27, 0), Vector3.ZERO, metal)
+	var tube := CylinderMesh.new()
+	tube.top_radius = 0.15
+	tube.bottom_radius = 0.17
+	tube.height = 0.72
+	# 管口朝 -Z 上方 25°（和模型"机头 = -Z"的约定一致）
+	_add(tube, Vector3(0, 0.52, -0.08), Vector3(-25, 0, 0), metal)
+	var mouth := TorusMesh.new()
+	mouth.inner_radius = 0.10
+	mouth.outer_radius = 0.155
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.albedo_color = Color(0.35, 0.95, 0.95, 0.85)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = Color(0.30, 0.90, 1.0)
+	ring_mat.emission_energy_multiplier = 2.0
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var ring := _add(mouth, Vector3(0, 0.80, -0.26), Vector3(-25, 0, 0), ring_mat)
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 ## 土堆：一坨压扁的球 + 三块石头

@@ -53,7 +53,8 @@ static func is_direct_hit(kind: String) -> bool:
 #   唯一的例外是枪榴弹：它本来就"落地才炸"，所以撞到角色 = 在那个格子落地开始计时。
 #   加一种新的炮弹 = 在 SHELL_LIKE 里加一行 + 工厂里调 shell_like_defaults()。
 # ══════════════════════════════════════════════════════════════════════════════
-const SHELL_LIKE := [Projectile.KIND_SHELL, Projectile.KIND_ROCKET, Projectile.KIND_GRENADE]
+const SHELL_LIKE := [Projectile.KIND_SHELL, Projectile.KIND_ROCKET, Projectile.KIND_GRENADE,
+	Projectile.KIND_LOITER]
 
 
 static func is_shell_class(kind: String) -> bool:
@@ -61,13 +62,14 @@ static func is_shell_class(kind: String) -> bool:
 
 
 ## 这一类【在半空被箭打掉】时怎么收尾：
-##   "burst"  -> 就地空爆（炮弹 / 火箭）
+##   "burst"  -> 就地空爆（炮弹 / 火箭 / 巡飞弹）
 ##   "drop"   -> 就地落地、开始自己的计时（枪榴弹）
 ##   ""       -> 不适用（召唤球只是信标：被击落直接作废，不炸）
 static func intercept_result(kind: String) -> String:
 	if kind == Projectile.KIND_GRENADE:
 		return "drop"
-	if kind == Projectile.KIND_SHELL or kind == Projectile.KIND_ROCKET:
+	if kind == Projectile.KIND_SHELL or kind == Projectile.KIND_ROCKET \
+			or kind == Projectile.KIND_LOITER:
 		return "burst"
 	return ""
 

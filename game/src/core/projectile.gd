@@ -28,6 +28,7 @@ const KIND_FRAGMENT := "fragment"  # 破片（箭矢类：无重力、平飞、�
 const KIND_BULLET := "bullet"      # 子弹（萨尼铁塔：箭矢类、无重力、阶梯衰减）
 const KIND_GRENADE := "grenade"    # 枪榴弹（空中=炮弹规则，落地变模型，GM 计时爆炸）
 const KIND_ROCKET := "rocket"      # 37mm 火箭（炮弹类：落地直径 2 格 + 2 枚破片）
+const KIND_LOITER := "loiter"      # 巡飞弹（炮弹类 + 可制导：定高 1.5、恒速 3、近炸引信）
 
 ## 速度剖面（0 = 匀速；老弹种一律 0，行为逐位不变）
 const SPEED_UNIFORM := 0
@@ -70,6 +71,22 @@ var removed_reason: String = ""
 var removed_at: Vector2 = Vector2.ZERO
 ## 发射单：伤害/落点/是否结束回合等，全部由发射者决定（弹道物自身只管飞）
 var shot: Ordnance.Shot = null
+
+# ── 可制导弹种（巡飞弹，用户口径第 90 轮）──────────────────────────────────
+## steering = true 的弹道物不走 from->to 插值：位置由 heading + 恒速逐帧积分，
+## 高度恒定 steer_h，飞满 max_dist 记 finished（自动引爆）。
+var steering: bool = false
+var steer_pos: Vector2 = Vector2.ZERO
+var heading: float = 0.0             # 水平方向（弧度，世界 xz 平面）
+var steer_speed: float = 3.0         # 恒速（格/秒）
+var steer_h: float = 1.5             # 定高（不受重力）
+var max_dist: float = 32.0
+var flown: float = 0.0
+var turn_w: float = 0.0              # 当前角速度（度/秒，带惯性）
+var hold_l: float = 0.0              # 左转键已按住多久（秒）
+var hold_r: float = 0.0              # 右转键已按住多久（秒）
+## 近炸引信要忽略的沙盒元素（发射它的那台发射器，否则一出生就自爆）
+var ignore_placeable: Placeable = null
 
 static var _next_id: int = 1
 
@@ -121,6 +138,8 @@ func flown_dist() -> float:
 
 
 func pos() -> Vector2:
+	if steering:
+		return steer_pos
 	var total := from.distance_to(to)
 	if total <= 0.0001:
 		return to
@@ -129,8 +148,10 @@ func pos() -> Vector2:
 	return from.lerp(to, progress())
 
 
-## 高度：两端基准高度 + 中间一条抛物线（两端为 0）
+## 高度：两端基准高度 + 中间一条抛物线（两端为 0）；可制导弹种恒定高度
 func height() -> float:
+	if steering:
+		return steer_h
 	var k := progress()
 	return lerpf(y0, y1, k) + apex * 4.0 * k * (1.0 - k)
 
@@ -148,6 +169,13 @@ func dir_flat() -> Vector2:
 
 func step(dt: float) -> void:
 	if not alive:
+		return
+	if steering:
+		# 可制导：恒速沿 heading 走，飞满 max_dist 就 finished（=> 自动引爆）
+		var d := steer_speed * dt
+		flown += d
+		steer_pos += Vector2(cos(heading), sin(heading)) * d
+		t = clampf(flown / maxf(0.001, max_dist), 0.0, 1.0)
 		return
 	t += dt / dur
 	if t >= 1.0:

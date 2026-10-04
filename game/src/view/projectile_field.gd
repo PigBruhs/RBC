@@ -90,6 +90,8 @@ func register(p: Projectile) -> void:
 			node = make_rocket_node(parent)
 		Projectile.KIND_GRENADE:
 			node = build_grenade_model(parent)
+		Projectile.KIND_LOITER:
+			node = make_loiter_node(parent)
 	items.append({"p": p, "node": node, "prev": p.pos()})
 
 
@@ -168,8 +170,13 @@ func step(delta: float) -> void:
 			p.removed_at = cq
 			if node != null and is_instance_valid(node):
 				node.position = Vector3(cq.x, p.height(), cq.y)
-			p.kill("out_of_bounds")
-			_report(EV_OUT, p)
+			if p.kind == Projectile.KIND_LOITER:
+				# 巡飞弹是炸药：撞到边界就地引爆，不许凭空消失（第 90 轮）
+				p.kill("out_of_bounds")
+				_report(EV_LANDED, p)
+			else:
+				p.kill("out_of_bounds")
+				_report(EV_OUT, p)
 			retire(e)
 			items.remove_at(i)
 			continue
@@ -259,6 +266,7 @@ static func kind_cn(kind: String) -> String:
 		Projectile.KIND_FRAGMENT: return "破片"
 		Projectile.KIND_BULLET: return "子弹"
 		Projectile.KIND_ROCKET: return "火箭"
+		Projectile.KIND_LOITER: return "巡飞弹"
 	return "标记球"
 
 
@@ -369,6 +377,41 @@ static func build_grenade_model(parent: Node3D) -> Node3D:
 		mer.position = Vector3(0, 0.17, 0)
 		mer.material_override = gm2
 		root.add_child(mer)
+	return root
+
+
+## 巡飞弹：**直径一格的球**（= 碰撞体积）+ 光晕 + 发光尾迹（用户口径第 90 轮）。
+## 尾迹的粗细/起点用节点 meta 覆盖：球比炮弹大得多，尾迹不能从球心里冒出来。
+func make_loiter_node(parent: Node3D) -> Node3D:
+	var root := Node3D.new()
+	parent.add_child(root)
+	root.visible = false
+	var ball := MeshInstance3D.new()
+	var sp := SphereMesh.new()
+	sp.radius = Loiter.BODY_R
+	sp.height = Loiter.BODY_R * 2.0
+	sp.radial_segments = 24
+	sp.rings = 12
+	ball.mesh = sp
+	ball.material_override = shell_mat()
+	root.add_child(ball)
+	var halo := MeshInstance3D.new()
+	var hs := SphereMesh.new()
+	hs.radius = Loiter.BODY_R * 1.5
+	hs.height = Loiter.BODY_R * 3.0
+	halo.mesh = hs
+	halo.material_override = glow_mat(Color(1.0, 0.86, 0.42, 0.38))
+	root.add_child(halo)
+	var tail: Array = []
+	for i in TAIL_SEGS:
+		var seg := MeshInstance3D.new()
+		seg.mesh = SphereMesh.new()
+		seg.material_override = glow_mat(Color(1.0, 0.84, 0.38, 0.7))
+		root.add_child(seg)
+		tail.append(seg)
+	root.set_meta("tail", tail)
+	root.set_meta("tail_inner", Loiter.BODY_R * 1.6)
+	root.set_meta("tail_r", 0.22)
 	return root
 
 
@@ -599,9 +642,10 @@ static func orient(node: Node3D, cur: Vector3, prev: Vector3, speed: float = 0.0
 	if not (tail is Array):
 		return
 	var segs: Array = tail
-	var diam := TAIL_REF_R * 2.0
+	var ref_r: float = float(node.get_meta("tail_r", TAIL_REF_R))
+	var inner: float = float(node.get_meta("tail_inner", SHELL_HALO_R))
+	var diam := ref_r * 2.0
 	var span: float = clampf(diam * TAIL_MAX_MULT * (speed / TAIL_SPEED_REF), 0.0, diam * TAIL_MAX_MULT)
-	var inner := SHELL_HALO_R
 	for i in segs.size():
 		var seg: MeshInstance3D = segs[i]
 		if not is_instance_valid(seg):
@@ -611,8 +655,8 @@ static func orient(node: Node3D, cur: Vector3, prev: Vector3, speed: float = 0.0
 		seg.position = Vector3(0, 0, inner + (span - inner) * (float(i) / float(maxi(1, segs.size() - 1))))
 		var ss := seg.mesh as SphereMesh
 		if ss != null:
-			ss.radius = TAIL_REF_R * f
-			ss.height = TAIL_REF_R * 2.0 * f
+			ss.radius = ref_r * f
+			ss.height = ref_r * 2.0 * f
 		var m := seg.material_override as StandardMaterial3D
 		if m != null:
 			m.albedo_color = Color(1.0, 0.80, 0.32, TAIL_ALPHA * f)

@@ -256,4 +256,12 @@ const PLACEABLES := [
 		"block_move": true, "block_ranged": true,
 		"count": 6,
 	},
+	{
+		"name": "巡飞弹发射器",
+		"w": 1, "h": 1,
+		"power": 20, "armor": 0,
+		"pr": 0, "mr": 1000,
+		"block_move": true, "block_ranged": false,
+		"count": 2,
+	},
 ]

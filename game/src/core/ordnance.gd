@@ -78,6 +78,29 @@ static func rocket_speed_at(s: float) -> float:
 	return minf(ROCKET_VMAX, ROCKET_V0 + s * ROCKET_ACCEL_K)
 
 
+## 巡飞弹（发射器发射，玩家用 Q/E 制导）：炮弹类 —— 可被箭击落、惊动哨兵、撞人=在命中处引爆。
+## 不受重力（定高 1.5 格）、恒速 3 格/秒、飞满 32 格自动引爆；近炸引信在 battle_scene 每帧判。
+## side = 发射方（沙盒发射器传 -1：不分敌我）；owner_name 只用于日志。
+static func make_loiter(side: int, owner_name: String, from: Vector2, heading: float, rng) -> Projectile:
+	var dir := Vector2(cos(heading), sin(heading))
+	var p := Projectile.make(Projectile.KIND_LOITER, from, from + dir * Loiter.MAX_DIST, 1.0)
+	p.steering = true
+	p.steer_pos = from
+	p.heading = heading
+	p.steer_speed = Loiter.SPEED
+	p.steer_h = Loiter.HEIGHT
+	p.max_dist = Loiter.MAX_DIST
+	p.hit_r = Loiter.BODY_R                     # 碰撞体积 = 直径一格的球
+	p.side = side
+	p.owner_name = owner_name
+	p.owner_unit = null
+	var tpl := Ballistics.shell_like_defaults(Projectile.KIND_LOITER)
+	p.hit_tags.assign(tpl["hit_tags"])
+	p.sentry_trigger = bool(tpl["sentry_trigger"])
+	p.shot = _shot(Projectile.KIND_LOITER, null, false, Loiter.BLAST_R, Loiter.opts(rng), "")
+	return p
+
+
 ## 火箭：从 from 飞向 to；总时长 = 解析解 t(s)。
 ## rng：给了就把**发射那一刻的伤害参数快照**写进发射单（第 89 轮）——
 ## 火箭是"落地才算威力"的弹种，中途发射者阵亡/坠机不该让已经出膛的这一发变成 0 伤害
