@@ -96,9 +96,18 @@ var skills_mod: SkillRunner = null
 ## 下面的同名薄包装转发到它；_process / _ready / 回调 Callable / 别人的调用点都照旧。
 var turn: TurnRunner = null
 
+## 放置/沙盒/待确认状态机模块（P2c 拆出，见 view/sandbox_runner.gd）。
+## place_left / _place_kind / placeables / _pending_kind / _pending_cell 的**声明留在本类**
+## （ViewFx 的黄勾可视化要读 _st._pending_cell），模块经 _st. 读写。
+var sandbox: SandboxRunner = null
+
 ## 行动菜单状态机（二级行动菜单 / 普攻菜单 / 技能入口 / 沙盒道具详情，
 ## 见 view/action_menu.gd）。菜单节点本身仍是 _action_menu / _attack_menu 等字段，声明留在本类。
 var action_menu: ActionMenu = null
+
+## 瞄准 / 拖拽输入 / 相机 / 鼠标拾取（见 view/aim_controller.gd）。
+## _arrow_root / _cam_focus / _zoom 等被测试直读的字段声明仍留在本类。
+var aim: AimController = null
 
 var _zoom: float = 15.0
 
@@ -337,24 +346,6 @@ func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, 
 
 
 ## 相机：不再固定。WASD 平移、滚轮缩放、QE 调高度（用户要求）
-
-func _build_camera() -> void:
-	_camera = Camera3D.new()
-	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_camera.name = "Cam"
-	add_child(_camera)
-	_cam_focus = Vector3(Level.cam_center().x, 0.0, Level.cam_center().y)
-	_update_camera()
-
-func _update_camera() -> void:
-	if _camera == null:
-		return
-	_camera.size = _zoom
-	var pitch := deg_to_rad(CAM_PITCH)
-	var yaw := deg_to_rad(_cam_yaw)
-	var dir := Vector3(cos(pitch) * cos(yaw), -sin(pitch), cos(pitch) * sin(yaw))
-	_camera.position = _cam_focus + dir * CAM_DIST + Vector3(0, _cam_height, 0)
-	_camera.look_at(_cam_focus + Vector3(0, _cam_height, 0), Vector3.UP)
 
 func _build_aim_helpers() -> void:
 	# 箭头 = 杆 + 三角锥头（明显比一根圆柱像箭头），整体挂在枢轴节点下，沿局部 Y 拉伸
@@ -625,30 +616,6 @@ func _loiter_pick_control() -> Projectile:
 	return _loiter_control
 
 
-func _camera_process(delta: float) -> void:
-	var move := Vector2.ZERO
-	if Input.is_key_pressed(KEY_W): move.y -= 1.0
-	if Input.is_key_pressed(KEY_S): move.y += 1.0
-	if Input.is_key_pressed(KEY_A): move.x -= 1.0
-	if Input.is_key_pressed(KEY_D): move.x += 1.0
-	if move == Vector2.ZERO:
-		return
-	# 平移方向取自相机自身的朝向（投影到地面），所以按 W 就是"画面上方"，
-	# 不会像之前那样按固定 45° 轴换算导致上下左右反向。
-	var speed := _zoom * 0.9 * delta
-	var basis := _camera.global_transform.basis
-	var fwd := Vector3(basis.z.x, 0.0, basis.z.z)      # 相机看向的反方向 = 画面里的"上"
-	var right := Vector3(basis.x.x, 0.0, basis.x.z)
-	if fwd.length() > 0.001:
-		fwd = fwd.normalized()
-	if right.length() > 0.001:
-		right = right.normalized()
-	_cam_focus += (fwd * move.y + right * move.x) * speed
-	# 平移只允许在【可行动区域】附近（空场没什么好看的，别让相机漂到 100×100 中间去）
-	_cam_focus.x = clampf(_cam_focus.x, float(PX) - 8.0, float(PX + PW) + 8.0)
-	_cam_focus.z = clampf(_cam_focus.z, float(PY) - 8.0, float(PY + PH) + 8.0)
-	_update_camera()
-
 ## 阵营显示名：敌方阵营里"玩家可控"的角色要标出来，否则玩家分不清谁能操作
 
 static func _faction_cn(u: Unit) -> String:
@@ -692,6 +659,24 @@ func _refresh_upgrades() -> void:
 		ui.refresh_upgrades(selected)
 
 
+
+# ── 跨模块事实接口：这三个别的模块会用 `_st.` 调，宿主必须留公开入口 ──
+#   action_menu.gd / skill_runner.gd -> _st._begin_aim()
+#   view_fx.gd                       -> _st._hover_cell()
+#   sandbox（放置/沙盒）             -> _st._pick_cell(...)  ← 预防性：拾格是放置的依赖
+# 实现在 view/aim_controller.gd。**别删**（删了调用方会在运行时炸，编译期查不出来）。
+func _begin_aim() -> void:
+	aim.begin_aim()
+
+
+func _hover_cell() -> Variant:
+	return aim.hover_cell()
+
+
+func _pick_cell(mouse: Vector2) -> Variant:
+	return aim.pick_cell(mouse)
+
+
 # ── 跨模块事实接口：这三个动作**别的模块也会调**，所以宿主必须留一个公开入口 ──
 #   basic_attack.gd   -> _st._show_action_menu() / _st._push_unit_stats(...)
 #   skill_runner.gd   -> _st._show_action_menu() / _st._hide_action_menu() / _st._push_unit_stats(...)
@@ -732,7 +717,9 @@ func _ready() -> void:
 	attack = BasicAttack.new(self)       # 普攻唯一入口模块
 	skills_mod = SkillRunner.new(self)   # 技能编排模块（唯一入口 perform_skill）
 	turn = TurnRunner.new(self)         # 回合机 / 寻路 / 单位生命周期模块
+	sandbox = SandboxRunner.new(self)   # 放置 / 沙盒 / 待确认状态机模块
 	action_menu = ActionMenu.new(self)   # 行动菜单状态机
+	aim = AimController.new(self)        # 瞄准/拖拽 + 相机 + 鼠标拾取
 	# 弹道物场：只做物理与上报，后果由 ProjectileSink 处理
 	# ⚠️ 这里传的是**模块方法**（Callable 事实接口）：改名即断，两处都在本函数里
 	field = ProjectileField.new()
@@ -750,7 +737,7 @@ func _ready() -> void:
 	sentry_range.grid_y0 = PY
 	_build_env()
 	_build_terrain()
-	_build_camera()
+	aim.build_camera()
 	_build_aim_helpers()
 	_init_passive_hooks()          # 受伤触发的被动钩子表（坠机…）
 	_spawn_units()
@@ -770,100 +757,36 @@ func _ready() -> void:
 ## 建立沙盒数据，并把"道具箱"按钮填进底边栏预留的位置
 
 func _build_sandbox() -> void:
-	# 沙盒数据在这里准备；按钮由 BattleUI 负责建（它自己按 place_left 刷新）
-	placeables.clear()
-	place_left.clear()
-	for d in UnitData.PLACEABLES:
-		place_left[d["name"]] = d["count"]
-	if ui != null:
-		ui.refresh_sandbox()
+	sandbox.build_sandbox()
 
 
 func _enter_placement() -> void:
-	phase = Phase.PLACE
-	active = null
-	selected = null
-	_place_kind = ""
-	if ui != null:
-		ui.refresh_sandbox()
-	if _btn_next != null:
-		_btn_next.visible = true
-		_btn_next.text = ">>"
-	if _action_menu != null:
-		_action_menu.visible = false
-	_refresh_all()
+	sandbox.enter_placement()
 
 func _pick_place_kind(nm: String) -> void:
-	if phase != Phase.PLACE:
-		return
-	if place_left.get(nm, 0) <= 0:
-		if ui != null:
-			ui.refresh_sandbox()
-		return
-	_place_kind = nm if _place_kind != nm else ""
-	if ui != null:
-		ui.refresh_sandbox()
+	sandbox.pick_place_kind(nm)
 
 ## 该格能不能放：在界内、不在河里、不压单位、不压已有道具
 
+## ⚠️ 跨模块事实接口（**别删**）：view_fx.gd（放置高亮配色） 正在通过 `_st._can_place_at` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _can_place_at(c: Vector2i) -> bool:
-	if not Level.in_play(c):          # 空场不能放（用户口径：那里没有格子）
-		return false
-	if Level.is_river(c):
-		return false
-	for u in units:
-		if u.is_alive() and u.cell == c:
-			return false
-	for p in placeables:
-		if p.is_alive() and p.covers(c):
-			return false
-	return true
+	return sandbox.can_place_at(c)
 
 
 ## 放一个道具
 
 func _place_at(c: Vector2i) -> void:
-	if _place_kind == "":
-		return
-	if place_left.get(_place_kind, 0) <= 0:
-		pass
-		return
-	if not _can_place_at(c):
-		pass
-		return
-	var data := _placeable_data(_place_kind)
-	if data.is_empty():
-		return
-	var p := Placeable.from_data(data, c)
-	placeables.append(p)
-	var v := PlaceableView.new()
-	add_child(v)
-	v.setup(p)
-	v.set_preview(false, true)
-	place_left[_place_kind] = int(place_left.get(_place_kind, 0)) - 1
-	_log("放置 %s 于 (%d, %d)，剩余 %d" % [_place_kind, c.x, c.y, place_left[_place_kind]])
-	if place_left[_place_kind] <= 0:
-		_place_kind = ""
-	if ui != null:
-		ui.refresh_sandbox()
+	sandbox.place_at(c)
 
 func _placeable_data(nm: String) -> Dictionary:
-	for d in UnitData.PLACEABLES:
-		if d["name"] == nm:
-			return d
-	return {}
+	return sandbox.placeable_data(nm)
 
 
 ## 结束放置 -> 正式开始第 1 回合
 
 func _finish_placement() -> void:
-	if phase != Phase.PLACE:
-		return
-	phase = Phase.IDLE
-	_place_kind = ""
-	if ui != null:
-		ui.refresh_sandbox()
-	_start_round()
+	sandbox.finish_placement()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -874,53 +797,44 @@ func _finish_placement() -> void:
 ## 设置待确认操作。kind: "move" / "attack" / "place" / "aim"
 ## actor：这次操作要一起染色的角色（移动 = 自己；攻击 = 目标；放置 = 无）
 
+## ⚠️ 跨模块事实接口（**别删**）：skill_runner.gd 正在通过 `_st._set_pending` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _set_pending(kind: String, cell: Vector2i, actor: Unit = null) -> void:
-	_pending_kind = kind
-	_pending_cell = cell
-	fx.set_pending_actor(actor)
-	fx.update_pending_visual()          # 立刻刷新：不然调用方忘了 _draw_hints 就看不见黄勾
+	sandbox.set_pending(kind, cell, actor)
 
+## ⚠️ 跨模块事实接口（**别删**）：skill_runner.gd / action_menu.gd 正在通过 `_st._clear_pending` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _clear_pending() -> void:
-	_pending_kind = ""
-	_pending_cell = Vector2i(-1, -1)
-	fx.set_pending_actor(null)
-	fx.update_pending_visual()
+	sandbox.clear_pending()
 
+## ⚠️ 跨模块事实接口（**别删**）：skill_runner.gd 正在通过 `_st._same_pending` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _same_pending(kind: String, cell: Vector2i) -> bool:
-	return _pending_kind == kind and _pending_cell == cell
+	return sandbox.same_pending(kind, cell)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 移动 / 阻挡查询
 # ══════════════════════════════════════════════════════════════════════════════
 ## 走不进去的格子：阻挡移动的道具 + 河面（不含桥）
+## ⚠️ 跨模块事实接口（**别删**）：turn_runner.gd（寻路占格） 正在通过 `_st._blocked_cells` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _blocked_cells() -> Dictionary:
-	var out := Level.river_cells()          # 河：角色无法移动进去（桥是普通地板，已排除）
-	for p in placeables:
-		if p.is_alive() and p.block_move:
-			for c in p.occupied_cells():
-				out[c] = true
-	return out
+	return sandbox.blocked_cells()
 
 
 ## 远程弹道是否被该格的道具挡住（投掷手无视阻挡远程的道具）
 
 func _ranged_blocked_at(c: Vector2i, by_thrower: bool) -> bool:
-	if by_thrower:
-		return false
-	for p in placeables:
-		if p.is_alive() and p.block_ranged and p.covers(c):
-			return true
-	return false
+	return sandbox.ranged_blocked_at(c, by_thrower)
 
 
 ## 找某格上的道具
 
+## ⚠️ 跨模块事实接口（**别删**）：basic_attack.gd（近战打道具） 正在通过 `_st._placeable_at` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func _placeable_at(c: Vector2i) -> Placeable:
-	for p in placeables:
-		if p.is_alive() and p.covers(c):
-			return p
-	return null
+	return sandbox.placeable_at(c)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1306,147 +1220,20 @@ func _show_result(win: bool) -> void:
 # 攻击二级菜单：点敌人后弹出「打力量 / 破甲」，两个按钮上直接写清楚伤害
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 进入拖拽瞄准（普攻与技能共用同一套手感；具体打什么由调用方决定）
-func _begin_aim() -> void:
-	_action_menu.visible = false
-	phase = Phase.AIMING
-	_aim_active = true
-	_aim_valid = false
-	_planned_cell = Vector2i(-1, -1)     # 必须重置！否则残留上一发的落点/默认 (0,0) 会被当成有效目标
-	_aim_origin = get_viewport().get_mouse_position()
-	_aim_now = _aim_origin
-	_arrow_root.visible = true
-	reachable = {}
-	attackable = {}
-	fx.clear_hints()
-	_refresh_all()
-
-
 ## 拖拽像素 -> 力度 t（0..1）
 
-func _charge_from_drag(px: float) -> float:
-	return clampf((px - UnitData.THROW_DRAG_MIN) / (UnitData.THROW_DRAG_MAX - UnitData.THROW_DRAG_MIN), 0.0, 1.0)
-
-
 ## 力度 -> 射程（格）。非线性：平方曲线，轻拉细腻、重拉才到远距离。
-
-func _aim_range(t: float) -> float:
-	return UnitData.THROW_RANGE_MIN + (UnitData.THROW_RANGE_MAX - UnitData.THROW_RANGE_MIN) * t * t
-
 
 ## 力度 t -> 箭头长度（世界单位）。约束：恒定落在 身高的 1~3 倍（用户要求）。
 ## 用同一条平方曲线，只是把 0~1 的力度映射到 1~3 倍身高：
 ##   len(t) = ARROW_LEN_MIN + (ARROW_LEN_MAX - ARROW_LEN_MIN) * t²   （单位 = 身高）
 ## 这样箭头长度与真实射程严格同步（同一 t），且永远看得见（最短也有 1 倍身高）。
 
-func _arrow_len_for_t(t: float) -> float:
-	var mult := UnitData.ARROW_LEN_MIN + (UnitData.ARROW_LEN_MAX - UnitData.ARROW_LEN_MIN) * t * t
-	return mult * UnitData.UNIT_HEIGHT
-
-func _update_aim(mouse: Vector2) -> void:
-	_aim_now = mouse
-	var origin3 := Vector3(float(active.cell.x) + 0.5, 0.0, float(active.cell.y) + 0.5)
-	var from := _camera.project_ray_origin(mouse)
-	var dir := _camera.project_ray_normal(mouse)
-	if absf(dir.y) < 0.0001:
-		return
-	var t := -from.y / dir.y
-	if t < 0.0:
-		return
-	var target := from + dir * t
-	var flat := Vector2(target.x - origin3.x, target.z - origin3.z)
-	if flat.length() < 0.15:
-		_arrow_root.visible = false
-		_aim_valid = false
-		return
-	var dir2 := flat.normalized()
-	var drag_px := _aim_origin.distance_to(mouse)
-	var charge := _charge_from_drag(drag_px)
-	var dist := _aim_range(charge)
-	_planned_cell = Vector2i(int(floor(origin3.x + dir2.x * dist)), int(floor(origin3.z + dir2.y * dist)))
-	_aim_valid = true
-	_aim_float_pos = Vector2(origin3.x + dir2.x * dist, origin3.z + dir2.y * dist)
-
-	_arrow_root.visible = true
-	# 箭头从【投掷手身前】沿方向贴地伸出，长度 = 射程（3~20 格 → 1~3 倍身高）
-	var start := Vector3(origin3.x, 0.32, origin3.z) + Vector3(dir2.x, 0, dir2.y) * 0.34
-	var d := Vector3(dir2.x, 0.0, dir2.y).normalized()
-	var bx := d.cross(Vector3.UP).normalized()
-	var bz := bx.cross(d).normalized()
-	_arrow_root.position = start
-	_arrow_root.basis = Basis(bx, d, bz)      # b.y = d（杆的轴向）
-	var total_len := _arrow_len_for_t(charge)
-	var head_len := clampf(total_len * 0.34, 0.42, 0.85)   # 箭头三角锥长度
-	var shaft_len := maxf(0.12, total_len - head_len)
-	_shaft.scale = Vector3(1.0, shaft_len, 1.0)
-	_shaft.position = Vector3(0, shaft_len * 0.5, 0)
-	_head.scale = Vector3(1.0, head_len, 1.0)
-	_head.position = Vector3(0, shaft_len + head_len * 0.5, 0)
-	_status.text = "力度 %d%%  射程 %.1f 格（箭头 %.1f 倍身高）  %s" % [
-		int(round(charge * 100.0)), dist, total_len / UnitData.UNIT_HEIGHT,
-		_aim_preview_text(_planned_cell)]
-
-
 ## 瞄准时把落点范围内的单位与该次的命中/伤害预览显示出来（含概率）
-
-func _aim_preview_text(center: Vector2i) -> String:
-	if center.x < 0 or active == null:
-		return ""
-	var parts: Array[String] = []
-	for o in units:
-		if not o.is_alive() or o == active:
-			continue
-		if not Targeting.blast_covers(Vector2(float(center.x) + 0.5, float(center.y) + 0.5), o.cell, BLAST_RADIUS):
-			continue
-		var eff_res: int = o.pr / 2                      # 炮击无视 50% 物抗
-		var p: Rules.Preview = Rules.preview(active.power_cur, o.armor_cur, eff_res)
-		var seg := "%s:破甲%s" % [o.name, _fmt(active.armor_break)]
-		if p.branch == Rules.Branch.NO_DAMAGE:
-			seg += "+力量打不动"
-		elif p.branch == Rules.Branch.ROLL:
-			seg += "+力量1(%d%%)" % p.hit_percent
-		else:
-			seg += "+力量%d" % p.damage
-		if o.side == active.side:
-			seg = "[友军]" + seg
-		parts.append(seg)
-	if parts.is_empty():
-		return "落点无单位"
-	return "影响→ " + " ｜ ".join(parts)
-
 
 ## 松开左键。
 ##   投掷手普攻：球沿抛物线飞出 -> 落地 -> 红圈 -> 结算（含友伤）
 ##   技能瞄准  ：飞出一枚【小球】（比头大、比炮弹小）-> 落地消失 -> 竖起紫色光柱 -> 结束回合
-
-func _fire() -> void:
-	if not _aim_active or active == null:
-		return
-	# 还没算出有效落点（例如按下就松开、鼠标没动过）：不消耗回合，继续瞄准
-	if not _aim_valid:
-		return
-	var thrower := active
-	var fpos := _aim_float_pos
-	var skill_id := _aim_skill_id
-	_arrow_root.visible = false
-	_aim_active = false
-	_aim_valid = false
-	_planned_cell = Vector2i(-1, -1)
-
-	# ── 技能：交给唯一的技能入口（玩家与 AI 同一条生产线）──
-	if skill_id != "":
-		_aim_skill_id = ""
-		_skill_info_text = ""
-		if not skills_mod.perform_skill(thrower, skill_id, fpos, Vector2i(int(floor(fpos.x)), int(floor(fpos.y)))):
-			action_menu.show_action_menu()
-		return
-
-	# ── 普攻：交给唯一的普攻入口（近战/弓箭/连发/投掷/火箭齐射都在里面分派）──
-	# 用户口径：投掷手是"玩家操作决定上下限"的角色，**一定要允许失误**：
-	# 这里不做任何射程/边界检查 —— 打偏、打出界都照打（炮弹飞到边界处消失）。
-	if not attack.perform_basic(thrower, fpos):
-		action_menu.show_action_menu()
-
 
 ## ── 炮弹（普攻 / 地毯式轰炸共用）────────────────────────────────────────────
 ## 弹道物的【物理】交给 Projectile；【伤害/落点】放在发射单里（用户口径）。
@@ -2043,7 +1830,7 @@ func _process(delta: float) -> void:
 	sentry_range.sync(gm.sentries) # 射界高亮跟着哨兵状态走
 	_sync_unit_visibility()        # 兜底：活着就必须看得见
 	_check_active_alive()         # 当前行动者在自己回合里被打死 -> 立刻结束其回合
-	_camera_process(delta)
+	aim.camera_process(delta)
 
 
 ## 队列条动画计时：到点就收尾；期间攒下的刷新请求在这里补做（最小间隔 0.5 秒）
@@ -2084,13 +1871,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom = clampf(_zoom - 1.5, 6.0, 30.0)
 			if _zoom_slider != null:
 				_zoom_slider.set_value_no_signal(_zoom)
-			_update_camera()
+			aim.update_camera()
 			return
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom = clampf(_zoom + 1.5, 6.0, 30.0)
 			if _zoom_slider != null:
 				_zoom_slider.set_value_no_signal(_zoom)
-			_update_camera()
+			aim.update_camera()
 			return
 		# ── 右键：退出当前选项，回到二级菜单 ──
 		if event.button_index == MOUSE_BUTTON_RIGHT:
@@ -2100,13 +1887,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	# ── 瞄准中的鼠标 ──
 	if _aim_active:
 		if event is InputEventMouseMotion:
-			_update_aim(event.position)
+			aim.update_aim(event.position)
 		elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-			_fire()
+			aim.fire()
 		return
 
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var cell = _pick_cell(event.position)
+		var cell = aim.pick_cell(event.position)
 		if cell == null:
 			# 点到棋盘外也算"点空白"：收起所有菜单与选中（放置阶段除外）
 			if phase != Phase.PLACE:
@@ -2282,20 +2069,6 @@ func _select_for_detail(u: Unit) -> void:
 		_panel.visible = (u != null)
 	_refresh_all()
 
-func _pick_cell(mouse: Vector2) -> Variant:
-	var from := _camera.project_ray_origin(mouse)
-	var dir := _camera.project_ray_normal(mouse)
-	if absf(dir.y) < 0.0001:
-		return null
-	var t := -from.y / dir.y
-	if t < 0.0:
-		return null
-	var p := from + dir * t
-	var cell := Vector2i(int(floor(p.x)), int(floor(p.z)))
-	if not Level.in_play(cell):
-		return null
-	return cell
-
 func _unit_at(cell: Vector2i) -> Unit:
 	return turn.unit_at(cell)
 
@@ -2324,21 +2097,6 @@ func _compute_reachable(u: Unit) -> Dictionary:
 ## 每帧让待确认标记呼吸：格子橙框在橙<->黄之间脉动，黄勾同步呼吸并保持正对摄像机
 
 ## 鼠标当前指向的格子（无有效指向返回 null）
-
-func _hover_cell() -> Variant:
-	var mp := get_viewport().get_mouse_position()
-	var from := _camera.project_ray_origin(mp)
-	var dir := _camera.project_ray_normal(mp)
-	if absf(dir.y) < 0.0001:
-		return null
-	var t := -from.y / dir.y
-	if t < 0.0:
-		return null
-	var p := from + dir * t
-	var c := Vector2i(int(floor(p.x)), int(floor(p.z)))
-	if not Level.in_play(c):
-		return null
-	return c
 
 ## 角色被击中时的白闪（实现在 view/view_fx.gd）
 static func _fmt(milli: int) -> String:
@@ -2418,16 +2176,22 @@ func ui_placeable_info() -> String:
 	return _placeable_info_text
 
 
+## ⚠️ 跨模块事实接口（**别删**）：battle_ui.gd（道具箱按钮） 正在通过 `_st.ui_place_left` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func ui_place_left() -> Dictionary:
-	return place_left
+	return sandbox.ui_place_left()
 
 
+## ⚠️ 跨模块事实接口（**别删**）：battle_ui.gd 正在通过 `_st.ui_place_kind` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func ui_place_kind() -> String:
-	return _place_kind
+	return sandbox.ui_place_kind()
 
 
+## ⚠️ 跨模块事实接口（**别删**）：battle_ui.gd 正在通过 `_st.ui_is_placing` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func ui_is_placing() -> bool:
-	return phase == Phase.PLACE
+	return sandbox.ui_is_placing()
 
 
 func ui_busy() -> bool:
@@ -2617,8 +2381,10 @@ func ui_end_turn() -> void:
 	_on_next_pressed()
 
 
+## ⚠️ 跨模块事实接口（**别删**）：battle_ui.gd 正在通过 `_st.ui_pick_place` 调它。
+## 删掉这个同名包装 = 对方在运行时报 Nonexistent function（编译期查不出来）。
 func ui_pick_place(nm: String) -> void:
-	_pick_place_kind(nm)
+	sandbox.ui_pick_place(nm)
 
 
 ## 自动演算用：这一局谁赢了
@@ -2643,7 +2409,7 @@ func ui_set_level(id: String) -> void:
 
 func ui_set_zoom(v: float) -> void:
 	_zoom = v
-	_update_camera()
+	aim.update_camera()
 
 
 func ui_pick_skill(id: String) -> void:
@@ -2830,7 +2596,7 @@ func t_tick_loiter_launchers(delta: float) -> void:
 	_tick_loiter_launchers(delta)
 
 func t_update_camera() -> void:
-	_update_camera()
+	aim.update_camera()
 
 func t_aim_skill_id() -> String:
 	return _aim_skill_id
@@ -2842,10 +2608,10 @@ func t_btn_rest_menu() -> Button:
 	return _btn_rest_menu
 
 func t_clear_pending() -> void:
-	_clear_pending()
+	sandbox.clear_pending()
 
 func t_place_at(c: Vector2i) -> void:
-	_place_at(c)
+	sandbox.place_at(c)
 
 func t_place_kind() -> String:
 	return _place_kind
@@ -2854,7 +2620,7 @@ func t_set_place_kind(v: String) -> void:
 	_place_kind = v
 
 func t_set_pending(kind: String, cell: Vector2i, actor: Unit = null) -> void:
-	_set_pending(kind, cell, actor)
+	sandbox.set_pending(kind, cell, actor)
 
 func t_zoom() -> float:
 	return _zoom
@@ -2938,7 +2704,7 @@ func t_can_aim_unit(t: Unit) -> bool:
 	return attack.can_aim_unit(t)
 
 func t_can_place_at(c: Vector2i) -> bool:
-	return _can_place_at(c)
+	return sandbox.can_place_at(c)
 
 func t_check_last_stand() -> bool:
 	return turn.check_last_stand()
@@ -2953,10 +2719,10 @@ func t_dive_clear(u: Unit) -> void:
 	skills_mod.dive_clear(u)
 
 func t_finish_placement() -> void:
-	_finish_placement()
+	sandbox.finish_placement()
 
 func t_fire() -> void:
-	_fire()
+	aim.fire()
 
 func t_fire_loiter(pl: Placeable, ctr: Vector2, tgt: Unit) -> void:
 	_fire_loiter(pl, ctr, tgt)
@@ -2977,13 +2743,13 @@ func t_set_planned_cell(v: Vector2i) -> void:
 	_planned_cell = v
 
 func t_ranged_blocked_at(c: Vector2i, by_thrower: bool) -> bool:
-	return _ranged_blocked_at(c, by_thrower)
+	return sandbox.ranged_blocked_at(c, by_thrower)
 
 func t_resolve_mortar_impact(attacker: Unit, center: Vector2i) -> void:
 	sink.resolve_mortar_impact(attacker, center)
 
 func t_same_pending(kind: String, cell: Vector2i) -> bool:
-	return _same_pending(kind, cell)
+	return sandbox.same_pending(kind, cell)
 
 func t_select_for_detail(u: Unit) -> void:
 	_select_for_detail(u)
@@ -3001,13 +2767,13 @@ func t_ai_ctx(u: Unit) -> Ai.Ctx:
 	return _ai_ctx(u)
 
 func t_aim_range(t: float) -> float:
-	return _aim_range(t)
+	return aim.aim_range(t)
 
 func t_air_burst(p: Projectile, why: String = "被打爆") -> void:
 	sink.air_burst(p, why)
 
 func t_arrow_len_for_t(t: float) -> float:
-	return _arrow_len_for_t(t)
+	return aim.arrow_len_for_t(t)
 
 func t_arrow_root() -> Node3D:
 	return _arrow_root
@@ -3019,7 +2785,7 @@ func t_attack_target_placeable(pl: Placeable) -> void:
 	attack.attack_target_placeable(pl)
 
 func t_blocked_cells() -> Dictionary:
-	return _blocked_cells()
+	return sandbox.blocked_cells()
 
 func t_btn_next() -> Button:
 	return _btn_next
@@ -3031,7 +2797,7 @@ func t_cast_sentry(caster: Unit) -> void:
 	skills_mod.cast_sentry(caster)
 
 func t_charge_from_drag(px: float) -> float:
-	return _charge_from_drag(px)
+	return aim.charge_from_drag(px)
 
 func t_check_heli_crash(u: Unit) -> bool:
 	return _check_heli_crash(u)
@@ -3079,7 +2845,7 @@ func t_perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool
 	return skills_mod.perform_skill(u, sid, aim, cell)
 
 func t_pick_place_kind(nm: String) -> void:
-	_pick_place_kind(nm)
+	sandbox.pick_place_kind(nm)
 
 func t_rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	await _rocket_salvo(u, fpos)
@@ -3106,7 +2872,7 @@ func t_ai_skill(u: Unit, plan: Dictionary) -> void:
 	_ai_skill(u, plan)
 
 func t_begin_aim() -> void:
-	_begin_aim()
+	aim.begin_aim()
 
 func t_btn_end_turn() -> Button:
 	return _btn_end_turn

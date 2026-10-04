@@ -49,6 +49,8 @@ const MODULES := [
 	{"mod": "res://src/view/skill_runner.gd", "host": "res://src/view/battle_scene.gd"},
 	{"mod": "res://src/view/turn_runner.gd", "host": "res://src/view/battle_scene.gd"},
 	{"mod": "res://src/view/action_menu.gd", "host": "res://src/view/battle_scene.gd"},
+	{"mod": "res://src/view/sandbox_runner.gd", "host": "res://src/view/battle_scene.gd"},
+	{"mod": "res://src/view/aim_controller.gd", "host": "res://src/view/battle_scene.gd"},
 	# 哨兵的三个方法在宿主里的包装名与模块不同（宿主为了保住测试的
 	# `_s._tick_sentry_queue()` 等调用而改了名），所以显式列出。
 	# ⚠️ 第 97 轮 P0 清账期之后，宿主里的同名薄包装**已删掉 45 个**，
@@ -128,6 +130,8 @@ const FORWARDING_MEMBERS := {
 	"skills_mod": "res://src/view/skill_runner.gd",
 	"turn": "res://src/view/turn_runner.gd",
 	"action_menu": "res://src/view/action_menu.gd",
+	"sandbox": "res://src/view/sandbox_runner.gd",
+	"aim": "res://src/view/aim_controller.gd",
 	"field": "res://src/view/projectile_field.gd",
 	"ui": "res://src/view/battle_ui.gd",
 }
