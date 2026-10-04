@@ -41,7 +41,7 @@ const TURN_INERTIA := 3.5          # 惯性：当前角速度向目标逼近的�
 
 # ── 发射器 ──
 const LAUNCHER_NAME := "巡飞弹发射器"
-const LAUNCH_RANGE := 12.0         # 射程（格）
+const LAUNCH_RANGE := 24.0         # 判定/射程（格）：第 94 轮 12 -> 24
 const LAUNCH_COOLDOWN_TURNS := 5   # 每 5 个回合边界一枚（GM 计时）
 const CONE_DEG := 45.0             # 初始方向：以"发射器 -> 目标"为中心线，左右各 45° 内随机
 const SAMPLE_HZ := 12.0            # 每帧检测太浪费，按这个频率采样

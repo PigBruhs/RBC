@@ -3068,6 +3068,50 @@ func _initialize() -> void:
 		"直升机齐射落点全部钳在可行动区域内（%d 发）" % int(Level.heli()["rockets"]))
 	_s.clear_projectiles()
 
+	# ── 56. 枪榴弹在空中被箭击落：模型要消失、就地落地开始计时（第 94 轮确认）──
+	print("\n[56] 枪榴弹飞行中被击落")
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()
+	var p94_sani: Unit = _unit_by("萨尼铁塔", 0)
+	var p94_archer: Unit = _unit_by("Alette", 0)
+	for p94_u in _s.units:
+		p94_u.cell = Vector2i(2, 44)
+		if p94_u.visual != null:
+			p94_u.visual.position = Vector3(2.5, p94_u.hover, 44.5)
+	p94_sani.cell = Vector2i(10, 20)
+	p94_sani.visual.position = Vector3(10.5, 0.0, 20.5)
+	p94_archer.cell = Vector2i(10, 26)          # 站在弹道正上方：箭沿 y 往下飞
+	p94_archer.visual.position = Vector3(10.5, 0.0, 26.5)
+	var p94_gp: Projectile = _s._spawn_grenade_shot(p94_sani, Vector2(10.5, 40.5), "grenade_launcher")
+	# 先飞一会儿，让手榴弹离开萨尼铁塔身前（不然箭一生成就撞上别人）
+	for p94_i in 30:
+		_s.field.step(1.0 / 60.0)
+	var p94_alive0: bool = p94_gp.alive
+	var p94_can: bool = p94_alive0 and Ballistics.can_shoot_down(Projectile.KIND_ARROW, p94_gp)
+	var p94_models0: int = _s._grenade_models.size()
+	var p94_pend0: int = _s.gm.pending.size()
+	_s._debug_log.clear()
+	var p94_ar: Projectile = _s._spawn_arrow(p94_archer, Vector3(10.5, 0.75, 26.5),
+		Vector3(10.5, 0.4, 20.0), null, false, false)
+	for p94_i2 in 400:
+		_s.field.step(1.0 / 60.0)
+		if not p94_gp.alive:
+			break
+	var p94_shot := false
+	for p94_lg in _s._debug_log:
+		if String(p94_lg).contains("击落"):
+			p94_shot = true
+	print("    枪榴弹：飞行中 alive=%s ｜ 被击落=%s ｜ 消亡原因='%s' ｜ 模型 %d -> %d ｜ GM %d -> %d" % [
+		p94_alive0, p94_shot, p94_gp.removed_reason, p94_models0, _s._grenade_models.size(),
+		p94_pend0, _s.gm.pending.size()])
+	_chk(p94_can, "枪榴弹声明自己怕箭（炮弹类统一模板，飞行中可以被击落）")
+	_chk(not p94_gp.alive and p94_gp.removed_reason == "shot_down",
+		"飞行中的枪榴弹真的被箭打掉了（飞行模型消失、就地落地）")
+	_chk(p94_shot, "日志里写明「被箭矢击落」")
+	_chk(_s._grenade_models.size() == p94_models0 + 1 and _s.gm.pending.size() == p94_pend0 + 1,
+		"被击落的枪榴弹就地落地：立起弹体模型 + 照旧登记 GM 计时（不是整发作废）")
+	_s.clear_projectiles()
+
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
 		print("✅ v3 试玩链路全部通过")

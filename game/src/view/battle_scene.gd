@@ -1668,7 +1668,7 @@ func _placeable_info(p: Placeable) -> String:
 	if p.name == "木刺":
 		txt += "尖桩拒马，挡住地面单位；但箭矢可以从上方越过，不阻挡远程。"
 	elif Loiter.is_launcher(p):
-		txt += "巡飞弹发射器：射程 %d 格，只打**进入范围的正在移动的角色**，" % int(Loiter.LAUNCH_RANGE)
+		txt += "巡飞弹发射器：判定范围 %d 格，只打**进入范围的正在移动的敌方角色**，" % int(Loiter.LAUNCH_RANGE)
 		txt += "每 %d 个回合边界发射一枚；发射方向 = 目标方向 ±%d° 内随机。" % [
 			Loiter.LAUNCH_COOLDOWN_TURNS, int(Loiter.CONE_DEG)]
 		txt += "巡飞弹可以被玩家用 Q/E 制导（左/右转弯），近炸引信 + 飞满 %d 格自动引爆。" % int(Loiter.MAX_DIST)
