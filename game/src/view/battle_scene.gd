@@ -680,6 +680,11 @@ func _refresh_upgrades() -> void:
 		ui.refresh_upgrades(selected)
 
 
+## 注：上面的 `_refresh_upgrades()` 全仓零引用 —— 保留是因为 `check_wrappers` 把它
+## 登记成了 `battle_ui.gd` 的包装（覆盖顺带纳入的）。加点 UI 已按用户要求整体移除
+## （规格 §九：左下角只保留队列可视化），所以它永远不会有调用方；
+## 删它需要同步改 `check_wrappers.gd` 的 MODULES。留在 P0 清账期的后续步骤里一起处理。
+
 func _ready() -> void:
 	# 先按当前关卡定尺寸与相机角度，再建一切
 	GW = Level.gw()
@@ -1747,8 +1752,9 @@ func _show_result(win: bool) -> void:
 		ui.show_result(win)
 
 
-func _on_result_continue() -> void:
-	get_tree().reload_current_scene()
+## 注：原 `_on_result_continue()`（`get_tree().reload_current_scene()`）于第 97 轮 P0
+## 清账期删除 —— 全仓零引用（死代码）。胜者界面的「继续」按钮走的是 `ui_restart()` /
+## `BattleUI` 自己的回调，不需要这个中转。
 
 ## 点格子类目标（俯冲轰炸这类 aim=cell 的技能，以及以后"点地格"的普攻）：
 ## 越界/超程会提示重新点；合法就交给统一入口。单独成函数便于自检直接调用。
@@ -2267,10 +2273,10 @@ func _holy_sani_check(u: Unit) -> void:
 	_revive_hero(mate)
 
 
-## 破片：箭矢类平飞弹（无重力、离地 0.5），伤害随飞行距离衰减
-## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装；全仓当前无调用点）
-func _spawn_fragment(caster: Unit, from: Vector3, dir: Vector2) -> Projectile:
-	return sink.spawn_fragment(caster, from, dir)
+## 注：原 `_spawn_fragment()` 薄包装于第 97 轮 P0 清账期删除 —— 全仓零引用。
+## 破片是 `ProjectileSink.rocket_fragments()` / `explode_grenade()` 里**直接**
+## `Ordnance.make_fragment(...)` 造的，从来没走过这个中转。（实现仍在
+## `view/projectile_sink.gd` 里，只是它自己也没被调用 —— 见那里的注释。）
 
 
 ## ↓ 实现已搬到 view/projectile_sink.gd（保留同名薄包装；调用方只剩 sink.on_projectile_event）
@@ -2761,17 +2767,9 @@ func _after_damage_to_placeable(pl: Placeable) -> void:
 			(pl.visual as PlaceableView).play_destroy()
 
 
-## 落点 BLAST_RADIUS 内是否有沙盒道具（决定要不要走"空爆"提前返回）
-
-func _any_placeable_in_blast(center: Vector2i) -> bool:
-	var ctr := Vector2(float(center.x) + 0.5, float(center.y) + 0.5)
-	for pl in placeables:
-		if not pl.is_alive():
-			continue
-		if ctr.distance_to(Vector2(float(pl.cell.x) + 0.5, float(pl.cell.y) + 0.5)) <= BLAST_RADIUS:
-			return true
-	return false
-
+## 注：原 `_any_placeable_in_blast()` 于第 97 轮 P0 清账期删除 —— 全仓零引用（死代码）。
+## 空爆的"要不要提前返回"判定现在在 `ProjectileSink.air_burst()` 里自己算，
+## 不需要宿主提供这个查询。
 
 ## 单位阵亡统一入口：假人会自动满血复活（用户要求，方便长期测试）
 ## 关键：**同一单位的复活计时器只能有一个**。以前每挨一发就新建一个计时器，
