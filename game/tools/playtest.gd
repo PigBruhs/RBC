@@ -3068,7 +3068,7 @@ func _initialize() -> void:
 		"直升机齐射落点全部钳在可行动区域内（%d 发）" % int(Level.heli()["rockets"]))
 	_s.clear_projectiles()
 
-	# ── 56. 枪榴弹在空中被箭击落：模型要消失、就地落地开始计时（第 94 轮确认）──
+	# ── 56. 枪榴弹在空中被箭击落：整发直接消失（第 96 轮；以前会就地落地 + 照炸）──
 	print("\n[56] 枪榴弹飞行中被击落")
 	_s.clear_projectiles()
 	_s.gm.clear_all_sentries()
@@ -3098,19 +3098,68 @@ func _initialize() -> void:
 		if not p94_gp.alive:
 			break
 	var p94_shot := false
+	var p94_gone := false
 	for p94_lg in _s._debug_log:
 		if String(p94_lg).contains("击落"):
 			p94_shot = true
-	print("    枪榴弹：飞行中 alive=%s ｜ 被击落=%s ｜ 消亡原因='%s' ｜ 模型 %d -> %d ｜ GM %d -> %d" % [
+		if String(p94_lg).contains("直接消失"):
+			p94_gone = true
+	# 再多跑 6 秒：确认它不会"过一会儿又在地上炸一下"（GM 里不许有这一发）
+	for p94_i3 in 360:
+		_s.field.step(1.0 / 60.0)
+	print("    枪榴弹：飞行中 alive=%s ｜ 被击落=%s ｜ 消亡原因='%s' ｜ 模型 %d -> %d ｜ GM %d -> %d ｜ 直接消失=%s" % [
 		p94_alive0, p94_shot, p94_gp.removed_reason, p94_models0, _s._grenade_models.size(),
-		p94_pend0, _s.gm.pending.size()])
+		p94_pend0, _s.gm.pending.size(), p94_gone])
 	_chk(p94_can, "枪榴弹声明自己怕箭（炮弹类统一模板，飞行中可以被击落）")
 	_chk(not p94_gp.alive and p94_gp.removed_reason == "shot_down",
-		"飞行中的枪榴弹真的被箭打掉了（飞行模型消失、就地落地）")
+		"飞行中的枪榴弹真的被箭打掉了（飞行模型消失）")
 	_chk(p94_shot, "日志里写明「被箭矢击落」")
-	_chk(_s._grenade_models.size() == p94_models0 + 1 and _s.gm.pending.size() == p94_pend0 + 1,
-		"被击落的枪榴弹就地落地：立起弹体模型 + 照旧登记 GM 计时（不是整发作废）")
+	_chk(p94_gone, "日志写明整发直接消失（不落地、不爆炸）")
+	_chk(_s._grenade_models.size() == p94_models0 and _s.gm.pending.size() == p94_pend0,
+		"被击落的枪榴弹不落地：不立弹体模型、不登记 GM 计时（第 96 轮：不会过一会儿又炸）")
 	_s.clear_projectiles()
+
+	# ── 57. 近战不能瞄准直升机（第 96 轮）──
+	print("\n[57] 近战 vs 悬停的直升机")
+	_s.clear_projectiles()
+	var p96_heli: Unit = null
+	for p96_u in _s.units:
+		# 注意：花名册里双方各有一架直升机，这里要的是**敌方那架**（近战的敌人）
+		if AttackProfile.is_heli(p96_u) and p96_u.side == UnitData.Side.ENEMY:
+			p96_heli = p96_u
+			break
+	p96_heli.power_cur = p96_heli.power_max
+	p96_heli.cell = Vector2i(11, 30)
+	p96_heli.visual.position = Vector3(11.5, p96_heli.hover, 30.5)
+	gerald.cell = Vector2i(10, 30)                   # 近战贴到它旁边那一格
+	gerald.visual.position = Vector3(10.5, 0.0, 30.5)
+	gerald.begin_turn()
+	gerald.energy = gerald.energy_max
+	_s.active = gerald
+	_s._menu_attack()
+	var p96_hl: bool = _s.attackable.has(p96_heli.cell)
+	var p96_aim: bool = _s._can_aim_unit(p96_heli)
+	var p96_pw0: int = p96_heli.power_cur
+	var p96_ok: bool = _s._perform_basic(gerald, _s._cc(p96_heli.cell), p96_heli)
+	print("    相邻：直升机高 %0.1f 格 ｜ 紫格高亮=%s ｜ 可瞄准=%s ｜ 出手=%s ｜ 直升机力量 %d -> %d ｜ 已行动=%s" % [
+		p96_heli.body_h(), p96_hl, p96_aim, p96_ok, p96_pw0 / 1000, p96_heli.power_cur / 1000,
+		gerald.has_acted])
+	_chk(not p96_hl, "近战点普攻后：悬停的直升机那一格不亮（够不着）")
+	_chk(not p96_aim, "近战不能瞄准直升机（_can_aim_unit 直接拒绝）")
+	_chk(not p96_ok and p96_heli.power_cur == p96_pw0 and not gerald.has_acted,
+		"就算硬调 _perform_basic 也打不出去：不掉血、不置已行动")
+	# 远程不受这条限制：照样能瞄（它本来就按高度轴抬枪口）
+	alette.cell = Vector2i(7, 30)
+	alette.visual.position = Vector3(7.5, 0.0, 30.5)
+	alette.begin_turn()
+	alette.energy = alette.energy_max
+	_s.active = alette
+	_s._menu_attack()
+	print("    弓箭手（4 格外）：紫格高亮=%s ｜ 可瞄准=%s" % [
+		_s.attackable.has(p96_heli.cell), _s._can_aim_unit(p96_heli)])
+	_chk(_s.attackable.has(p96_heli.cell) and _s._can_aim_unit(p96_heli),
+		"远程不受这条限制：照样能瞄准直升机")
+	_s._cancel_to_menu()
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():

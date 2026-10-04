@@ -299,6 +299,27 @@ func _initialize() -> void:
 	var hv_hits: Array = Damage.air_burst(null, Vector3(5.5, 2.5, 5.5), ab_opts, [ab_hv] as Array[Unit])
 	_expect(hv_hits.size() == 1, "空爆结算会按 hover 判定（悬空单位也能被空爆打到）", fails)
 
+	# ── 近战够不着空中单位（用户口径第 96 轮：近战攻击不能瞄准直升机）──
+	print("\n── 近战 vs 空中单位 ──")
+	_expect(AttackProfile.id_for(Unit.from_data(by_name["Gerald"])) == AttackProfile.BASIC_MELEE,
+		"杰拉尔德是近战（这条规则针对近战）", fails)
+	_expect(not Targeting.melee_reaches(grd, hv), "近战够不着悬停 2 格的直升机", fails)
+	var melee_ground := Unit.from_data(by_name["Airburst mortar"])
+	melee_ground.cell = Vector2i(9, 6)
+	_expect(Targeting.melee_reaches(grd, melee_ground),
+		"近战照旧能打地面单位（只有身体离地的够不着）", fails)
+	# 远程 / 投掷不受这条限制：它们本来就按高度轴瞄身体中心（aim_height）
+	_expect(Targeting.melee_reaches(Unit.from_data(by_name["Alette"]), hv),
+		"弓箭手不受这条限制（能瞄直升机，靠 aim_height 抬枪口）", fails)
+	_expect(Targeting.melee_reaches(Unit.from_data(by_name["萨尼铁塔"]), hv),
+		"投掷手不受这条限制", fails)
+	# 俯冲中的直升机（临时高度 2~4 格）同样够不着；落地的身体高度 = 0 才够得着
+	hv.body_y = 4.0
+	_expect(not Targeting.melee_reaches(grd, hv), "爬升到 4 格投弹时更够不着", fails)
+	hv.body_y = 0.0
+	_expect(Targeting.melee_reaches(grd, hv), "身体落地（高度 0）时近战就够得着", fails)
+	hv.body_y = -1.0
+
 	# ── 炮弹类的"撞到人 = 在命中处落地"规则表（第 87 轮）──
 	print("\n── 弹道撞人规则 ──")
 	_expect(Ballistics.body_impact(Projectile.KIND_SHELL) == "land"
@@ -318,9 +339,10 @@ func _initialize() -> void:
 	_expect(rk_i.hit_tags.has(Projectile.KIND_ARROW), "火箭可以被箭击落（炮弹类统一模板）", fails)
 	_expect(Ballistics.can_shoot_down(Projectile.KIND_ARROW, rk_i), "箭矢真的能拦下火箭", fails)
 	_expect(Ballistics.intercept_result(Projectile.KIND_ROCKET) == "burst"
-		and Ballistics.intercept_result(Projectile.KIND_SHELL) == "burst"
-		and Ballistics.intercept_result(Projectile.KIND_GRENADE) == "drop",
-		"被拦下：炮弹/火箭就地空爆，枪榴弹就地落地计时", fails)
+		and Ballistics.intercept_result(Projectile.KIND_SHELL) == "burst",
+		"被拦下：炮弹/火箭就地空爆", fails)
+	_expect(Ballistics.intercept_result(Projectile.KIND_GRENADE) == "",
+		"枪榴弹被击落 = 整发作废（第 96 轮：模型直接消失，不落地、不爆炸）", fails)
 	_expect(Ballistics.intercept_result(Projectile.KIND_MARKER) == "",
 		"召唤球被击落只是作废（不炸）", fails)
 	# 哨兵箭只吃 25% 力量（用户口径第 83 轮）

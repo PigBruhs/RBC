@@ -165,6 +165,7 @@ static func plan(ctx: Ctx) -> Dictionary:
 	var best_s := -1e9
 	var approach: Unit = null                 # 打不到任何人时，朝谁靠拢
 	var approach_s := -1e9
+	var air_only := false                     # 敌人里只剩"近战够不着的空中单位"
 	var spots: Array = [me.cell]
 	for c in ctx.reachable.keys():
 		spots.append(c)
@@ -173,6 +174,11 @@ static func plan(ctx: Ctx) -> Dictionary:
 	for from in spots:
 		for t in ctx.foes:
 			if not t.is_alive():
+				continue
+			# 近战够不着空中的单位（用户口径第 96 轮：近战攻击不能瞄准直升机）——
+			# 既不当攻击目标、也不当靠拢路标：走上去也永远砍不到，纯属白过回合。
+			if not Targeting.melee_reaches(me, t):
+				air_only = true
 				continue
 			var s := score(me, t, from, ctx)
 			if s > approach_s:
@@ -243,7 +249,9 @@ static func plan(ctx: Ctx) -> Dictionary:
 		return {"action": "end", "note": "已经动过了，这回合就这样"}   # 规则：移动后不能休息
 	var far: Unit = approach
 	if far == null:
-		return {"action": "end", "note": "没有目标"}
+		# 敌人只剩空中的（近战一辈子砍不到）：如实说明，不说"没有目标"这种假话
+		var note := "够不着空中的目标（近战打不到直升机）" if air_only else "没有目标"
+		return {"action": "end", "note": note}
 	# 朝目标挪一步：在可达格里挑离它最近的。
 	# 第 93 轮：**哨兵回避只对远程/投掷**（和评分口径一致）——
 	# 近战躲哨兵射界会永远贴不上去，一旦所有"更近的格子"都在敌方哨兵圈里，

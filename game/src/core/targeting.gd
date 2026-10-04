@@ -71,6 +71,18 @@ static func attackable_cells(u: Unit, units: Array[Unit]) -> Dictionary:
 	return res
 
 
+## 【近战够不够得着这个单位】用户口径（第 96 轮）：**近战攻击不能瞄准直升机**。
+## 规则只按高度轴算（和 body_span / aim_height 同一套口径）：近战是贴上去砍，
+## 只能砍**脚踏在地上**的单位；身体离地（直升机 hover = 2 格，俯冲时 2~4 格）就够不着。
+## 远程 / 投掷不受这条限制 —— 它们本来就瞄身体中心，能打空中目标。
+static func melee_reaches(u: Unit, t: Unit) -> bool:
+	if t == null:
+		return false
+	if u != null and u.role != UnitData.Role.MELEE:
+		return true
+	return t.body_h() <= 0.0001
+
+
 ## 圆与格子（边长 1 的正方形）是否相交：红圈沾到格子就算命中
 static func circle_touches_cell(ctr: Vector2, cell: Vector2i, radius: float) -> bool:
 	var nx := clampf(ctr.x, float(cell.x), float(cell.x) + 1.0)

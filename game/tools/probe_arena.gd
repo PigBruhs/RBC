@@ -149,8 +149,8 @@ func _process(d: float) -> bool:
 				_chk(_guard.power_cur == _guard.power_max, "落河不产生爆炸伤害")
 				_chk(_s.count_impact_rings() == 0, "落河不留红圈")
 				_shot("arena_after.png")
-				# ── 枪榴弹在河上空被打掉：不许把模型立在河面上（第 89 轮）──
-				print("\n[3] 枪榴弹在河上空被打掉")
+				# ── 枪榴弹在空中被打掉：整发直接消失（第 96 轮；以前会就地落地/立模型）──
+				print("\n[3] 枪榴弹在空中被打掉")
 				var sani_g = unit_by("萨尼铁塔")
 				var gp_r := Ordnance.make_grenade(sani_g, Vector2(10.5, 20.5), true)
 				gp_r.from = Vector2(10.5, 20.5)
@@ -159,16 +159,20 @@ func _process(d: float) -> bool:
 				var pend_before: int = _s.gm.pending.size()
 				_s._debug_log.clear()
 				_s._shell_intercepted(gp_r, "在半空被打爆")
+				var gone_log := false
 				var river_log := false
 				for lg in _s._debug_log:
+					if String(lg).contains("直接消失"):
+						gone_log = true
 					if String(lg).contains("落进河里"):
 						river_log = true
-				print("    (10,20) 是河=%s ｜ 模型 %d -> %d ｜ GM %d -> %d ｜ 落河日志=%s" % [
+				print("    (10,20) 是河=%s ｜ 模型 %d -> %d ｜ GM %d -> %d ｜ 直接消失=%s ｜ 落河日志=%s" % [
 					Level.is_river(Vector2i(10, 20), "arena"), models_before, _s._grenade_models.size(),
-					pend_before, _s.gm.pending.size(), river_log])
-				_chk(river_log, "被击落的枪榴弹落在河面 -> 按落河处理（直接消失）")
+					pend_before, _s.gm.pending.size(), gone_log, river_log])
+				_chk(gone_log and not river_log,
+					"被击落的枪榴弹整发直接消失（不落地、不爆炸，连河面规则都不走）")
 				_chk(_s._grenade_models.size() == models_before and _s.gm.pending.size() == pend_before,
-					"河面上不许立枪榴弹模型、也不登记 GM 计时")
+					"不许立枪榴弹模型、也不登记 GM 计时（第 96 轮）")
 				# ── 复活点（第 87 轮）：必须在老国王正前方那一行，不许回河边 ──
 				print("\n[4] 英雄复活点")
 				var gz = unit_by("Gerald")

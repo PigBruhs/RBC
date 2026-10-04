@@ -63,11 +63,11 @@ static func is_shell_class(kind: String) -> bool:
 
 ## 这一类【在半空被箭打掉】时怎么收尾：
 ##   "burst"  -> 就地空爆（炮弹 / 火箭 / 巡飞弹）
-##   "drop"   -> 就地落地、开始自己的计时（枪榴弹）
-##   ""       -> 不适用（召唤球只是信标：被击落直接作废，不炸）
+##   ""       -> 整发作废、**模型直接消失**（枪榴弹 / 召唤球）
+## 用户口径（第 96 轮）：枪榴弹被击落不再"就地落地" ——
+##   以前它会在当前格立起弹体、登记 GM 计时、然后照样爆炸（打掉了还照炸）；
+##   现在和轨道空爆的召唤球一样：打掉就是没了（不落地、不立模型、不计时、不爆炸）。
 static func intercept_result(kind: String) -> String:
-	if kind == Projectile.KIND_GRENADE:
-		return "drop"
 	if kind == Projectile.KIND_SHELL or kind == Projectile.KIND_ROCKET \
 			or kind == Projectile.KIND_LOITER:
 		return "burst"

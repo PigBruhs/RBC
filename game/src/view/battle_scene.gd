@@ -1925,6 +1925,7 @@ func _menu_attack() -> void:
 			reachable = {}
 			# 只显示"当前位置能打到的格子"（紫色高亮）
 			attackable = Targeting.attack_range_cells_rect(active, PX, PY, PW, PH)
+			_prune_air_cells()       # 近战：够不着的空中单位那格不亮（第 96 轮）
 			_draw_hints()
 			_refresh_all()
 
@@ -2259,9 +2260,11 @@ func _after_projectile_gone(sh: Ordnance.Shot) -> void:
 		_finish_turn()
 
 
-## 炮弹类【被箭击落】的统一收尾（用户口径第 83/84 轮）：
+## 炮弹类【被箭击落】的统一收尾（用户口径第 83/84/96 轮）：
 ##   · 炮弹 / 火箭 -> 就地空爆（一格球三维判定，真的造成伤害）
-##   · 枪榴弹       -> 就地落地（和正常落地完全同一条路：见 _land_shell）
+##   · 巡飞弹       -> 战斗部就地炸开
+##   · 枪榴弹       -> **整发作废：模型直接消失**（第 96 轮用户口径）
+##                     不落地、不立模型、不登记 GM 计时、不爆炸 —— 和轨道空爆的召唤球一个待遇。
 ## 注意（第 87 轮）：**飞行中撞到角色不走这里**，那是"在命中处落地"（_land_shell）。
 func _shell_intercepted(p: Projectile, why: String) -> void:
 	if p == null:
@@ -2270,13 +2273,11 @@ func _shell_intercepted(p: Projectile, why: String) -> void:
 		# 巡飞弹被箭打掉：整发战斗部就地炸开（造伤范围还是它自己的直径两格球）
 		_loiter_burst(p, p.pos3())
 		return
-	if Ballistics.intercept_result(p.kind) == "drop":
-		# 用户口径第 89 轮：走 _land_shell —— 在**河面/空场上空**被打掉的枪榴弹
-		# 直接作废（不立模型、不登记 GM），以前会把模型立在河面上。
+	if Ballistics.intercept_result(p.kind) == "":
+		# 被打掉就没了：飞行模型随弹道物一起回收，地上不留东西、GM 里不排队。
 		var gc := Vector2i(int(floor(p.pos().x)), int(floor(p.pos().y)))
-		_log("  🛑 %s的%s%s，就地落地（%d, %d）" % [
+		_log("  🛑 %s的%s%s，整发直接消失（(%d, %d) 不落地、不爆炸）" % [
 			p.owner_name, ProjectileField.kind_cn(p.kind), why, gc.x, gc.y])
-		_land_shell(p, p.pos())
 		return
 	_flash_sphere(p.pos3(), 0.6, 0.25)
 	_air_burst(p, why)
@@ -3366,6 +3367,11 @@ func _perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Place
 	# 拒绝类文案不写日志（用户口径：日志只记既定事实，提示只留在状态栏/菜单）。
 	if u.energy_points() < cost:
 		return false
+	# 近战够不着空中的单位（用户口径第 96 轮：近战攻击不能瞄准直升机）——
+	# 和"精力不足"同一档的**拒绝**：不置已行动、不扣精力，由调用方收尾。
+	if String(prof["basic"]) == AttackProfile.BASIC_MELEE and target != null \
+			and not Targeting.melee_reaches(u, target):
+		return false
 	u.has_acted = true
 	u.has_moved = true
 	if cost > 0:
@@ -3468,6 +3474,27 @@ func _volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
 		if not last:
 			await get_tree().create_timer(gap).timeout
 	return true
+
+
+## 点目标前的最后一道闸（口径与 _perform_basic 里的拒绝完全一致）：
+## 近战够不着空中的单位 —— 第 96 轮用户口径「近战攻击不应该能瞄准直升机」。
+func _can_aim_unit(t: Unit) -> bool:
+	if active == null or t == null:
+		return false
+	return t.side != active.side and active.in_range_of(t.cell) \
+		and Targeting.melee_reaches(active, t)
+
+
+## 近战的高亮格：空中单位（够不着）那一格不点亮。
+## 例外：那格上还站着可打的沙盒道具时保留（同一格里道具照样能砍）。
+func _prune_air_cells() -> void:
+	if active == null or active.role != UnitData.Role.MELEE:
+		return
+	for c in attackable.keys():
+		var o := _unit_at(c)
+		if o != null and o.side != active.side and not Targeting.melee_reaches(active, o) \
+				and _placeable_at(c) == null:
+			attackable.erase(c)
 
 
 ## 点目标路径（玩家）：唯一差别是"已经出手过就不再响应"。
@@ -3655,7 +3682,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_set_pending("place", cell, null)
 					_refresh_all()
 				return
-			if t != null and t.side != active.side and attackable.has(cell):
+			if t != null and t.side != active.side and attackable.has(cell) and _can_aim_unit(t):
 				if _same_pending("attack", cell):
 					_clear_pending()
 					_show_attack_menu(t)
