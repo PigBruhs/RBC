@@ -1944,8 +1944,8 @@ func _initialize() -> void:
 		rockets, e0, he2.energy_points(), _s.active != he2])
 	_chk(rockets == 2, "第一次齐射应左右各一发（第 93 轮：共 8 次、16 发，每两波间隔 1 秒）")
 	_chk(he2.energy_points() == e0 - 4, "普攻必须消耗 4 点精力")
-	_chk(int(Level.heli()["salvo_gap"]) == 1, "第 83 轮：每两波火箭弹间隔 1 秒")
-	# 齐射是异步的：等它把 8 次打完（间隔 1 秒 -> 至少 7 秒）
+	_chk(int(Level.heli()["salvo_gap"] * 1000.0) == 500, "第 95 轮：每两波火箭弹间隔 0.5 秒")
+	# 齐射是异步的：等它把 8 次打完（间隔 0.5 秒 -> 至少 3.5 秒）
 	await _wait_salvo()
 	var rockets2 := 0
 	for it2 in _s.field.items:
@@ -1953,7 +1953,7 @@ func _initialize() -> void:
 		if pp2.kind == Projectile.KIND_ROCKET: rockets2 += 1
 	print("    齐射完成：场上火箭（含在飞）%d 发 ｜ 已出膛波次 %d" % [
 		rockets2, (_s._salvo_dbg.get("spawns", []) as Array).size()])
-	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，7 秒内 16 发基本都在飞）")
+	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，3.5 秒内 16 发基本都在飞）")
 	_chk((_s._salvo_dbg.get("spawns", []) as Array).size() == int(Level.heli()["salvo_pairs"]),
 		"8 次齐射全部出膛（第 93 轮：4 -> 8）")
 	_chk(_s.active != he2, "发射完即进入下一回合（无需等待落地）")
@@ -2293,7 +2293,7 @@ func _initialize() -> void:
 	_chk(near_fire == wave1.size(), "齐射必须从脚下（当前位置）出膛")
 	_chk((salvo0.get("base", Vector2.ZERO) as Vector2).distance_to(here) < 0.001,
 		"齐射基准 = 开火那一刻的当前位置")
-	await create_timer(1.15).timeout
+	await create_timer(float(Level.heli()["salvo_gap"]) + 0.15).timeout
 	var wave2: Array[Vector2] = []
 	for it2 in _s.field.items:
 		var pp2: Projectile = it2["p"]
@@ -2304,7 +2304,7 @@ func _initialize() -> void:
 		if f2.distance_to(here) > 0.6:
 			same_spot = false
 	print("    第二波 %d 发：出膛 %s（应与第一波同一处）" % [wave2.size(), wave2])
-	_chk(wave2.size() == 2, "第二波也应出膛（间隔 1 秒）")
+	_chk(wave2.size() >= 2, "第二波也应出膛（间隔 %.1f 秒）" % float(Level.heli()["salvo_gap"]))
 	_chk(same_spot and (he_e.visual.is_walking() == false), "站定开火：两波都从同一处出膛")
 	await _wait_salvo()                      # 等 8 波打完，别污染后面
 	_s.clear_projectiles()

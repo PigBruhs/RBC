@@ -898,6 +898,11 @@ func _initialize() -> void:
 	var ball_top: float = 0.15 + float(hcfg["drop_blast_r"])
 	_expect(float(hcfg["climb_h"]) > ball_top,
 		"爬升 %.1f 格 > 爆心球顶 %.2f 格 -> 炸不到自己" % [float(hcfg["climb_h"]), ball_top], fails)
+	# 第 95 轮：普攻间隔减半；投弹范围 = 半径 3 格的三维球
+	_expect(absf(float(hcfg["salvo_gap"]) - 0.5) < 0.001,
+		"直升机普攻每次齐射间隔 0.5 秒（第 95 轮：1 -> 0.5）", fails)
+	_expect(absf(float(hcfg["drop_blast_r"]) - 3.0) < 0.001,
+		"投弹范围 = 半径 3 格的三维球（第 95 轮确认）", fails)
 	print("    直升机普攻：%s" % AttackProfile.describe(heli_u2))
 	print("    Alette 普攻：%s" % AttackProfile.describe(Unit.from_data(by_name["Alette"])))
 

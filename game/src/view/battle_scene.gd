@@ -3055,13 +3055,14 @@ func _place_diving(u: Unit, pos: Vector2, h: float) -> void:
 	_sentry_lock(u, sample)
 
 
-## 投弹：投掷手普攻模型直径翻倍、半径 3 格、40 破甲 + 20 力量、不触发哨兵。
+## 投弹：投掷手普攻模型直径翻倍、**半径 3 格的三维球**、40 破甲 + 20 力量、不触发哨兵。
 ## 用户口径（第 86 轮）：判定改成**三维球**（球心在地面、半径 3 格）——
 ## 所以爬到 4 格以上投弹就炸不到自己（以前是"红圈沾格"，站多高都吃伤害）。
+## 第 95 轮：爆炸表现也照这个半径画（以前只有一个 1.2 的小闪光，看不出 3 格的范围）。
 func _drop_bomb(u: Unit, at: Vector2) -> void:
 	var cfg := Level.heli()
 	var radius := float(cfg["drop_blast_r"])
-	_flash_sphere(Vector3(at.x, 0.8, at.y), 1.2, 0.3)
+	_flash_sphere(Vector3(at.x, 0.8, at.y), radius, 0.42)
 	var opts := Combat.opts({
 		"power": int(cfg["drop_power"]) * 1000,
 		"armor_break": int(cfg["drop_break"]) * 1000,
