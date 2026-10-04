@@ -3909,3 +3909,468 @@ func _heli_shadow(u: Unit) -> void:
 	node.position = Vector3(u.visual.position.x, 0.02, u.visual.position.z)
 	var k: float = clampf(h / 2.0, 0.0, 1.5)
 	node.scale = Vector3(1.0 + 0.25 * k, 1.0, 1.0 + 0.25 * k)
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 测试 / 探针专用接口（t_*）—— **不是游戏逻辑**
+#
+# 谁用：只有 tools/playtest.gd 与 tools/probe_*.gd。
+# 游戏本体（src/ 下的任何代码）不许调用这里的方法 —— 它们是给测试的稳定契约，
+# 不参与"重构时怎么改内部结构"的自由度：内部怎么搬，t_* 的名字与语义都不变。
+#
+# 为什么要有这一层：测试过去直接摸 `_s._私有成员`，导致
+#   · 内部一改名/一搬模块，测试就炸；
+#   · battle_scene 里为了"测试还能调"被迫留着薄包装，行数永远降不下来。
+# 现在测试只认 t_*：读 = t_xxx()，写 = t_set_xxx(v)。
+#
+# 约束（与 tools 侧一一对应）：
+#   · 只暴露"测试真的用到的"成员，不预先扩大；
+#   · 不暴露可变字段本身（否则收口没意义）；
+#   · 与私有成员同名不同前缀：t_foo() -> _foo；t_set_foo(v) -> _foo = v；
+#   · 被 await 的私有协程，t_* 必须同样 await（否则调用方不再等待）。
+# ══════════════════════════════════════════════════════════════════════════════
+
+func t_debug_log() -> Array[String]:
+	return _debug_log
+
+func t_grenade_models() -> Dictionary:
+	return _grenade_models
+
+func t_turn_just_finished() -> Unit:
+	return _turn_just_finished
+
+func t_set_turn_just_finished(v: Unit) -> void:
+	_turn_just_finished = v
+
+func t_action_menu() -> PanelContainer:
+	return _action_menu
+
+func t_set_action_menu(v: PanelContainer) -> void:
+	_action_menu = v
+
+func t_pending_root() -> Node3D:
+	return _pending_root
+
+func t_on_unit_died(u: Unit) -> void:
+	_on_unit_died(u)
+
+func t_show_action_menu() -> void:
+	_show_action_menu()
+
+func t_attack_target_unit(t: Unit, break_armor: bool) -> void:
+	_attack_target_unit(t, break_armor)
+
+func t_menu_attack() -> void:
+	_menu_attack()
+
+func t_pending_kind() -> String:
+	return _pending_kind
+
+func t_spawn_arrow(attacker: Unit, from: Vector3, to: Vector3, target: Unit,
+		break_armor: bool, ends_turn: bool, tint_sentry: bool = false) -> Projectile:
+	return _spawn_arrow(attacker, from, to, target, break_armor, ends_turn, tint_sentry)
+
+func t_aim_active() -> bool:
+	return _aim_active
+
+func t_set_aim_active(v: bool) -> void:
+	_aim_active = v
+
+func t_attack_menu() -> PanelContainer:
+	return _attack_menu
+
+func t_set_attack_menu(v: PanelContainer) -> void:
+	_attack_menu = v
+
+func t_draw_hints() -> void:
+	_draw_hints()
+
+func t_revive_hero(u: Unit) -> void:
+	_revive_hero(u)
+
+func t_spawn_shell(caster: Unit, to: Vector2, ends_turn: bool,
+		pre: float = 0.0, group: String = "", blast_r: float = Ordnance.DEFAULT_BLAST_R) -> Projectile:
+	return _spawn_shell(caster, to, ends_turn, pre, group, blast_r)
+
+func t_btn_power() -> Button:
+	return _btn_power
+
+func t_loiter_pick_control() -> Projectile:
+	return _loiter_pick_control()
+
+func t_btn_attack() -> Button:
+	return _btn_attack
+
+func t_cam_focus() -> Vector3:
+	return _cam_focus
+
+func t_set_cam_focus(v: Vector3) -> void:
+	_cam_focus = v
+
+func t_queue_alternation_ok() -> bool:
+	return _queue_alternation_ok()
+
+func t_tick_loiter_launchers(delta: float) -> void:
+	_tick_loiter_launchers(delta)
+
+func t_update_camera() -> void:
+	_update_camera()
+
+func t_aim_skill_id() -> String:
+	return _aim_skill_id
+
+func t_set_aim_skill_id(v: String) -> void:
+	_aim_skill_id = v
+
+func t_btn_rest_menu() -> Button:
+	return _btn_rest_menu
+
+func t_clear_pending() -> void:
+	_clear_pending()
+
+func t_place_at(c: Vector2i) -> void:
+	_place_at(c)
+
+func t_place_kind() -> String:
+	return _place_kind
+
+func t_set_place_kind(v: String) -> void:
+	_place_kind = v
+
+func t_set_pending(kind: String, cell: Vector2i, actor: Unit = null) -> void:
+	_set_pending(kind, cell, actor)
+
+func t_zoom() -> float:
+	return _zoom
+
+func t_set_zoom(v: float) -> void:
+	_zoom = v
+
+func t_ai_turn() -> bool:
+	return _ai_turn
+
+func t_set_ai_turn(v: bool) -> void:
+	_ai_turn = v
+
+func t_cell_targeting() -> bool:
+	return _cell_targeting
+
+func t_set_cell_targeting(v: bool) -> void:
+	_cell_targeting = v
+
+func t_choose_skill(id: String) -> void:
+	_choose_skill(id)
+
+func t_clamp_cell(c: Vector2i) -> Vector2i:
+	return _clamp_cell(c)
+
+func t_click_cell_target(cell: Vector2i) -> bool:
+	return _click_cell_target(cell)
+
+func t_do_move(u: Unit, cell: Vector2i) -> void:
+	_do_move(u, cell)
+
+func t_in_bounds(c: Vector2i) -> bool:
+	return _in_bounds(c)
+
+func t_last_flash() -> Node3D:
+	return _last_flash
+
+func t_loiter_steer_apply(p: Projectile, dir: float, delta: float) -> void:
+	_loiter_steer_apply(p, dir, delta)
+
+func t_salvo_dbg() -> Dictionary:
+	return _salvo_dbg
+
+static func t_unit_pos(u: Unit) -> Vector2:
+	return _unit_pos(u)
+
+func t_after_damage_to_unit(u: Unit) -> void:
+	_after_damage_to_unit(u)
+
+func t_ai_attack(u: Unit, plan: Dictionary) -> void:
+	_ai_attack(u, plan)
+
+func t_aim_float_pos() -> Vector2:
+	return _aim_float_pos
+
+func t_set_aim_float_pos(v: Vector2) -> void:
+	_aim_float_pos = v
+
+func t_aim_now() -> Vector2:
+	return _aim_now
+
+func t_set_aim_now(v: Vector2) -> void:
+	_aim_now = v
+
+func t_aim_origin() -> Vector2:
+	return _aim_origin
+
+func t_set_aim_origin(v: Vector2) -> void:
+	_aim_origin = v
+
+func t_aim_valid() -> bool:
+	return _aim_valid
+
+func t_set_aim_valid(v: bool) -> void:
+	_aim_valid = v
+
+func t_btn_break() -> Button:
+	return _btn_break
+
+func t_can_aim_unit(t: Unit) -> bool:
+	return _can_aim_unit(t)
+
+func t_can_place_at(c: Vector2i) -> bool:
+	return _can_place_at(c)
+
+func t_check_last_stand() -> bool:
+	return _check_last_stand()
+
+func t_check_mats() -> Array:
+	return _check_mats
+
+func t_dive_begin(u: Unit) -> bool:
+	return _dive_begin(u)
+
+func t_dive_clear(u: Unit) -> void:
+	_dive_clear(u)
+
+func t_finish_placement() -> void:
+	_finish_placement()
+
+func t_fire() -> void:
+	_fire()
+
+func t_fire_loiter(pl: Placeable, ctr: Vector2, tgt: Unit) -> void:
+	_fire_loiter(pl, ctr, tgt)
+
+func t_gm_busy() -> bool:
+	return _gm_busy
+
+func t_passive_hooks() -> Dictionary:
+	return _passive_hooks
+
+func t_pending_cell() -> Vector2i:
+	return _pending_cell
+
+func t_planned_cell() -> Vector2i:
+	return _planned_cell
+
+func t_set_planned_cell(v: Vector2i) -> void:
+	_planned_cell = v
+
+func t_ranged_blocked_at(c: Vector2i, by_thrower: bool) -> bool:
+	return _ranged_blocked_at(c, by_thrower)
+
+func t_resolve_mortar_impact(attacker: Unit, center: Vector2i) -> void:
+	_resolve_mortar_impact(attacker, center)
+
+func t_same_pending(kind: String, cell: Vector2i) -> bool:
+	return _same_pending(kind, cell)
+
+func t_select_for_detail(u: Unit) -> void:
+	_select_for_detail(u)
+
+func t_show_attack_menu(t: Unit) -> void:
+	_show_attack_menu(t)
+
+func t_skill_menu() -> PanelContainer:
+	return _skill_menu
+
+func t_set_skill_menu(v: PanelContainer) -> void:
+	_skill_menu = v
+
+func t_ai_ctx(u: Unit) -> Ai.Ctx:
+	return _ai_ctx(u)
+
+func t_aim_range(t: float) -> float:
+	return _aim_range(t)
+
+func t_air_burst(p: Projectile, why: String = "被打爆") -> void:
+	_air_burst(p, why)
+
+func t_arrow_len_for_t(t: float) -> float:
+	return _arrow_len_for_t(t)
+
+func t_arrow_root() -> Node3D:
+	return _arrow_root
+
+func t_set_arrow_root(v: Node3D) -> void:
+	_arrow_root = v
+
+func t_attack_target_placeable(pl: Placeable) -> void:
+	_attack_target_placeable(pl)
+
+func t_blocked_cells() -> Dictionary:
+	return _blocked_cells()
+
+func t_btn_next() -> Button:
+	return _btn_next
+
+func t_cast_dive(u: Unit, cell: Vector2i) -> void:
+	_cast_dive(u, cell)
+
+func t_cast_sentry(caster: Unit) -> void:
+	_cast_sentry(caster)
+
+func t_charge_from_drag(px: float) -> float:
+	return _charge_from_drag(px)
+
+func t_check_heli_crash(u: Unit) -> bool:
+	return _check_heli_crash(u)
+
+func t_clear_selection() -> void:
+	_clear_selection()
+
+func t_compute_reachable(u: Unit) -> Dictionary:
+	return _compute_reachable(u)
+
+func t_dive_markers() -> Dictionary:
+	return _dive_markers
+
+func t_dive_tick(delta: float) -> void:
+	_dive_tick(delta)
+
+func t_explode_grenade(p: GameMaster.Pending) -> void:
+	_explode_grenade(p)
+
+func t_find_arrow_qte() -> ArrowQTE:
+	return _find_arrow_qte()
+
+func t_finish_turn() -> void:
+	await _finish_turn()
+
+func t_gm_step() -> void:
+	await _gm_step()
+
+func t_menu_move() -> void:
+	_menu_move()
+
+func t_next_turn() -> void:
+	await _next_turn()
+
+func t_on_proj_landed(p: Projectile) -> void:
+	_on_proj_landed(p)
+
+func t_panel() -> PanelContainer:
+	return _panel
+
+func t_path_to(u: Unit, goal: Vector2i) -> Array[Vector2i]:
+	return _path_to(u, goal)
+
+func t_perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
+	return _perform_skill(u, sid, aim, cell)
+
+func t_pick_place_kind(nm: String) -> void:
+	_pick_place_kind(nm)
+
+func t_rocket_salvo(u: Unit, fpos: Vector2) -> void:
+	await _rocket_salvo(u, fpos)
+
+func t_skill_info_text() -> String:
+	return _skill_info_text
+
+func t_set_skill_info_text(v: String) -> void:
+	_skill_info_text = v
+
+func t_spawn_grenade_model(cell: Vector2i, p: Projectile) -> void:
+	_spawn_grenade_model(cell, p)
+
+func t_spawn_grenade_shot(u: Unit, aim: Vector2, sid: String) -> Projectile:
+	return _spawn_grenade_shot(u, aim, sid)
+
+func t_tick_loiter_fuse() -> void:
+	_tick_loiter_fuse()
+
+func t_ai_move(u: Unit, cell: Vector2i, wait: bool = true) -> void:
+	await _ai_move(u, cell, wait)
+
+func t_ai_skill(u: Unit, plan: Dictionary) -> void:
+	_ai_skill(u, plan)
+
+func t_begin_aim() -> void:
+	_begin_aim()
+
+func t_btn_end_turn() -> Button:
+	return _btn_end_turn
+
+func t_cam_yaw() -> float:
+	return _cam_yaw
+
+func t_camera() -> Camera3D:
+	return _camera
+
+func t_cancel_to_menu() -> void:
+	_cancel_to_menu()
+
+static func t_cc(c: Vector2i) -> Vector2:
+	return _cc(c)
+
+func t_check_root() -> Node3D:
+	return _check_root
+
+func t_clear_pylons() -> void:
+	_clear_pylons()
+
+func t_confirm_attack(break_armor: bool) -> void:
+	_confirm_attack(break_armor)
+
+func t_confirm_cell_target(cell: Vector2i) -> bool:
+	return _confirm_cell_target(cell)
+
+func t_face_check_mark() -> void:
+	_face_check_mark()
+
+func t_fire_cannon_ai(u: Unit, ends_turn: bool = true) -> void:
+	_fire_cannon_ai(u, ends_turn)
+
+func t_hint_layer() -> Node3D:
+	return _hint_layer
+
+func t_holy_sani_check(u: Unit) -> void:
+	_holy_sani_check(u)
+
+func t_is_ai_unit(u: Unit) -> bool:
+	return _is_ai_unit(u)
+
+func t_menu_rest() -> void:
+	_menu_rest()
+
+func t_on_blank_click() -> void:
+	_on_blank_click()
+
+func t_pending_mats() -> Array:
+	return _pending_mats
+
+func t_perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Placeable = null,
+		break_armor: bool = false, guard_acted: bool = false) -> bool:
+	return _perform_basic(u, aim, target, placeable, break_armor, guard_acted)
+
+func t_proj_collision(p: Projectile) -> Projectile:
+	return _proj_collision(p)
+
+func t_qte_active() -> bool:
+	return _qte_active
+
+func t_refresh_all() -> void:
+	_refresh_all()
+
+func t_salvo_u() -> Unit:
+	return _salvo_u
+
+func t_shell_intercepted(p: Projectile, why: String) -> void:
+	_shell_intercepted(p, why)
+
+func t_spawn_marker(caster: Unit, to: Vector2) -> Projectile:
+	return _spawn_marker(caster, to)
+
+func t_start_carpet_bomb(caster: Unit, center: Vector2) -> void:
+	_start_carpet_bomb(caster, center)
+
+func t_sync_unit_visibility() -> void:
+	_sync_unit_visibility()
+
+func t_tick_pending_pulse(delta: float) -> void:
+	_tick_pending_pulse(delta)

@@ -46,7 +46,7 @@ func _move(u: Unit, c: Vector2i) -> void:
 ## 日志里这一段的"落点命运"计数
 func _fates() -> Dictionary:
 	var out := {"落地爆炸": 0, "落河": 0, "落空场": 0, "被击落": 0, "出界": 0, "撞到角色落地": 0}
-	for lg in _s._debug_log:
+	for lg in _s.t_debug_log():
 		var s := String(lg)
 		if s.contains("火箭落地"):
 			out["落地爆炸"] += 1
@@ -83,8 +83,8 @@ func _process(d: float) -> bool:
 			_victim.armor_cur = 0
 			_victim.pr = 0
 			_hp0 = _victim.power_cur
-			_s._debug_log.clear()
-			_s._rocket_salvo(_heli, Vector2(10.5, 22.5))   # 真实齐射（4 波 / 每波 1 秒）
+			_s.t_debug_log().clear()
+			_s.t_rocket_salvo(_heli, Vector2(10.5, 22.5))   # 真实齐射（4 波 / 每波 1 秒）
 			_t0 = _t
 			_stage = 1
 		1:
@@ -101,7 +101,7 @@ func _process(d: float) -> bool:
 				# ── 第二种情况：火箭在飞，发射者阵亡 ──
 				print("\n[2] 发射者中途坠机：落地还有伤害吗")
 				_s.clear_projectiles()
-				_s._debug_log.clear()
+				_s.t_debug_log().clear()
 				_move(_heli, Vector2i(12, 18))
 				_heli.power_cur = _heli.power_max
 				_heli.tags.erase("crashing")
@@ -113,7 +113,7 @@ func _process(d: float) -> bool:
 					Vector2(10.5, 22.5), false, _s.rng)
 				_s.field.register(rk)
 				_heli.power_cur = 0
-				_s._on_unit_died(_heli)                    # 出膛之后发射者立刻阵亡
+				_s.t_on_unit_died(_heli)                    # 出膛之后发射者立刻阵亡
 				print("    发射者力量 %d（已阵亡）｜ 火箭在飞 %s" % [_heli.power_cur, rk.alive])
 				_t0 = _t
 				_stage = 2

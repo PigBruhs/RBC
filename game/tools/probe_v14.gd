@@ -54,16 +54,16 @@ func _process(d: float) -> bool:
 				print("\n[1] 场上：我方 %d 人，敌方 %d 人" % [p, e])
 				# 人数改由关卡 roster 决定（场景解耦）：测试场 7 + 10
 				_chk(p == 8 and e == 11, "场上应是我方 8 + 敌方 11（按关卡 roster）")
-				_s._finish_placement()
-				_s._cam_focus = Vector3(6.0, 0.0, 7.0)
-				_s._zoom = 22.0
-				_s._update_camera()
+				_s.t_finish_placement()
+				_s.t_set_cam_focus(Vector3(6.0, 0.0, 7.0))
+				_s.t_set_zoom(22.0)
+				_s.t_update_camera()
 				_stage = 1
 		1:
 			if _t >= 0.6:
 				_shot("v14_field.png")
 				# 调试面板（重写版：选中即编辑）——先确认它真的能建出输入框
-				_s._select_for_detail(_alette)
+				_s.t_select_for_detail(_alette)
 				_s.ui.toggle_debug()
 				_s.ui.dbg_seen_unit = null
 				_s.ui.refresh_debug()
@@ -84,7 +84,7 @@ func _process(d: float) -> bool:
 				_alette.energy = _alette.energy_max
 				_alette.begin_turn()
 				_s.active = null
-				_s._cast_sentry(_alette)
+				_s.t_cast_sentry(_alette)
 				_chk(_s.gm.has_sentry(_alette), "阿莱特应进入哨兵状态")
 				print("    哨兵：%s" % _s.gm.sentry_desc())
 				_t0 = _t
@@ -103,7 +103,7 @@ func _process(d: float) -> bool:
 				_mortar.power_cur = _mortar.power_max
 				_mortar.begin_turn()
 				_s.active = null
-				_pp = _s._spawn_shell(_mortar, Vector2(13.0, 7.0), false)
+				_pp = _s.t_spawn_shell(_mortar, Vector2(13.0, 7.0), false)
 				print("    spawn -> alive=%s dur=%.2f t=%.2f projs=%d" % [_pp.alive, _pp.dur, _pp.t, _s.field.items.size()])
 				_t0 = _t
 				_stage = 2
@@ -112,7 +112,7 @@ func _process(d: float) -> bool:
 				print("\n[2] 炮弹飞行 + 哨兵")
 				var shells: int = _s.live_projectiles()
 				print("    存活弹道物 = %d ｜ 该发: alive=%s 原因='%s' t=%.2f" % [shells, _pp.alive, _pp.removed_reason, _pp.t])
-				for lg in _s._debug_log.slice(maxi(0, _s._debug_log.size() - 6)):
+				for lg in _s.t_debug_log().slice(maxi(0, _s.t_debug_log().size() - 6)):
 					print("    [日志] %s" % lg)
 				_chk(shells >= 1, "炮弹应在飞（哨兵随后拦截，见下一项断言）")
 				_shot("v14_shell.png")
@@ -129,20 +129,20 @@ func _process(d: float) -> bool:
 				_shot("v14_shotdown.png")
 				_shot("v14_after.png")
 				# 待确认黄勾：直接摆一个待确认格子（拉近看细节）
-				_s._zoom = 7.0
-				_s._cam_focus = Vector3(6.0, 0.0, 6.5)
-				_s._update_camera()
-				_s._set_pending("move", Vector2i(6, 7), _alette)
-				_s._draw_hints()
+				_s.t_set_zoom(7.0)
+				_s.t_set_cam_focus(Vector3(6.0, 0.0, 6.5))
+				_s.t_update_camera()
+				_s.t_set_pending("move", Vector2i(6, 7), _alette)
+				_s.t_draw_hints()
 				_t0 = _t
 				_stage = 6
 		6:
 			# 下一帧再截图（get_image() 拿的是上一帧），顺便让它完成"面向摄像机"
 			if _t - _t0 >= 0.12:
-				_chk(_s._pending_root.visible and _s._check_mats.size() == 4, "待确认黄勾应出现")
+				_chk(_s.t_pending_root().visible and _s.t_check_mats().size() == 4, "待确认黄勾应出现")
 				_shot("v14_check.png")
-				_s._clear_pending()
-				_s._draw_hints()
+				_s.t_clear_pending()
+				_s.t_draw_hints()
 				# 杰拉尔德被箭命中 -> 弹反 QTE
 				var g: Unit = null
 				var a: Unit = null
@@ -159,14 +159,14 @@ func _process(d: float) -> bool:
 				a.cell = Vector2i(6, 14)
 				a.visual.position = Vector3(6.5, 0.0, 14.5)
 				a.power_cur = Rules.points_to_milli(100)
-				_s._cam_focus = Vector3(6.0, 0.0, 10.0)
-				_s._update_camera()
+				_s.t_set_cam_focus(Vector3(6.0, 0.0, 10.0))
+				_s.t_update_camera()
 				_s.clear_projectiles()
-				_s._spawn_arrow(a, Vector3(6.5, 0.75, 14.5), Vector3(6.5, 0.55, 7.5), g, false, true)
+				_s.t_spawn_arrow(a, Vector3(6.5, 0.75, 14.5), Vector3(6.5, 0.55, 7.5), g, false, true)
 				_t0 = _t
 				_stage = 7
 		7:
-			if _s._qte_active:
+			if _s.t_qte_active():
 				_chk(_s.get_tree().paused, "弹反 QTE 期间必须暂停时间")
 				_chk(g_power_kept(), "QTE 期间不结算伤害")
 				print("    弹反 QTE：按键 = %s，窗口 = %s" % [_find_qte_keys(), _find_qte_windows()])
@@ -205,9 +205,9 @@ func _process(d: float) -> bool:
 				king.visual.position = Vector3(8.5, 0.0, 10.5)
 				princess.cell = Vector2i(9, 7)             # 站在炮口反方向，别被自己人的炮弹打死
 				princess.visual.position = Vector3(9.5, 0.0, 7.5)
-				_s._cam_focus = Vector3(8.5, 0.0, 10.0)
-				_s._zoom = 5.0
-				_s._update_camera()
+				_s.t_set_cam_focus(Vector3(8.5, 0.0, 10.0))
+				_s.t_set_zoom(5.0)
+				_s.t_update_camera()
 				_t0 = _t
 				_stage = 10
 		10:
@@ -216,7 +216,7 @@ func _process(d: float) -> bool:
 				var king: Unit = null
 				for u in _s.units:
 					if u.side == UnitData.Side.PLAYER and Unit.base_name(u.name) == "老国王": king = u
-				_s._fire_cannon_ai(king)                 # 让他真的开一炮
+				_s.t_fire_cannon_ai(king)                 # 让他真的开一炮
 				_t0 = _t
 				_stage = 11
 		11:
@@ -242,7 +242,7 @@ func _process(d: float) -> bool:
 
 
 func _find_qte_node():
-	return _s._find_arrow_qte()
+	return _s.t_find_arrow_qte()
 
 
 func _find_qte_keys() -> Array:

@@ -26,10 +26,11 @@ static func color_at(t: float, phase: float = 0.0, alpha: float = 1.0) -> Color:
 	return Color.from_hsv(h, 1.0, 1.0, alpha)
 
 
-## 取"偏亮/偏暗"版本，用于描边（同色相、不同明度），保证边缘比填充更显眼
+## 取描边色。**实现与 color_at() 完全相同** —— 审计去重：原先两份逐字重复的公式。
+## 名字保留是因为调用点按语义区分"填充 / 描边"（几十处），删掉会伤可读性；
+## 将来若真要把它做成"同色相、不同明度"，只改这一处即可，不必再动所有调用点。
 static func edge_at(t: float, phase: float = 0.0, alpha: float = 1.0) -> Color:
-	var h := fposmod(t * rate() + phase, 1.0)
-	return Color.from_hsv(h, 1.0, 1.0, alpha)
+	return color_at(t, phase, alpha)
 
 
 ## 取填充版（半透明）

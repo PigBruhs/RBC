@@ -66,6 +66,17 @@ static func points_to_milli(points: int) -> int:
 	return points * 1000
 
 
+## 千分比 -> 显示文本（整数点不带小数：`2000 -> "2"`；否则一位小数：`1500 -> "1.5"`）。
+## 去重收敛：combat.gd / damage.gd 原先各有一份**逐字相同**的 `_fmt`，现在都转发到这里；
+## battle_scene.gd 还有第三份（测试可见的 `_fmt` / `ui_fmt`），留给后续统一处理。
+## 放在 Rules 的理由：`milli` 这个单位本身由 Rules 定义（points_to_milli / compute_d_milli 都在这），
+## 而且 Rules 已有 `option_label()` 这种"取值 -> 显示串"的先例。
+static func milli_text(milli: int) -> String:
+	if milli % 1000 == 0:
+		return str(milli / 1000)
+	return "%.1f" % (milli / 1000.0)
+
+
 # ── 加点（原型阶段：无限点数） ─────────────────────────────────────────────
 const UPG_POWER := "power"
 const UPG_ARMOR := "armor"

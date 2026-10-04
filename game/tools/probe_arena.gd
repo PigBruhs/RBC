@@ -42,7 +42,7 @@ func _process(d: float) -> bool:
 			if _t >= 0.25:
 				print("\n[1] 竞技场地形")
 				print("    物理 %d×%d ｜ 可行动 %d×%d @ %d,%d ｜ 关卡 %s ｜ 相机偏航 %.0f" % [
-					_s.GW, _s.GH, _s.PW, _s.PH, _s.PX, _s.PY, Level.name_of(), _s._cam_yaw])
+					_s.GW, _s.GH, _s.PW, _s.PH, _s.PX, _s.PY, Level.name_of(), _s.t_cam_yaw()])
 				_chk(_s.GW == 100 and _s.GH == 100, "竞技场物理边界是 100×100（炮弹不再飞出边界就消失）")
 				_chk(_s.PW == 21 and _s.PH == 41, "真正有格子的还是 21×41")
 				_chk(Level.play_rect("arena") == [0, 0, 21, 41], "可行动区域写在关卡元数据里")
@@ -55,20 +55,20 @@ func _process(d: float) -> bool:
 				var gp_void := Ordnance.make_grenade(carrier, Vector2(60.0, 60.0), true)
 				gp_void.from = Vector2(60.0, 60.0)
 				gp_void.to = Vector2(60.0, 60.0)
-				var models0: int = _s._grenade_models.size()
+				var models0: int = _s.t_grenade_models().size()
 				var pend0: int = _s.gm.pending.size()
-				_s._on_proj_landed(gp_void)
-				_chk(_s._grenade_models.size() == models0 and _s.gm.pending.size() == pend0,
+				_s.t_on_proj_landed(gp_void)
+				_chk(_s.t_grenade_models().size() == models0 and _s.gm.pending.size() == pend0,
 					"枪榴弹落在空场：作废（不立模型、不登记 GM）")
 				var sh_void: Projectile = Ordnance.make_shell(carrier, Vector2(60.0, 60.0), false, _s.rng)
 				sh_void.from = Vector2(60.0, 60.0)
 				sh_void.to = Vector2(60.0, 60.0)
 				var rings0: int = _s.count_impact_rings()
-				_s._on_proj_landed(sh_void)
+				_s.t_on_proj_landed(sh_void)
 				_chk(_s.count_impact_rings() == rings0 + 1,
 					"炮弹落在空场：照常落地爆炸（不再因为飞出竞技场边界就消失）")
 				# 河不可走，桥可走
-				var blocked: Dictionary = _s._blocked_cells()
+				var blocked: Dictionary = _s.t_blocked_cells()
 				_chk(blocked.has(Vector2i(10, 20)), "河面不可移动")
 				_chk(not blocked.has(Vector2i(4, 20)) and not blocked.has(Vector2i(16, 20)),
 					"两座桥是正常地板（可移动）")
@@ -94,18 +94,18 @@ func _process(d: float) -> bool:
 				_chk(_s.gm.sentries.size() == 4, "场上应有 4 个常备哨兵（4 个公主）")
 				_chk(Level.is_bridge(Vector2i(5, 20), "arena") and not Level.is_bridge(Vector2i(6, 20), "arena"),
 					"桥格判定正确（x=5 是桥，x=6 是水）")
-				_s._cam_focus = Vector3(10.0, 0.0, 20.0)
-				_s._zoom = 26.0
-				_s._update_camera()
+				_s.t_set_cam_focus(Vector3(10.0, 0.0, 20.0))
+				_s.t_set_zoom(26.0)
+				_s.t_update_camera()
 				_t0 = _t
 				_stage = 1
 		1:
 			if _t - _t0 >= 0.2:
 				_shot("arena_top.png")
 				# 近距离看一眼河道与桥
-				_s._cam_focus = Vector3(10.0, 0.0, 20.0)
-				_s._zoom = 12.0
-				_s._update_camera()
+				_s.t_set_cam_focus(Vector3(10.0, 0.0, 20.0))
+				_s.t_set_zoom(12.0)
+				_s.t_update_camera()
 				_t0 = _t
 				_stage = 2
 		2:
@@ -126,7 +126,7 @@ func _process(d: float) -> bool:
 				_guard = guard
 				_s.clear_projectiles()
 				var rings: int = _s.count_impact_rings()
-				_s._spawn_shell(mortar, Vector2(10.5, 20.5), false)   # 落点在河中央
+				_s.t_spawn_shell(mortar, Vector2(10.5, 20.5), false)   # 落点在河中央
 				_t0 = _t
 				_stage = 3
 		3:
@@ -140,7 +140,7 @@ func _process(d: float) -> bool:
 			# 等炮弹落地（河道在 y=20 附近，3 格/秒 -> 2 秒足够）
 			if _t - _t0 >= 2.2:
 				var hit_river := false
-				for lg in _s._debug_log:
+				for lg in _s.t_debug_log():
 					if String(lg).contains("落进河里"):
 						hit_river = true
 				print("    落河后：场上弹道物 %d ｜ 杰拉尔德力量 %d ｜ 日志命中=%s" % [
@@ -155,23 +155,23 @@ func _process(d: float) -> bool:
 				var gp_r := Ordnance.make_grenade(sani_g, Vector2(10.5, 20.5), true)
 				gp_r.from = Vector2(10.5, 20.5)
 				gp_r.to = Vector2(10.5, 20.5)
-				var models_before: int = _s._grenade_models.size()
+				var models_before: int = _s.t_grenade_models().size()
 				var pend_before: int = _s.gm.pending.size()
-				_s._debug_log.clear()
-				_s._shell_intercepted(gp_r, "在半空被打爆")
+				_s.t_debug_log().clear()
+				_s.t_shell_intercepted(gp_r, "在半空被打爆")
 				var gone_log := false
 				var river_log := false
-				for lg in _s._debug_log:
+				for lg in _s.t_debug_log():
 					if String(lg).contains("直接消失"):
 						gone_log = true
 					if String(lg).contains("落进河里"):
 						river_log = true
 				print("    (10,20) 是河=%s ｜ 模型 %d -> %d ｜ GM %d -> %d ｜ 直接消失=%s ｜ 落河日志=%s" % [
-					Level.is_river(Vector2i(10, 20), "arena"), models_before, _s._grenade_models.size(),
+					Level.is_river(Vector2i(10, 20), "arena"), models_before, _s.t_grenade_models().size(),
 					pend_before, _s.gm.pending.size(), gone_log, river_log])
 				_chk(gone_log and not river_log,
 					"被击落的枪榴弹整发直接消失（不落地、不爆炸，连河面规则都不走）")
-				_chk(_s._grenade_models.size() == models_before and _s.gm.pending.size() == pend_before,
+				_chk(_s.t_grenade_models().size() == models_before and _s.gm.pending.size() == pend_before,
 					"不许立枪榴弹模型、也不登记 GM 计时（第 96 轮）")
 				# ── 复活点（第 87 轮）：必须在老国王正前方那一行，不许回河边 ──
 				print("\n[4] 英雄复活点")
@@ -179,10 +179,10 @@ func _process(d: float) -> bool:
 				var roster_cell: Vector2i = gz.home_cell
 				var hs: Array = Level.respawn_cells(gz.side)
 				gz.power_cur = 0
-				_s._on_unit_died(gz)
+				_s.t_on_unit_died(gz)
 				_s.gm.revive_at[gz] = _s.gm.turn_count            # 立刻到点
 				for ru in _s.gm.due_revives():
-					_s._revive_hero(ru)
+					_s.t_revive_hero(ru)
 				print("    开局出场格 %s ｜ 关卡重生点 %s ｜ 复活格 %s ｜ 国王 %s" % [
 					roster_cell, hs, gz.cell, pos_of("老国王")])
 				_chk(hs.has(gz.cell), "复活回到关卡给的英雄重生点（%s）" % [hs])
@@ -198,10 +198,10 @@ func _process(d: float) -> bool:
 					"开局的出场格（河边）与复活格已经分开")
 				var az = unit_by("Alette")
 				az.power_cur = 0
-				_s._on_unit_died(az)
+				_s.t_on_unit_died(az)
 				_s.gm.revive_at[az] = _s.gm.turn_count
 				for ru2 in _s.gm.due_revives():
-					_s._revive_hero(ru2)
+					_s.t_revive_hero(ru2)
 				print("    第二个复活的人（Alette）→ %s" % [az.cell])
 				_chk(az.cell != gz.cell and hs.has(az.cell), "第二个人换一格站（三格分开）")
 				print("\n── 竞技场探针：%d 张截图，失败 %d 项 ──" % [_shots, _fail])

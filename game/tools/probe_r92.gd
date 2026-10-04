@@ -68,9 +68,9 @@ func _process(d: float) -> bool:
 			print("\n[1] 真实输入路径：Q/E 到底有没有让巡飞弹转向")
 			_s.gm.clear_all_sentries()
 			_s.phase = _s.Phase.IDLE
-			_s._place_kind = "巡飞弹发射器"
+			_s.t_set_place_kind("巡飞弹发射器")
 			_s.place_left["巡飞弹发射器"] = 1
-			_s._place_at(Vector2i(10, 10))
+			_s.t_place_at(Vector2i(10, 10))
 			for p in _s.placeables:
 				if Loiter.is_launcher(p):
 					_lp = p
@@ -96,7 +96,7 @@ func _process(d: float) -> bool:
 					print("\n── r92 探针：%d 项检查，失败 %d 项 ──" % [_checks, _fail])
 					return true
 				_mun = ls[0]
-				_chk(_s._loiter_pick_control() == _mun and not _mun.no_control,
+				_chk(_s.t_loiter_pick_control() == _mun and not _mun.no_control,
 					"场上只有这一发 -> 它就是受控的那一发")
 				_key(KEY_Q, true)                                # 真的按下 Q
 				_t0 = _t
@@ -119,7 +119,7 @@ func _process(d: float) -> bool:
 				print("    改按 E 一秒：朝向 %.1f° ｜ 角速度 %.1f°/秒" % [_h_e, _mun.turn_w])
 				_chk(absf(_h_e - _h_q) > 5.0, "Q 与 E 让朝向往不同方向偏（真的在转）")
 				# 用"真实发射路径"再打一发 -> 它必须被标记为多余
-				_s._fire_loiter(_lp, Vector2(10.5, 10.5), _unit("Gerald (E)"))
+				_s.t_fire_loiter(_lp, Vector2(10.5, 10.5), _unit("Gerald (E)"))
 				var ls2 := _loiters()
 				var extra: Projectile = null
 				for q in ls2:
@@ -128,19 +128,19 @@ func _process(d: float) -> bool:
 				print("    第二发：no_control=%s（多余的一发）" % [
 					extra.no_control if extra != null else "-"])
 				_chk(extra != null and extra.no_control, "真实发射的第二发被标记为多余（不受控）")
-				_chk(_s._loiter_pick_control() == _mun, "两发在场时仍然控制原来那发")
+				_chk(_s.t_loiter_pick_control() == _mun, "两发在场时仍然控制原来那发")
 				_mun.kill("probe_kill")
-				_chk(_s._loiter_pick_control() == null, "受控那发爆炸后：多余的仍然不受控（不会接管）")
+				_chk(_s.t_loiter_pick_control() == null, "受控那发爆炸后：多余的仍然不受控（不会接管）")
 				_chk(extra != null and extra.alive, "多余的那发还在飞（只是没人能控它）")
 				# 清空战场（把多余那发也打掉）-> 之后新发射的一发要重新受控
 				if extra != null:
 					extra.kill("probe_kill2")
 				_s.clear_projectiles()
-				_s._fire_loiter(_lp, Vector2(10.5, 10.5), _unit("Gerald (E)"))
+				_s.t_fire_loiter(_lp, Vector2(10.5, 10.5), _unit("Gerald (E)"))
 				var fresh: Projectile = null
 				for q2 in _loiters():
 					fresh = q2
-				_chk(fresh != null and not fresh.no_control and _s._loiter_pick_control() == fresh,
+				_chk(fresh != null and not fresh.no_control and _s.t_loiter_pick_control() == fresh,
 					"场上清空后新发射的一发重新受控（玩家按 Q/E 一定有反应）")
 				print("\n── r92 探针：%d 项检查，失败 %d 项 ──" % [_checks, _fail])
 				Level.current = "field"

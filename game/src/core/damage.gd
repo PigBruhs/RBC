@@ -220,7 +220,6 @@ static func prop_strike(attacker: Unit, pl: Placeable, rng) -> Hit:
 	return h
 
 
+## 千分比 -> 显示文本。实现唯一一份在 Rules.milli_text()（去重，原来本文件与 combat.gd 各一份）
 static func _fmt(milli: int) -> String:
-	if milli % 1000 == 0:
-		return str(milli / 1000)
-	return "%.1f" % (milli / 1000.0)
+	return Rules.milli_text(milli)

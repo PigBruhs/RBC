@@ -11,7 +11,7 @@ var _do_move_probe_start: int = 0        # 走位耗时探针（第 40 节）
 ## 统计高亮格数量（排除常驻的待确认 √ sprite）
 func _count_hint_boxes() -> int:
 	var n := 0
-	for c in _s._hint_layer.get_children():
+	for c in _s.t_hint_layer().get_children():
 		if c is MeshInstance3D:
 			n += 1
 	return n
@@ -25,13 +25,13 @@ func _chk(cond: bool, label: String) -> void:
 
 ## 当前是否有一个活着的弹反 QTE 节点
 func _find_qte() -> ArrowQTE:
-	return _s._find_arrow_qte()
+	return _s.t_find_arrow_qte()
 
 
 ## 等直升机的火箭齐射全部出膛（第 93 轮：8 波 / 间隔 1 秒 = 7 秒多）
 func _wait_salvo() -> void:
 	var guard := 0.0
-	while _s._salvo_u != null and guard < 12.0:
+	while _s.t_salvo_u() != null and guard < 12.0:
 		guard += 0.1
 		await create_timer(0.1).timeout
 
@@ -105,23 +105,23 @@ func _basic_sig(u: Unit, victim: Unit, entry: String) -> String:
 	var hp0: int = victim.power_cur
 	var aim := Vector2(float(victim.cell.x) + 0.5, float(victim.cell.y) + 0.5)
 	_s.active = u
-	_s._turn_just_finished = null
+	_s.t_set_turn_just_finished(null)
 	_s.phase = _s.Phase.IDLE
 	match entry:
 		"drag":
 			_s.phase = _s.Phase.AIMING
-			_s._aim_active = true
-			_s._aim_valid = true
-			_s._aim_origin = Vector2.ZERO
-			_s._aim_now = Vector2(220, 0)
-			_s._aim_float_pos = aim
-			_s._planned_cell = victim.cell
-			_s._aim_skill_id = ""
-			_s._fire()
+			_s.t_set_aim_active(true)
+			_s.t_set_aim_valid(true)
+			_s.t_set_aim_origin(Vector2.ZERO)
+			_s.t_set_aim_now(Vector2(220, 0))
+			_s.t_set_aim_float_pos(aim)
+			_s.t_set_planned_cell(victim.cell)
+			_s.t_set_aim_skill_id("")
+			_s.t_fire()
 		"click":
-			_s._attack_target_unit(victim, false)
+			_s.t_attack_target_unit(victim, false)
 		_:
-			_s._ai_attack(u, {"target": victim, "aim": aim})
+			_s.t_ai_attack(u, {"target": victim, "aim": aim})
 	var kinds: Array = []
 	for it in _s.field.items:
 		var kn := ProjectileField.kind_cn((it["p"] as Projectile).kind)
@@ -160,10 +160,10 @@ func _reset_skill_scene(caster: Unit) -> void:
 	_s.clear_projectiles()
 	_s.gm.pending.clear()
 	_s.gm.clear_all_sentries()
-	_s._clear_pylons()
+	_s.t_clear_pylons()
 	caster.tags.erase("dive_ready")
 	caster.tags.erase("diving")
-	_s._dive_clear(caster)
+	_s.t_dive_clear(caster)
 	caster.energy = caster.energy_max
 	caster.has_acted = false
 	caster.has_moved = false
@@ -192,22 +192,22 @@ func _initialize() -> void:
 	print("    木刺 ×%d   土堆 ×%d（来自 bc_stat.md）" % [spike_n, mound_n])
 	_chk(_s.place_left.has("木刺") and _s.place_left.has("土堆"), "两种道具都应被解析出来")
 	if spike_n > 0:
-		_s._pick_place_kind("木刺")
-		_chk(_s._place_kind == "木刺", "应选中木刺")
+		_s.t_pick_place_kind("木刺")
+		_chk(_s.t_place_kind() == "木刺", "应选中木刺")
 		var pc := Vector2i(6, 12)
-		_chk(_s._can_place_at(pc), "空地上可以放置")
-		_s._place_at(pc)
+		_chk(_s.t_can_place_at(pc), "空地上可以放置")
+		_s.t_place_at(pc)
 		print("    放置木刺后：道具数 = %d，剩余 = %d" % [
 			_s.placeables.size(), _s.place_left.get("木刺", 0)])
 		_chk(_s.placeables.size() == 1, "应放下 1 个道具")
 		_chk(int(_s.place_left.get("木刺")) == spike_n - 1, "剩余数量应减 1")
-		_chk(not _s._can_place_at(pc), "同一格不能再放")
-		_chk(not _s._can_place_at(_s.units[0].cell), "有单位的格子不能放")
+		_chk(not _s.t_can_place_at(pc), "同一格不能再放")
+		_chk(not _s.t_can_place_at(_s.units[0].cell), "有单位的格子不能放")
 	if mound_n > 0:
-		_s._pick_place_kind("土堆")
-		_s._place_at(Vector2i(7, 12))
+		_s.t_pick_place_kind("土堆")
+		_s.t_place_at(Vector2i(7, 12))
 		_chk(_s.placeables.size() == 2, "再放一个土堆")
-	_s._finish_placement()
+	_s.t_finish_placement()
 	print("    结束放置后：阶段 = %d，队列 = %s" % [_s.phase, _s.queue.dump() if _s.queue else "-"])
 	_chk(_s.phase != _s.Phase.PLACE, "点 >> 后应离开放置阶段")
 	_chk(_s.queue != null, "结束后应建立回合队列")
@@ -250,7 +250,7 @@ func _initialize() -> void:
 		if _s.active == null:
 			continue
 		if _s.active.is_manual():
-			_s._finish_turn()          # 我方 + 敌方阵营里的可控角色都由玩家结束回合
+			_s.t_finish_turn()          # 我方 + 敌方阵营里的可控角色都由玩家结束回合
 		await create_timer(UnitData.DUMMY_SKIP_DELAY + 0.35).timeout
 	var enemy_seen := 0
 	var player_seen := 0
@@ -278,31 +278,31 @@ func _initialize() -> void:
 			if dummy == null: dummy = u
 	_s.active = gerald
 	_s.phase = _s.Phase.IDLE
-	_s._select_for_detail(gerald)
-	_s._show_action_menu()
-	print("\n[3] 菜单可见 =", _s._action_menu.visible, " 阶段 =", _s.phase, " 可达格 =", _s.reachable.size())
-	_chk(_s._action_menu.visible, "点自己人应弹出菜单")
+	_s.t_select_for_detail(gerald)
+	_s.t_show_action_menu()
+	print("\n[3] 菜单可见 =", _s.t_action_menu().visible, " 阶段 =", _s.phase, " 可达格 =", _s.reachable.size())
+	_chk(_s.t_action_menu().visible, "点自己人应弹出菜单")
 	_chk(_s.reachable.size() > 0, "菜单打开时应有移动范围")
 
 	# ── 4. 攻击二级菜单 ──
 	gerald.cell = dummy.cell + Vector2i(-1, 0)
-	_s._menu_attack()
+	_s.t_menu_attack()
 	_chk(_s.phase == _s.Phase.CHOOSE_TARGET, "普攻应进入选目标阶段")
 	_chk(_s.attackable.has(dummy.cell), "相邻敌人应可攻击")
-	_s._show_attack_menu(dummy)
-	print("\n[4] 攻击菜单可见 =", _s._attack_menu.visible)
+	_s.t_show_attack_menu(dummy)
+	print("\n[4] 攻击菜单可见 =", _s.t_attack_menu().visible)
 	print("    蓝(破甲) = %s   红(力量) = %s" % [
-		_s._btn_break.text.replace("\n", "/"), _s._btn_power.text.replace("\n", "/")])
-	_chk(_s._attack_menu.visible, "点敌人应弹出攻击方式菜单")
-	_chk(_s._btn_break.text.contains("破甲"), "左按钮是破甲")
-	_chk(_s._btn_power.text.contains("打力量"), "右按钮是打力量")
-	_chk(_s._btn_break.text.contains("16"), "破甲按钮应显示 16")
+		_s.t_btn_break().text.replace("\n", "/"), _s.t_btn_power().text.replace("\n", "/")])
+	_chk(_s.t_attack_menu().visible, "点敌人应弹出攻击方式菜单")
+	_chk(_s.t_btn_break().text.contains("破甲"), "左按钮是破甲")
+	_chk(_s.t_btn_power().text.contains("打力量"), "右按钮是打力量")
+	_chk(_s.t_btn_break().text.contains("16"), "破甲按钮应显示 16")
 	# 假人现在是 100 甲，Gerald 41 力打不动 -> 按钮应显示"打不动"且置灰
-	print("    假人现在 100 甲，Gerald 41 力：力量按钮 =", _s._btn_power.text.replace("\n", "/"),
-		" disabled=", _s._btn_power.disabled)
-	_chk(_s._btn_power.text.contains("打不动"), "力量打不动时应显示「打不动」")
+	print("    假人现在 100 甲，Gerald 41 力：力量按钮 =", _s.t_btn_power().text.replace("\n", "/"),
+		" disabled=", _s.t_btn_power().disabled)
+	_chk(_s.t_btn_power().text.contains("打不动"), "力量打不动时应显示「打不动」")
 	var arm_before: int = dummy.armor_cur
-	_s._confirm_attack(true)          # 用破甲，必然能削它护甲
+	_s.t_confirm_attack(true)          # 用破甲，必然能削它护甲
 	await process_frame
 	print("    确认破甲后：%s 护甲 %s -> %s" % [dummy.name, arm_before / 1000.0, dummy.armor_cur / 1000.0])
 	_chk(dummy.armor_cur < arm_before, "破甲应削减护甲池")
@@ -312,23 +312,23 @@ func _initialize() -> void:
 	tough.pr = 800
 	_s.active = gerald
 	gerald.power_cur = tough.armor_cur + Rules.points_to_milli(1)
-	_s._show_attack_menu(tough)
-	print("    概率区间的红按钮 =", _s._btn_power.text.replace("\n", "/"))
-	_chk(_s._btn_power.text.contains("概率"), "概率区间应写「1（xx%概率）」")
+	_s.t_show_attack_menu(tough)
+	print("    概率区间的红按钮 =", _s.t_btn_power().text.replace("\n", "/"))
+	_chk(_s.t_btn_power().text.contains("概率"), "概率区间应写「1（xx%概率）」")
 	tough.pr = 0
 
 	# ── 5. 投掷瞄准数学 ──
 	_s.active = mortar
-	_s._begin_aim()
+	_s.t_begin_aim()
 	print("\n[5] 射程 %s~%s 格；箭头 %s~%s 倍身高" % [
 		UnitData.THROW_RANGE_MIN, UnitData.THROW_RANGE_MAX,
 		UnitData.ARROW_LEN_MIN, UnitData.ARROW_LEN_MAX])
 	var prev_r := -1.0
 	var prev_l := -1.0
 	for px in [0, 30, 100, 200, 300, 400, 700]:
-		var t1: float = _s._charge_from_drag(float(px))
-		var r1: float = _s._aim_range(t1)
-		var al1: float = _s._arrow_len_for_t(t1) / UnitData.UNIT_HEIGHT
+		var t1: float = _s.t_charge_from_drag(float(px))
+		var r1: float = _s.t_aim_range(t1)
+		var al1: float = _s.t_arrow_len_for_t(t1) / UnitData.UNIT_HEIGHT
 		print("      拖 %4d px -> 力度 %3d%% -> 射程 %5.2f 格 -> 箭头 %.2f 倍身高" % [
 			px, int(t1 * 100), r1, al1])
 		_chk(r1 >= UnitData.THROW_RANGE_MIN - 0.001, "射程 >= 最短")
@@ -336,9 +336,9 @@ func _initialize() -> void:
 		_chk(al1 >= UnitData.ARROW_LEN_MIN - 0.001, "箭头 >= 1 倍身高")
 		_chk(al1 <= UnitData.ARROW_LEN_MAX + 0.001, "箭头 <= 3 倍身高")
 	for px in range(0, 500, 10):
-		var t2: float = _s._charge_from_drag(float(px))
-		var r2: float = _s._aim_range(t2)
-		var al2: float = _s._arrow_len_for_t(t2)
+		var t2: float = _s.t_charge_from_drag(float(px))
+		var r2: float = _s.t_aim_range(t2)
+		var al2: float = _s.t_arrow_len_for_t(t2)
 		_chk(r2 >= prev_r - 0.0001, "射程单调不减")
 		_chk(al2 >= prev_l - 0.0001, "箭头单调不减")
 		prev_r = r2
@@ -362,7 +362,7 @@ func _initialize() -> void:
 		ab.append(u.armor_cur)
 	print("\n[6] 炮击（落点 9,6；落点上的假人物抗 high=80% → 按 40% 计）")
 	var expect_bd: int = mortar.armor_break
-	_s._resolve_mortar_impact(mortar, Vector2i(9, 6))
+	_s.t_resolve_mortar_impact(mortar, Vector2i(9, 6))
 	for i in tgt.size():
 		print("      %-16s 力 %s->%s  甲 %s->%s" % [tgt[i].name,
 			pb[i] / 1000.0, tgt[i].power_cur / 1000.0,
@@ -382,7 +382,7 @@ func _initialize() -> void:
 	var d2 = e_list[0]
 	d2.take_power_damage(999999)          # 打到力量池归零 = 阵亡（alive 是派生属性，不能直接赋值）
 	_chk(not d2.is_alive(), "力量归零后 is_alive() 为 false")
-	_s._on_unit_died(d2)
+	_s.t_on_unit_died(d2)
 	await create_timer(UnitData.DUMMY_REVIVE_SEC + 0.3).timeout
 	print("      复活后 力=%s 甲=%s alive=%s" % [
 		d2.power_cur / 1000.0, d2.armor_cur / 1000.0, d2.is_alive()])
@@ -392,12 +392,12 @@ func _initialize() -> void:
 
 	# ── 7. 取消选择 ──
 	_s.selected = gerald
-	_s._clear_selection()
+	_s.t_clear_selection()
 	print("\n[7] 取消选择：selected=%s 详情=%s 行动菜单=%s 攻击菜单=%s" % [
-		_s.selected, _s._panel.visible, _s._action_menu.visible, _s._attack_menu.visible])
+		_s.selected, _s.t_panel().visible, _s.t_action_menu().visible, _s.t_attack_menu().visible])
 	_chk(_s.selected == null, "点空白应取消选择")
-	_chk(not _s._panel.visible, "未选人时详情栏隐藏")
-	_chk(not _s._action_menu.visible and not _s._attack_menu.visible, "未选人时二级菜单隐藏")
+	_chk(not _s.t_panel().visible, "未选人时详情栏隐藏")
+	_chk(not _s.t_action_menu().visible and not _s.t_attack_menu().visible, "未选人时二级菜单隐藏")
 
 	# ── 8. 队列条 ──
 	_s.ui.queue_anim_lock = 0.0
@@ -423,10 +423,10 @@ func _initialize() -> void:
 	# ── 9. 回合推进后队头左移 ──
 	# 先确保"当前回合是活的"（否则 _finish_turn 会走幂等保护、队列不动，
 	# 这条断言就会因为测试自身的状态而假失败）
-	_s._next_turn()
+	_s.t_next_turn()
 	await create_timer(UnitData.DUMMY_SKIP_DELAY + 0.2).timeout
 	var head: Unit = _s.active
-	_s._finish_turn()
+	_s.t_finish_turn()
 	await create_timer(UnitData.DUMMY_SKIP_DELAY + 0.3).timeout
 	var seq2: Array = _s.ui_upcoming(10)
 	var new_head: Unit = seq2[0] if seq2.size() > 0 else null
@@ -441,53 +441,53 @@ func _initialize() -> void:
 	gerald.cell = Vector2i(4, 4)
 	gerald.power_cur = gerald.power_max
 	gerald.armor_cur = gerald.armor_max
-	_s._show_action_menu()
-	print("    未移动时：休息按钮 disabled =", _s._btn_rest_menu.disabled)
-	_chk(not _s._btn_rest_menu.disabled, "未移动时可以休息")
+	_s.t_show_action_menu()
+	print("    未移动时：休息按钮 disabled =", _s.t_btn_rest_menu().disabled)
+	_chk(not _s.t_btn_rest_menu().disabled, "未移动时可以休息")
 	_chk(_s.reachable.size() > 0, "未移动时可以移动")
 
 	# 移动一格
 	var dest: Vector2i = _s.reachable.keys()[0]
-	_s._do_move(gerald, dest)
+	_s.t_do_move(gerald, dest)
 	print("    移动后：has_moved =", gerald.has_moved,
-		" 休息按钮 disabled =", _s._btn_rest_menu.disabled,
+		" 休息按钮 disabled =", _s.t_btn_rest_menu().disabled,
 		" 可达格 =", _s.reachable.size())
 	_chk(gerald.has_moved, "移动标记置位")
-	_chk(_s._btn_rest_menu.disabled, "移动后不能休息")
+	_chk(_s.t_btn_rest_menu().disabled, "移动后不能休息")
 	_chk(_s.reachable.size() == 0, "移动后不能再移动")
 
 	# 移动后点休息 -> 应被拒绝
 	gerald.power_cur = Rules.points_to_milli(10)
 	var before_rest: int = gerald.power_cur
-	_s._menu_rest()
+	_s.t_menu_rest()
 	print("    移动后强行点休息：力量 %s -> %s（应不变）" % [before_rest / 1000.0, gerald.power_cur / 1000.0])
 	_chk(gerald.power_cur == before_rest, "移动后休息应被拒绝")
 
 	# 三选一（普攻）后回合立即结束：active 应换人
 	var who_before: Unit = gerald
-	_s._show_action_menu()
+	_s.t_show_action_menu()
 	_s.active = gerald
 	_s.phase = _s.Phase.CHOOSE_TARGET
 	var victim = e_list[0]
 	victim.cell = gerald.cell + Vector2i(1, 0)
 	victim.power_cur = victim.power_max
 	victim.armor_cur = Rules.points_to_milli(10)     # 压低护甲让 Gerald 打得动
-	_s._attack_target_unit(victim, false)
+	_s.t_attack_target_unit(victim, false)
 	await create_timer(0.35).timeout
 	print("    普攻后：active %s -> %s（回合应自动结束）" % [
 		who_before.name, _s.active.name if _s.active else "-"])
 	_chk(_s.active != who_before, "三选一后回合应自动结束、轮到下一个人")
 
 	# 「结束回合」已从二级菜单挪到右下角的 >> 按钮（用户要求）
-	print("    二级菜单：休息=%s ｜ 右下角按钮=%s" % [_s._btn_rest_menu.text, _s._btn_next.text])
-	_chk(_s._btn_next.text == ">>", "右下角按钮应是 >>")
-	_chk(_s._btn_end_turn == null, "二级菜单里的「结束回合」按钮应已移除")
+	print("    二级菜单：休息=%s ｜ 右下角按钮=%s" % [_s.t_btn_rest_menu().text, _s.t_btn_next().text])
+	_chk(_s.t_btn_next().text == ">>", "右下角按钮应是 >>")
+	_chk(_s.t_btn_end_turn() == null, "二级菜单里的「结束回合」按钮应已移除")
 
 	# ── 11. 高亮与菜单显隐（用户第三轮要求）──
 	print("\n[11] 高亮与菜单显隐")
 	# ① 没选任何人 -> 不应有可移动格
-	_s._clear_selection()
-	_s._draw_hints()
+	_s.t_clear_selection()
+	_s.t_draw_hints()
 	var hint_count_empty: int = _count_hint_boxes()
 	print("    未选人时高亮格数 =", hint_count_empty)
 	_chk(hint_count_empty == 0, "未选人时不应高亮任何格子")
@@ -497,16 +497,16 @@ func _initialize() -> void:
 	gerald.begin_turn()
 	gerald.cell = Vector2i(5, 5)
 	_s.selected = gerald
-	_s._show_action_menu()
+	_s.t_show_action_menu()
 	var hint_move: int = _count_hint_boxes()
 	print("    选中且未移动时高亮格数 =", hint_move, "（可达格 %d）" % _s.reachable.size())
 	_chk(hint_move > 0, "选中后应高亮可移动格")
 
 	# ③ 点普攻 -> 二级菜单必须消失，且高亮变成"可攻击范围"
-	_s._menu_attack()
-	print("    点普攻后：二级菜单可见 =", _s._action_menu.visible,
+	_s.t_menu_attack()
+	print("    点普攻后：二级菜单可见 =", _s.t_action_menu().visible,
 		" 阶段 =", _s.phase, " 可攻击格数 =", _s.attackable.size())
-	_chk(not _s._action_menu.visible, "点普攻后二级菜单必须消失")
+	_chk(not _s.t_action_menu().visible, "点普攻后二级菜单必须消失")
 	_chk(_s.phase == _s.Phase.CHOOSE_TARGET, "点普攻应进入目标选择阶段")
 
 	# ④ 近战：可攻击范围应为 4 邻格（含越界剔除）
@@ -532,13 +532,13 @@ func _initialize() -> void:
 	# ⑥ 投掷瞄准时菜单也要消失
 	_s.active = mortar
 	_s.selected = mortar
-	_s._show_action_menu()
-	_s._menu_attack()
-	print("    点普攻（投掷手）后：菜单可见 =", _s._action_menu.visible, " 瞄准中 =", _s._aim_active)
-	_chk(not _s._action_menu.visible, "投掷手点普攻后菜单也应消失")
-	_chk(_s._aim_active, "投掷手点普攻应进入瞄准")
-	_s._aim_active = false
-	_s._arrow_root.visible = false
+	_s.t_show_action_menu()
+	_s.t_menu_attack()
+	print("    点普攻（投掷手）后：菜单可见 =", _s.t_action_menu().visible, " 瞄准中 =", _s.t_aim_active())
+	_chk(not _s.t_action_menu().visible, "投掷手点普攻后菜单也应消失")
+	_chk(_s.t_aim_active(), "投掷手点普攻应进入瞄准")
+	_s.t_set_aim_active(false)
+	_s.t_arrow_root().visible = false
 
 	# ── 12. 远程一回合只能打一次（用户报告"弓箭手破甲能打两次"）──
 	print("\n[12] 远程一回合只打一次")
@@ -550,9 +550,9 @@ func _initialize() -> void:
 	victim2.armor_cur = victim2.armor_max
 	var arm0: int = victim2.armor_cur
 	_s.phase = _s.Phase.CHOOSE_TARGET
-	_s._turn_just_finished = null                     # 模拟"一个全新的回合"，避免幂等保护挡掉推进
+	_s.t_set_turn_just_finished(null) # 模拟"一个全新的回合"，避免幂等保护挡掉推进
 	var tc0: int = _s.gm.turn_count
-	_s._attack_target_unit(victim2, true)             # 破甲
+	_s.t_attack_target_unit(victim2, true)             # 破甲
 	# 出手瞬间就应被标记"已行动"（必须在这时检查：等回合结束后 active 已换人）
 	var acted_now: bool = alette.has_acted
 	await create_timer(4.5).timeout                   # 等箭矢飞完+结算（箭速降到 2 格/秒）
@@ -565,7 +565,7 @@ func _initialize() -> void:
 	_s.active = alette                                # 把回合还给她，模拟"同一回合内再点一次"
 	# 再调一次：应被 has_acted 挡住，不能再打
 	var arm_after: int = victim2.armor_cur
-	_s._attack_target_unit(victim2, true)
+	_s.t_attack_target_unit(victim2, true)
 	await create_timer(0.3).timeout
 	print("    再打一次：护甲 %s -> %s（应不变）" % [arm_after / 1000.0, victim2.armor_cur / 1000.0])
 	_chk(victim2.armor_cur == arm_after, "同一回合不能二次攻击")
@@ -581,7 +581,7 @@ func _initialize() -> void:
 	_s.queue.last_stand = false
 	_s.queue.lone = null
 	_s.queue.rebuild(_s.units)
-	var entered: bool = _s._check_last_stand()
+	var entered: bool = _s.t_check_last_stand()
 	print("    只剩 1 敌 vs 3 玩家 -> 进入连击=%s 队列 %s" % [entered, _s.queue.dump()])
 	_chk(_s.queue.is_last_stand(), "应进入最后一人模式")
 	var pv2: Array = _s.queue.preview(6)
@@ -592,7 +592,7 @@ func _initialize() -> void:
 	print("    预测序列：", pv2.map(func(u: Unit) -> String: return u.name))
 	_chk(pattern_ok, "孤军应出现在偶数位（孤军→对面1→孤军→对面2…）")
 	_chk(pv2.size() == 6, "应能预测 6 步")
-	var triggered2: bool = _s._check_last_stand()
+	var triggered2: bool = _s.t_check_last_stand()
 	_chk(not triggered2, "已处于最后一人模式时不应反复重排")
 	# 真正走一遍回合推进（不是只看 preview）：必须是 孤军→对面1→孤军→对面2→…
 	var run: Array = []
@@ -622,14 +622,14 @@ func _initialize() -> void:
 	gerald.visual.position = Vector3(4.5, 0.0, 4.5)
 	_s.selected = gerald
 	_s.phase = _s.Phase.MENU
-	_s.reachable = _s._compute_reachable(gerald)
+	_s.reachable = _s.t_compute_reachable(gerald)
 	var goal := Vector2i(-1, -1)
 	for c in _s.reachable.keys():
 		if absi(c.x - gerald.cell.x) + absi(c.y - gerald.cell.y) == 4:
 			goal = c
 			break
 	_chk(goal.x >= 0, "应能找到距离 4 的可达目标格")
-	var path: Array = _s._path_to(gerald, goal)
+	var path: Array = _s.t_path_to(gerald, goal)
 	print("    路径格子数 =", path.size(), "（起点 + 4 步 = 5）")
 	print("    路径 =", path)
 	_chk(path.size() == 5, "路径应是 5 个格子")
@@ -638,7 +638,7 @@ func _initialize() -> void:
 	var samples: Array[Vector2] = []
 	var heights: Array[float] = []
 	var stamps: Array[float] = []
-	_s._do_move(gerald, goal)
+	_s.t_do_move(gerald, goal)
 	_chk(gerald.visual.is_walking(), "移动后应处于走路状态")
 	var t := 0.0
 	while t < 2.6 and gerald.visual.is_walking():
@@ -719,7 +719,7 @@ func _initialize() -> void:
 	e_list[0].armor_cur = Rules.points_to_milli(5)    # 低护甲，好观察力量伤害
 	var p0: int = e_list[0].power_cur
 	var a0: int = e_list[0].armor_cur
-	_s._resolve_mortar_impact(mortar, center)
+	_s.t_resolve_mortar_impact(mortar, center)
 	print("    斜邻格里的 %s（甲5、无抗）：力 %s->%s 甲 %s->%s" % [e_list[0].name,
 		p0 / 1000.0, e_list[0].power_cur / 1000.0, a0 / 1000.0, e_list[0].armor_cur / 1000.0])
 	_chk(e_list[0].armor_cur < a0, "斜邻格单位应被破甲")
@@ -728,7 +728,7 @@ func _initialize() -> void:
 	e_list[0].armor_cur = Rules.points_to_milli(100)
 	e_list[0].power_cur = e_list[0].power_max
 	var p1: int = e_list[0].power_cur
-	_s._resolve_mortar_impact(mortar, center)
+	_s.t_resolve_mortar_impact(mortar, center)
 	print("    甲 100 时：力 %s->%s（应不变，因为打不动）" % [p1 / 1000.0, e_list[0].power_cur / 1000.0])
 	_chk(e_list[0].power_cur == p1, "护甲 100 时炮手力量线打不动，力应不变")
 
@@ -742,7 +742,7 @@ func _initialize() -> void:
 	_s.ui.toggle_debug()
 
 	var n_fields: int = _s.DBG_FIELDS.size()
-	_s._select_for_detail(e_list[0])
+	_s.t_select_for_detail(e_list[0])
 	_s.ui.dbg_seen_unit = null
 	_s.ui.refresh_debug()
 	print("    选中 %s 后编辑框 = %d 个（字段 %d 个）" % [
@@ -763,7 +763,7 @@ func _initialize() -> void:
 	_chk(not d1.is_alive(), "力量 0 应判定阵亡")
 	_s.ui_dbg_set(d1, "power_cur", "50")
 	_chk(d1.is_alive(), "改回 50 应复活")
-	_s._sync_unit_visibility()
+	_s.t_sync_unit_visibility()
 	_chk(d1.visual.visible, "复活后模型必须可见")
 	_s.ui.dbg_seen_unit = null
 	_s.ui.refresh_debug()
@@ -777,15 +777,15 @@ func _initialize() -> void:
 		if p.name == "木刺": spike = p
 		if p.name == "土堆": mound = p
 	if spike != null and mound != null:
-		var blocked: Dictionary = _s._blocked_cells()
+		var blocked: Dictionary = _s.t_blocked_cells()
 		print("    木刺@%s 土堆@%s 阻挡移动格数 = %d" % [spike.cell, mound.cell, blocked.size()])
 		_chk(blocked.has(spike.cell) and blocked.has(mound.cell), "两种道具都应阻挡移动")
-		_chk(not _s._ranged_blocked_at(spike.cell, false), "木刺不阻挡远程")
-		_chk(_s._ranged_blocked_at(mound.cell, false), "土堆阻挡远程")
-		_chk(not _s._ranged_blocked_at(mound.cell, true), "投掷手不受土堆阻挡")
+		_chk(not _s.t_ranged_blocked_at(spike.cell, false), "木刺不阻挡远程")
+		_chk(_s.t_ranged_blocked_at(mound.cell, false), "土堆阻挡远程")
+		_chk(not _s.t_ranged_blocked_at(mound.cell, true), "投掷手不受土堆阻挡")
 
 		# 目标在道具【后面】：路径必须绕开道具，不能穿过它所在格
-		var block_path: Array = _s._path_to(alette, spike.cell + Vector2i(0, 2))
+		var block_path: Array = _s.t_path_to(alette, spike.cell + Vector2i(0, 2))
 		var passes := false
 		for c in block_path:
 			if c == spike.cell: passes = true
@@ -810,12 +810,12 @@ func _initialize() -> void:
 		var spike_before: int = spike.power_cur
 		_s.active = alette
 		alette.begin_turn()                      # 清掉 has_acted，否则守卫会拦下这次攻击
-		_s._attack_target_unit(victim3, false)
+		_s.t_attack_target_unit(victim3, false)
 		await create_timer(4.5).timeout
 		# 注意：假人会定时满血复活，直接比血量会被"复活"冲掉。
 		# 所以这里以【游戏日志】为准：只要出现"Alette 攻击 → 目标"就说明箭穿过了木刺。
 		var pierced := false
-		for lg in _s._debug_log:
+		for lg in _s.t_debug_log():
 			if String(lg).contains("Alette 攻击 → %s" % victim3.name):
 				pierced = true
 		print("    箭矢飞向 (4,8)，木刺在 (4,6)：木刺 %s -> %s，日志命中=%s" % [
@@ -842,14 +842,14 @@ func _initialize() -> void:
 		victim3.cell = Vector2i(4, 8)
 		victim3.power_cur = victim3.power_max
 		var gerald_before: int = gerald.power_cur
-		var log_from: int = _s._debug_log.size()
-		_s._attack_target_unit(victim3, false)
+		var log_from: int = _s.t_debug_log().size()
+		_s.t_attack_target_unit(victim3, false)
 		await create_timer(4.5).timeout
 		print("    弹道上放友军 Gerald：力量 %s -> %s ｜ 目标 %s -> %s" % [
 			gerald_before / 1000.0, gerald.power_cur / 1000.0,
 			victim3.power_max / 1000.0, victim3.power_cur / 1000.0])
 		# 假人会定时满血复活，所以以【本次新增的日志】为准（和上面木刺那条同一个套路）
-		var new_lines: Array = _s._debug_log.slice(log_from)
+		var new_lines: Array = _s.t_debug_log().slice(log_from)
 		var hit_friend := false
 		var hit_target := false
 		for lg2 in new_lines:
@@ -867,7 +867,7 @@ func _initialize() -> void:
 		gerald.power_cur = gerald.power_max
 		victim3.cell = Vector2i(40, 40)
 		var gerald_before2: int = gerald.power_cur
-		_s._attack_target_unit(gerald, false)
+		_s.t_attack_target_unit(gerald, false)
 		await create_timer(4.5).timeout
 		print("    直接朝友军 Gerald 射：力量 %s -> %s" % [
 			gerald_before2 / 1000.0, gerald.power_cur / 1000.0])
@@ -881,29 +881,29 @@ func _initialize() -> void:
 	gerald.cell = Vector2i(5, 5)
 	gerald.visual.position = Vector3(5.5, 0.0, 5.5)
 	_s.selected = gerald
-	_s._show_action_menu()
-	_s._menu_move()
+	_s.t_show_action_menu()
+	_s.t_menu_move()
 	print("    点「移动」后：二级菜单可见=%s，可移动格=%d" % [
-		_s._action_menu.visible, _s.reachable.size()])
-	_chk(not _s._action_menu.visible, "点移动后二级菜单应消失")
+		_s.t_action_menu().visible, _s.reachable.size()])
+	_chk(not _s.t_action_menu().visible, "点移动后二级菜单应消失")
 	_chk(_s.reachable.size() > 0, "点移动后应高亮可移动格")
 	var goal2 := Vector2i(5, 7)
 	_chk(_s.reachable.has(goal2), "目标格应可达")
-	_s._set_pending("move", goal2)
+	_s.t_set_pending("move", goal2)
 	_s.phase = _s.Phase.MOVE_CONFIRM
-	_s._draw_hints()
+	_s.t_draw_hints()
 	print("    第一次点 (%d,%d)：待确认=%s，格子仍是 %s" % [
-		goal2.x, goal2.y, _s._pending_kind, gerald.cell])
+		goal2.x, goal2.y, _s.t_pending_kind(), gerald.cell])
 	_chk(gerald.cell == Vector2i(5, 5), "第一次点不应真的移动")
-	_chk(_s._same_pending("move", goal2), "待确认目标应是该格")
-	_s._do_move(gerald, goal2)
+	_chk(_s.t_same_pending("move", goal2), "待确认目标应是该格")
+	_s.t_do_move(gerald, goal2)
 	await create_timer(0.6).timeout
 	print("    确认后：已移动到 %s" % gerald.cell)
 	_chk(gerald.cell == goal2, "确认后才真的移动")
 
 	# ── 19. 队列绝不连续同阵营（用户重点）──
 	print("\n[19] 队列交替自检")
-	_chk(_s._queue_alternation_ok(), "当前队列不应出现连续同阵营")
+	_chk(_s.t_queue_alternation_ok(), "当前队列不应出现连续同阵营")
 	gerald.power_cur = gerald.power_max
 	alette.power_cur = alette.power_max
 	var alive_p := 0
@@ -914,13 +914,13 @@ func _initialize() -> void:
 			else: alive_e += 1
 	_s.queue.rebuild(_s.units)
 	print("    %d 人 vs %d 人 -> %s" % [alive_p, alive_e, _s.queue.dump()])
-	_chk(_s._queue_alternation_ok(), "人数不等时也必须严格交替")
+	_chk(_s.t_queue_alternation_ok(), "人数不等时也必须严格交替")
 	var sides2: Array[int] = []
 	for u in _s.queue.order:
 		if u.is_alive():
 			sides2.append(u.side)
 	print("    阵营序列 =", sides2)
-	_chk(_s._queue_alternation_ok(), "阵营序列不能有相邻相同")
+	_chk(_s.t_queue_alternation_ok(), "阵营序列不能有相邻相同")
 
 	# ── 20. 连击状态在"对面复活"后必须保持 ──
 	print("\n[20] 连击状态的保持")
@@ -940,16 +940,16 @@ func _initialize() -> void:
 	_s.queue.rebuild(_s.units)
 	print("    1 vs 1 时：连击=%s 队列=%s" % [_s.queue.last_stand, _s.queue.dump()])
 	_chk(not _s.queue.last_stand, "1 vs 1 不该进入连击（应严格交替）")
-	_chk(_s._queue_alternation_ok(), "1 vs 1 也应隔一回合换边")
+	_chk(_s.t_queue_alternation_ok(), "1 vs 1 也应隔一回合换边")
 
 	# 敌方复活一个 -> 变成 1 vs 2 -> 应进入连击
 	eh20[1].power_cur = eh20[1].power_max
-	var switched: bool = _s._check_last_stand()
+	var switched: bool = _s.t_check_last_stand()
 	_s.queue.rebuild(_s.units)
 	print("    敌方复活 1 人后：检测到切换=%s 连击=%s" % [switched, _s.queue.last_stand])
 	print("      队列 = %s" % _s.queue.dump())
 	_chk(_s.queue.last_stand, "1 vs 2 应进入连击")
-	_chk(_s._queue_alternation_ok(), "连击模式下也不能连续同阵营")
+	_chk(_s.t_queue_alternation_ok(), "连击模式下也不能连续同阵营")
 
 	# 关键：再复活一个敌方 -> 连击必须保持
 	eh20[2].power_cur = eh20[2].power_max
@@ -958,7 +958,7 @@ func _initialize() -> void:
 	print("      连击保持 = %s" % _s.queue.last_stand)
 	print("      队列 = %s" % _s.queue.dump())
 	_chk(_s.queue.last_stand, "对面复活后连击状态必须保持")
-	_chk(_s._queue_alternation_ok(), "连击保持时仍不能连续同阵营")
+	_chk(_s.t_queue_alternation_ok(), "连击保持时仍不能连续同阵营")
 	# 一个完整循环 = 孤军 + 对面每人各一次
 	var opp_n: int = _s.queue.e_queue.size() if _s.queue.lone.side == UnitData.Side.PLAYER \
 		else _s.queue.p_queue.size()
@@ -976,25 +976,25 @@ func _initialize() -> void:
 	gerald.begin_turn()
 	gerald.cell = Vector2i(5, 5)
 	_s.selected = gerald
-	_s._show_action_menu()
-	_s._menu_move()
+	_s.t_show_action_menu()
+	_s.t_menu_move()
 	var goal3 := Vector2i(5, 7)
 	print("    点「移动」后：可移动格 = %d（应 > 0，说明高亮存在）" % _s.reachable.size())
 	_chk(_s.reachable.size() > 0, "点移动后应有可移动格")
-	_s._set_pending("move", goal3, gerald)
+	_s.t_set_pending("move", goal3, gerald)
 	_s.phase = _s.Phase.MOVE_CONFIRM
-	_s._draw_hints()
-	_chk(_s._pending_root != null, "应创建常驻的待确认标记节点")
+	_s.t_draw_hints()
+	_chk(_s.t_pending_root() != null, "应创建常驻的待确认标记节点")
 	print("    待确认标记可见 = %s 位置 = %s" % [
-		_s._pending_root.visible, _s._pending_root.position])
-	_chk(_s._pending_root.visible, "待确认标记应可见")
-	_chk(_s._pending_root.position.x > 5.0 and _s._pending_root.position.x < 6.0,
+		_s.t_pending_root().visible, _s.t_pending_root().position])
+	_chk(_s.t_pending_root().visible, "待确认标记应可见")
+	_chk(_s.t_pending_root().position.x > 5.0 and _s.t_pending_root().position.x < 6.0,
 		"标记应落在待确认格 (5,7) 上")
 	# 脉冲：颜色随时间变化
 	var cols: Array[Color] = []
 	for i in 6:
-		_s._tick_pending_pulse(0.08)
-		cols.append((_s._pending_mats[0] as StandardMaterial3D).albedo_color)
+		_s.t_tick_pending_pulse(0.08)
+		cols.append((_s.t_pending_mats()[0] as StandardMaterial3D).albedo_color)
 	var all_diff := true
 	for i in range(1, cols.size()):
 		if cols[i].is_equal_approx(cols[i - 1]):
@@ -1002,9 +1002,9 @@ func _initialize() -> void:
 	print("    标记颜色脉动：", cols[0], "->", cols[5])
 	_chk(all_diff, "标记颜色应随时间脉动")
 	# 取消后应隐藏
-	_s._clear_pending()
-	_s._draw_hints()
-	_chk(not _s._pending_root.visible, "取消待确认后标记应隐藏")
+	_s.t_clear_pending()
+	_s.t_draw_hints()
+	_chk(not _s.t_pending_root().visible, "取消待确认后标记应隐藏")
 
 	# ── 22. 地毯式轰炸（新技能）──
 	print("\n[22] 地毯式轰炸")
@@ -1070,22 +1070,22 @@ func _initialize() -> void:
 		e_list[i].cell = cells22[i]
 		e_list[i].power_cur = e_list[i].power_max
 		e_list[i].armor_cur = Rules.points_to_milli(5)
-	_s._start_carpet_bomb(mortar22, ctr22)
+	_s.t_start_carpet_bomb(mortar22, ctr22)
 	# 物理弹道：7 发间隔 0.2 秒起飞，每发飞 1 秒 -> 最后一发在 2.2 秒后落地
 	await create_timer(6.0).timeout
 	var hurt := 0
 	for i in mini(3, e_list.size()):
 		if e_list[i].power_cur < e_list[i].power_max:
 			hurt += 1
-	for lg in _s._debug_log:
+	for lg in _s.t_debug_log():
 		if String(lg).contains("呼叫【地毯式轰炸】"):
 			print("    [实际落点] %s" % lg)
 	print("    放完：精力 %d -> %d（应 -%d）｜ 区内 %d/3 个目标挨打 ｜ 红圈节点 %d 个 ｜ gm_busy=%s" % [
-		e_before, mortar22.energy, int(d22["cost"]), hurt, _s.count_impact_rings(), _s._gm_busy])
+		e_before, mortar22.energy, int(d22["cost"]), hurt, _s.count_impact_rings(), _s.t_gm_busy()])
 	_chk(mortar22.energy == e_before - int(d22["cost"]) * 1000, "地毯式轰炸应扣 3 点精力")
 	_chk(hurt > 0, "轰炸区内的目标应吃到炮弹")
 	_chk(_s.count_impact_rings() > 0, "炮弹落点必须有红圈")
-	_chk(not _s._gm_busy, "演出结束后必须解锁操作")
+	_chk(not _s.t_gm_busy(), "演出结束后必须解锁操作")
 	_chk(mortar22.has_acted, "放完技能应标记已行动（不能一回合打两次）")
 
 	# ── 23. 空爆延迟 = 5 回合 ──
@@ -1101,16 +1101,16 @@ func _initialize() -> void:
 	_s.selected = g24
 	g24.begin_turn()
 	_s.phase = _s.Phase.CHOOSE_TARGET
-	_s._action_menu.visible = true
-	_s._attack_menu.visible = true
-	if _s._skill_menu != null: _s._skill_menu.visible = true
-	_s._set_pending("move", Vector2i(6, 6), g24)
-	_s._on_blank_click()
-	_chk(not _s._action_menu.visible, "点空白后行动菜单必须收起")
-	_chk(not _s._attack_menu.visible, "点空白后攻击菜单必须收起")
-	_chk(not _s._skill_menu.visible, "点空白后技能菜单必须收起")
+	_s.t_action_menu().visible = true
+	_s.t_attack_menu().visible = true
+	if _s.t_skill_menu() != null: _s.t_skill_menu().visible = true
+	_s.t_set_pending("move", Vector2i(6, 6), g24)
+	_s.t_on_blank_click()
+	_chk(not _s.t_action_menu().visible, "点空白后行动菜单必须收起")
+	_chk(not _s.t_attack_menu().visible, "点空白后攻击菜单必须收起")
+	_chk(not _s.t_skill_menu().visible, "点空白后技能菜单必须收起")
 	_chk(_s.selected == null, "点空白后不应保持选中")
-	_chk(_s._pending_kind == "", "点空白后待确认标记必须清掉")
+	_chk(_s.t_pending_kind() == "", "点空白后待确认标记必须清掉")
 
 	# ── 25. 哨兵 / 弹道物物理 / 受击白闪 ──
 	print("\n[25] 哨兵与弹道物物理")
@@ -1131,7 +1131,7 @@ func _initialize() -> void:
 	al25.energy = al25.energy_max
 	al25.begin_turn()
 	_s.active = null          # 让 _cast_sentry 内部的 _finish_turn() 直接返回，别把哨兵刷掉
-	_s._cast_sentry(al25)
+	_s.t_cast_sentry(al25)
 	print("    施放哨兵：登记=%s 精力 %d/%d ｜ %s" % [
 		_s.gm.has_sentry(al25), al25.energy_points(), al25.energy_max_points(), _s.gm.sentry_desc()])
 	_chk(_s.gm.has_sentry(al25), "施放后 GM 必须登记哨兵状态")
@@ -1215,7 +1215,7 @@ func _initialize() -> void:
 	for u in _s.units:
 		if u.name == "Airburst mortar": mkthrow = u
 	mkthrow.cell = Vector2i(5, 9)      # 离阿莱特 4 格，正好在射界 1~8 内
-	var mk: Projectile = _s._spawn_marker(mkthrow, Vector2(5.5, 9.5))
+	var mk: Projectile = _s.t_spawn_marker(mkthrow, Vector2(5.5, 9.5))
 	print("    召唤球：sentry_trigger=%s hit_tags=%s 半径=%.2f" % [
 		mk.sentry_trigger, mk.hit_tags, mk.hit_r])
 	_chk(mk.sentry_trigger, "轨道召唤球必须能惊动哨兵")
@@ -1236,10 +1236,10 @@ func _initialize() -> void:
 	for u in _s.units:
 		if u.name == "Airburst mortar": shooter2 = u
 	shooter2.cell = Vector2i(5, 5)
-	var sh2: Projectile = _s._spawn_shell(shooter2, Vector2(9.0, 9.0), false)
-	var ar2: Projectile = _s._spawn_arrow(shooter2, Vector3(5.5, 0.75, 5.5),
+	var sh2: Projectile = _s.t_spawn_shell(shooter2, Vector2(9.0, 9.0), false)
+	var ar2: Projectile = _s.t_spawn_arrow(shooter2, Vector3(5.5, 0.75, 5.5),
 		Vector3(9.5, 0.55, 9.5), null, false, false)
-	_chk(_s._proj_collision(sh2) == ar2, "箭矢应能击落炮弹（炮弹必须有碰撞体积）")
+	_chk(_s.t_proj_collision(sh2) == ar2, "箭矢应能击落炮弹（炮弹必须有碰撞体积）")
 	_s.clear_projectiles()
 	_chk(_s.live_projectiles() == 0, "清场后不应残留弹道物")
 
@@ -1255,7 +1255,7 @@ func _initialize() -> void:
 	g25.cell = Vector2i(2, 45)
 	if g25.visual != null:
 		g25.visual.position = Vector3(2.5, 0.0, 45.5)
-	var p_out: Projectile = _s._spawn_shell(g25, Vector2(float(_s.GW) + 12.0, 45.0), true, 1.0)
+	var p_out: Projectile = _s.t_spawn_shell(g25, Vector2(float(_s.GW) + 12.0, 45.0), true, 1.0)
 	for i in 3000:
 		_s.field.step(1.0 / 30.0)
 		if not p_out.alive:
@@ -1321,8 +1321,8 @@ func _initialize() -> void:
 	gerald.power_cur = gerald.power_max
 	var hp_bt: int = gerald.power_cur
 	# 炮弹往远处飞（落点够远 -> 落地爆炸打不到杰拉尔德），只有"半空打爆"才会伤到他
-	var shell_b: Projectile = _s._spawn_shell(shooter_b, Vector2(12.0, 5.5), false)
-	var arrow_b: Projectile = _s._spawn_arrow(shooter_b, Vector3(4.5, 0.75, 5.5),
+	var shell_b: Projectile = _s.t_spawn_shell(shooter_b, Vector2(12.0, 5.5), false)
+	var arrow_b: Projectile = _s.t_spawn_arrow(shooter_b, Vector3(4.5, 0.75, 5.5),
 		Vector3(14.0, 0.55, 5.5), null, false, false)
 	for i in 400:
 		_s.field.step(1.0 / 60.0)
@@ -1333,7 +1333,7 @@ func _initialize() -> void:
 		hp_bt, gerald.power_cur])
 	_chk(not shell_b.alive and shell_b.removed_reason == "shot_down", "炮弹应被箭在半空击落")
 	var burst_logged := false
-	for lg in _s._debug_log:
+	for lg in _s.t_debug_log():
 		if String(lg).contains("空爆"):
 			burst_logged = true
 	_chk(burst_logged, "半空被打爆必须走空爆结算（日志里应有空爆字样）")
@@ -1345,20 +1345,20 @@ func _initialize() -> void:
 	gerald.armor_cur = Rules.points_to_milli(10)
 	var hp_low: int = gerald.power_cur
 	shooter_b.power_cur = shooter_b.power_max      # 保证"发射者活着"：发射单里的力量是开火那一刻的快照
-	var low_shell: Projectile = _s._spawn_shell(shooter_b, Vector2(6.5, 6.5), false)
+	var low_shell: Projectile = _s.t_spawn_shell(shooter_b, Vector2(6.5, 6.5), false)
 	low_shell.from = Vector2(6.5, 6.5)
 	low_shell.to = Vector2(6.5, 6.5)
-	_s._air_burst(low_shell)                       # 起飞高度 0.85 -> 贴脸炸
+	_s.t_air_burst(low_shell)                       # 起飞高度 0.85 -> 贴脸炸
 	print("    贴地空爆（高 %.2f）：杰拉尔德力量 %d -> %d" % [
 		low_shell.pos3().y, hp_low, gerald.power_cur])
 	_chk(gerald.power_cur < hp_low, "贴地空爆必须有伤害")
 	var hp_high: int = gerald.power_cur
-	var high_shell: Projectile = _s._spawn_shell(shooter_b, Vector2(6.5, 6.5), false)
+	var high_shell: Projectile = _s.t_spawn_shell(shooter_b, Vector2(6.5, 6.5), false)
 	high_shell.from = Vector2(6.5, 6.5)
 	high_shell.to = Vector2(6.5, 6.5)
 	high_shell.apex = 3.0
 	high_shell.t = 0.5                              # 抬到拱顶
-	_s._air_burst(high_shell)
+	_s.t_air_burst(high_shell)
 	print("    高空空爆（高 %.2f）：杰拉尔德力量 %d -> %d" % [
 		high_shell.pos3().y, hp_high, gerald.power_cur])
 	_chk(gerald.power_cur == hp_high, "飞得高的空爆打不到人（三维判定 + 一格球）")
@@ -1371,7 +1371,7 @@ func _initialize() -> void:
 	for u in _s.units:
 		if u.name == "Alette": archer = u
 	archer.cell = Vector2i(4, 4)
-	var land_arrow: Projectile = _s._spawn_arrow(archer, Vector3(4.5, 0.75, 4.5),
+	var land_arrow: Projectile = _s.t_spawn_arrow(archer, Vector3(4.5, 0.75, 4.5),
 		Vector3(4.5, 0.55, 7.5), null, false, false)
 	# 推到落地
 	for i in 600:
@@ -1406,42 +1406,42 @@ func _initialize() -> void:
 	gerald.visual.position = Vector3(5.5, 0.0, 5.5)
 	gerald.begin_turn()
 	_s.active = gerald
-	_s._menu_attack()
+	_s.t_menu_attack()
 	_chk(_s.phase == _s.Phase.CHOOSE_TARGET, "近战点普攻后应进入选目标（要确认）")
 	foe27.cell = Vector2i(6, 5)
 	foe27.power_cur = foe27.power_max
 	foe27.visual.position = Vector3(6.5, 0.0, 5.5)
 	_s.attackable = Targeting.attack_range_cells(gerald, _s.GW, _s.GH)
 	_chk(_s.attackable.has(foe27.cell), "相邻敌格应在可攻击范围里")
-	_s._set_pending("attack", foe27.cell, foe27)      # 第一次点
-	_chk(_s._pending_root.visible, "待确认黄勾必须立刻出现（不能依赖调用方补 _draw_hints）")
-	_s._draw_hints()
+	_s.t_set_pending("attack", foe27.cell, foe27)      # 第一次点
+	_chk(_s.t_pending_root().visible, "待确认黄勾必须立刻出现（不能依赖调用方补 _draw_hints）")
+	_s.t_draw_hints()
 	print("    第一次点 %s：待确认=%s 黄勾可见=%s 笔画=%d" % [
-		foe27.name, _s._pending_kind, _s._pending_root.visible, _s._check_mats.size()])
-	_chk(_s._pending_kind == "attack" and _s._same_pending("attack", foe27.cell),
+		foe27.name, _s.t_pending_kind(), _s.t_pending_root().visible, _s.t_check_mats().size()])
+	_chk(_s.t_pending_kind() == "attack" and _s.t_same_pending("attack", foe27.cell),
 		"第一次点目标只是待确认，不弹菜单")
-	_chk(_s._pending_root.visible, "待确认黄勾应出现")
-	_chk(_s._check_mats.size() == 4, "黄勾 = 2 段笔画 × (亮芯 + 柔光)")
+	_chk(_s.t_pending_root().visible, "待确认黄勾应出现")
+	_chk(_s.t_check_mats().size() == 4, "黄勾 = 2 段笔画 × (亮芯 + 柔光)")
 	# 朝向：必须正对摄像机（不能斜）
-	_s._face_check_mark()
-	var cb: Basis = _s._check_root.global_transform.basis
-	var camz: Vector3 = _s._camera.global_transform.basis.z
+	_s.t_face_check_mark()
+	var cb: Basis = _s.t_check_root().global_transform.basis
+	var camz: Vector3 = _s.t_camera().global_transform.basis.z
 	print("    黄勾朝向与摄像机 z 轴点积 = %.4f（1 = 完全正对）" % cb.z.normalized().dot(camz))
 	_chk(absf(cb.z.normalized().dot(camz) - 1.0) < 0.001, "黄勾必须正对摄像机，不能斜")
 	# 第二次点同一格 -> 确认，弹攻击菜单
-	if _s._same_pending("attack", foe27.cell):
-		_s._clear_pending()
-		_s._show_attack_menu(foe27)
-	_s._draw_hints()
-	_chk(_s._attack_menu.visible, "第二次点同一目标才弹攻击菜单")
-	_chk(not _s._pending_root.visible, "确认后黄勾必须消失")
-	_s._attack_menu.visible = false
+	if _s.t_same_pending("attack", foe27.cell):
+		_s.t_clear_pending()
+		_s.t_show_attack_menu(foe27)
+	_s.t_draw_hints()
+	_chk(_s.t_attack_menu().visible, "第二次点同一目标才弹攻击菜单")
+	_chk(not _s.t_pending_root().visible, "确认后黄勾必须消失")
+	_s.t_attack_menu().visible = false
 	# 远程：同样要确认
 	alette.cell = Vector2i(9, 5)
 	alette.visual.position = Vector3(9.5, 0.0, 5.5)
 	alette.begin_turn()
 	_s.active = alette
-	_s._menu_attack()
+	_s.t_menu_attack()
 	_chk(_s.phase == _s.Phase.CHOOSE_TARGET, "远程点普攻后也应进入选目标（要确认）")
 	# 投掷手：直接进入瞄准，不需要确认
 	var mortar27 = null
@@ -1449,10 +1449,10 @@ func _initialize() -> void:
 		if u.name == "Airburst mortar": mortar27 = u
 	mortar27.begin_turn()
 	_s.active = mortar27
-	_s._menu_attack()
-	_chk(_s.phase == _s.Phase.AIMING and _s._aim_active, "投掷手瞄准不需要确认（直接进入拖动瞄准）")
-	_s._aim_active = false
-	_s._arrow_root.visible = false
+	_s.t_menu_attack()
+	_chk(_s.phase == _s.Phase.AIMING and _s.t_aim_active(), "投掷手瞄准不需要确认（直接进入拖动瞄准）")
+	_s.t_set_aim_active(false)
+	_s.t_arrow_root().visible = false
 
 	# ── 28. 杰拉尔德被动：箭矢弹反 QTE ──
 	print("\n[28] 箭矢弹反 QTE")
@@ -1474,7 +1474,7 @@ func _initialize() -> void:
 	# ① 按错一次 -> 立刻结算伤害；同一角色回合里的后续箭矢不再给机会
 	_s.gm.on_turn_begin()
 	var hp0: int = gerald.power_cur
-	var arrow1: Projectile = _s._spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
+	var arrow1: Projectile = _s.t_spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
 		Vector3(5.5, 0.55, 5.5), gerald, false, true)
 	var q1: ArrowQTE = null
 	for i in 900:
@@ -1502,7 +1502,7 @@ func _initialize() -> void:
 	# ①b 同一个角色回合里的第二支箭：直接结算，不再弹 QTE（用户口径）
 	_s.clear_projectiles()
 	var hp_mid: int = gerald.power_cur
-	var arrow1b: Projectile = _s._spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
+	var arrow1b: Projectile = _s.t_spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
 		Vector3(5.5, 0.55, 5.5), gerald, false, true)
 	var q1b: ArrowQTE = null
 	for i in 900:
@@ -1525,7 +1525,7 @@ func _initialize() -> void:
 	# 第 93 轮：反弹箭力量系数回到 75%（52 × 75% = 39），护甲照样压低到 8 方便看伤害
 	var al_armor0: int = alette.armor_cur
 	alette.armor_cur = Rules.points_to_milli(8)
-	var arrow2: Projectile = _s._spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
+	var arrow2: Projectile = _s.t_spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
 		Vector3(5.5, 0.55, 5.5), gerald, false, true)
 	var q2: ArrowQTE = null
 	for i in 900:
@@ -1577,7 +1577,7 @@ func _initialize() -> void:
 	# 用户口径：阵亡要清除一切状态（哨兵警戒 / 蓄势层数）
 	_s.gm.add_sentry(gerald, 1, 8)
 	Passives.add_focus(gerald)
-	_s._on_unit_died(gerald)
+	_s.t_on_unit_died(gerald)
 	print("    阵亡后：哨兵=%s ｜ 蓄势层数=%d" % [_s.gm.has_sentry(gerald), Passives.focus_stacks(gerald)])
 	_chk(not _s.gm.has_sentry(gerald), "阵亡应清除哨兵警戒")
 	_chk(Passives.focus_stacks(gerald) == 0, "阵亡应清空蓄势层数")
@@ -1591,11 +1591,11 @@ func _initialize() -> void:
 	for i in GameMaster.HERO_REVIVE_TURNS - 1:
 		_s.gm.dispatch_turn_boundary()
 		for u in _s.gm.due_revives():
-			_s._revive_hero(u)
+			_s.t_revive_hero(u)
 	_chk(not gerald.is_alive(), "没到 10 个回合还不能复活")
 	_s.gm.dispatch_turn_boundary()
 	for u in _s.gm.due_revives():
-		_s._revive_hero(u)
+		_s.t_revive_hero(u)
 	print("    10 个回合后：力量 %s/%s 护甲 %s/%s 位置 %s 可见=%s" % [
 		gerald.power_cur / 1000.0, gerald.power_max / 1000.0,
 		gerald.armor_cur / 1000.0, gerald.armor_max / 1000.0, gerald.cell, gerald.visual.visible])
@@ -1618,9 +1618,9 @@ func _initialize() -> void:
 	print("\n[31] 锁定沙盒元素")
 	_s.clear_projectiles()
 	_s.phase = _s.Phase.PLACE
-	_s._place_kind = "木刺"
+	_s.t_set_place_kind("木刺")
 	_s.place_left["木刺"] = 1
-	_s._place_at(Vector2i(8, 8))
+	_s.t_place_at(Vector2i(8, 8))
 	_chk(_s.placeables.size() >= 1, "应能放下一个木刺")
 	var spike2: Placeable = _s.placeables[_s.placeables.size() - 1]
 	print("    木刺在 %s ｜ 力量 %d ｜ 阻挡远程=%s" % [spike2.cell, spike2.power_cur / 1000, spike2.block_ranged])
@@ -1630,7 +1630,7 @@ func _initialize() -> void:
 	gerald.has_moved = false
 	_s.active = gerald
 	var hp_spike: int = spike2.power_cur
-	_s._attack_target_placeable(spike2)
+	_s.t_attack_target_placeable(spike2)
 	print("    杰拉尔德近战：木刺力量 %d -> %d" % [hp_spike / 1000, spike2.power_cur / 1000])
 	_chk(spike2.power_cur < hp_spike or not spike2.is_alive(), "近战英雄应能锁定并打伤沙盒道具")
 	# 远程：阿莱特射它（木刺不挡远程，但【明确锁定】必须打得中）
@@ -1640,7 +1640,7 @@ func _initialize() -> void:
 	alette.has_moved = false
 	_s.active = alette
 	_s.clear_projectiles()
-	_s._attack_target_placeable(spike2)
+	_s.t_attack_target_placeable(spike2)
 	var arrow_ok: bool = _s.live_projectiles() >= 1
 	for i in 300:
 		if _s.field.items.is_empty():
@@ -1651,7 +1651,7 @@ func _initialize() -> void:
 	_chk(arrow_ok, "远程英雄应能对沙盒道具出箭")
 	_chk(spike2.power_cur < spike2.power_max, "锁定的箭必须打中木刺（哪怕木刺不挡远程）")
 	_s.phase = _s.Phase.IDLE
-	_s._place_kind = ""
+	_s.t_set_place_kind("")
 
 	# ── 30. AI 决策（索敌打分 / 技能规避 / 休息与靠拢）──
 	print("\n[30] AI 决策")
@@ -1669,7 +1669,7 @@ func _initialize() -> void:
 	for u in _s.units:
 		if u.side != ai_me.side and u.is_alive(): ctx.foes.append(u)
 	ctx.foe_king = foe_king
-	ctx.reachable = _s._compute_reachable(ai_me)
+	ctx.reachable = _s.t_compute_reachable(ai_me)
 	ctx.placeables = _s.placeables
 	# ① 国王的分数必须高于远处的小兵
 	var sc_king := Ai.score(ai_me, foe_king, Vector2i(9, 36), ctx)
@@ -1770,13 +1770,13 @@ func _initialize() -> void:
 		"无法使用", "不能休息", "先从道具箱", "选择攻击方式", "假人无 AI", "操作已锁定",
 		"放不下", "没有可用技能", "用完了", "请点", "右键返回"]
 	var bad: Array[String] = []
-	for lg in _s._debug_log:
+	for lg in _s.t_debug_log():
 		var s := String(lg)
 		for b in banned:
 			if s.contains(b):
 				bad.append(s)
-	print("    日志共 %d 行，命中提示类文案 %d 行" % [_s._debug_log.size(), bad.size()])
-	var tail: Array = _s._debug_log.slice(maxi(0, _s._debug_log.size() - 10))
+	print("    日志共 %d 行，命中提示类文案 %d 行" % [_s.t_debug_log().size(), bad.size()])
+	var tail: Array = _s.t_debug_log().slice(maxi(0, _s.t_debug_log().size() - 10))
 	for lg in tail:
 		print("    ｜%s" % String(lg))
 	_chk(bad.is_empty(), "日志里不应出现提示/拒绝类文案（只有既定事实）")
@@ -1793,9 +1793,9 @@ func _initialize() -> void:
 	_chk(sani != null, "场上应有萨尼铁塔")
 	# ① 落地：地上出现模型 + GM 开始计时
 	var grn := Ordnance.make_grenade(sani, Vector2(6.5, 6.5), true)
-	_s._spawn_grenade_model(Vector2i(6, 6), grn)
-	print("    落地模型 %d 个 ｜ GM 在途 %d" % [_s._grenade_models.size(), _s.gm.pending.size()])
-	_chk(_s._grenade_models.has(Vector2i(6, 6)), "手榴弹落地应留下模型（不可交互）")
+	_s.t_spawn_grenade_model(Vector2i(6, 6), grn)
+	print("    落地模型 %d 个 ｜ GM 在途 %d" % [_s.t_grenade_models().size(), _s.gm.pending.size()])
+	_chk(_s.t_grenade_models().has(Vector2i(6, 6)), "手榴弹落地应留下模型（不可交互）")
 	_chk(_s.gm.pending.size() == 1 and String(_s.gm.pending[0].skill_id) == "grenade",
 		"GM 应开始 4 回合倒计时")
 	# ② 4 个回合边界后爆炸 -> 8 枚破片
@@ -1803,27 +1803,27 @@ func _initialize() -> void:
 	for i in 4:
 		for p in _s.gm.dispatch_turn_boundary():
 			if String(p.skill_id) == "grenade":
-				_s._explode_grenade(p)
+				_s.t_explode_grenade(p)
 	var frags := 0
 	for it in _s.field.items:
 		var pp: Projectile = it["p"]
 		if pp.kind == Projectile.KIND_FRAGMENT and pp.alive:
 			frags += 1
 			_chk(pp.hit_self, "手榴弹破片必须能打自己人（hit_self）") if frags == 1 else null
-	print("    爆炸后场上破片 %d 枚 ｜ 模型残留 %d" % [frags, _s._grenade_models.size()])
+	print("    爆炸后场上破片 %d 枚 ｜ 模型残留 %d" % [frags, _s.t_grenade_models().size()])
 	_chk(frags == 8, "爆炸应撒出 8 枚破片")
-	_chk(_s._grenade_models.is_empty(), "爆炸后模型应被清掉")
-	print("    爆炸闪光节点 = %s" % ("有" if _s._last_flash != null and is_instance_valid(_s._last_flash) else "无"))
-	_chk(_s._last_flash != null and is_instance_valid(_s._last_flash), "爆炸应有球状闪光（不是红圈）")
+	_chk(_s.t_grenade_models().is_empty(), "爆炸后模型应被清掉")
+	print("    爆炸闪光节点 = %s" % ("有" if _s.t_last_flash() != null and is_instance_valid(_s.t_last_flash()) else "无"))
+	_chk(_s.t_last_flash() != null and is_instance_valid(_s.t_last_flash()), "爆炸应有球状闪光（不是红圈）")
 	_s.clear_projectiles()
 	# ③ 圣萨尼：复活最后一个阵亡的队友，每条命一次
 	var mate: Unit = null
 	for u in _s.units:
 		if u.name == "Gerald": mate = u
 	mate.power_cur = 0
-	_s._on_unit_died(mate)
+	_s.t_on_unit_died(mate)
 	print("    队友阵亡：%s ｜ 她的标记=%s" % [mate.name, sani.tags.has("holy_sani_used")])
-	_s._holy_sani_check(sani)
+	_s.t_holy_sani_check(sani)
 	print("    圣萨尼之后：队友 alive=%s 位置 %s ｜ 已用标记=%s" % [
 		mate.is_alive(), mate.cell, sani.tags.has("holy_sani_used")])
 	_chk(mate.is_alive() and mate.power_cur == mate.power_max, "圣萨尼应立即复活最后一个阵亡的队友")
@@ -1857,11 +1857,11 @@ func _initialize() -> void:
 	victim_near.armor_cur = victim_near.armor_max
 	heli.power_cur = 15 * 1000
 	# 先确认"还剩 15 点力量"不坠机（第 97 轮删掉的那条半血自毁规则）
-	_s._check_heli_crash(heli)
+	_s.t_check_heli_crash(heli)
 	_chk(not heli.tags.has("crashing"), "力量还剩 15 点【不】坠机（第 97 轮：删掉半血自毁）")
 	heli.power_cur = 0
 	var hp_crash: int = victim_near.power_cur
-	_s._check_heli_crash(heli)
+	_s.t_check_heli_crash(heli)
 	print("    坠机触发：crashing=%s" % heli.tags.has("crashing"))
 	_chk(heli.tags.has("crashing"), "力量归零应进入坠机")
 	await create_timer(0.7).timeout
@@ -1872,17 +1872,17 @@ func _initialize() -> void:
 	_chk(_s.gm.revive_countdown(heli) > 0, "坠机后应进入重生倒计时")
 	# 俯冲轰炸：准备状态 -> AI 可读 -> 俯冲 -> 投弹 -> 返航
 	heli.power_cur = heli.power_max
-	_s._revive_hero(heli)
+	_s.t_revive_hero(heli)
 	heli.energy = heli.energy_max
 	var dtgt := Vector2i(heli.cell.x + 4, heli.cell.y)
-	_s._cast_dive(heli, dtgt)
+	_s.t_cast_dive(heli, dtgt)
 	print("    准备状态：ready=%s 目标=%s ｜ 标识节点=%d" % [
-		Ai.heli_is_ready(heli), Ai.heli_ready_target(heli), _s._dive_markers.size()])
+		Ai.heli_is_ready(heli), Ai.heli_ready_target(heli), _s.t_dive_markers().size()])
 	_chk(Ai.heli_is_ready(heli) and Ai.heli_ready_target(heli) == dtgt, "应进入准备状态并记住目标格")
-	_chk(_s._dive_markers.size() == 1, "目标格应有地面标识（橙色圆盘）")
+	_chk(_s.t_dive_markers().size() == 1, "目标格应有地面标识（橙色圆盘）")
 	_chk(Ai.heli_threatens_cell(heli, dtgt + Vector2i(1, 1)), "AI 能算出它威胁到的格子")
 	_chk(Ai.ready_helis([heli]).size() == 1, "AI 能列出正在准备的敌方直升机")
-	_chk(_s._dive_begin(heli), "轮到它的回合应开始爬升轰炸")
+	_chk(_s.t_dive_begin(heli), "轮到它的回合应开始爬升轰炸")
 	_chk(heli.tags.has("diving"), "爬升轰炸中要打上 diving 标记")
 	var dummy_v: Unit = victim_near
 	dummy_v.cell = dtgt
@@ -1890,7 +1890,7 @@ func _initialize() -> void:
 	var hp_bomb: int = dummy_v.power_cur
 	var top_h := 0.0
 	for i in 400:
-		_s._dive_tick(1.0 / 60.0)
+		_s.t_dive_tick(1.0 / 60.0)
 		top_h = maxf(top_h, heli.visual.position.y)
 		if not heli.tags.has("diving"):
 			break
@@ -1908,15 +1908,15 @@ func _initialize() -> void:
 	# ── 35. 选技能链路（枪榴弹）：说明文案 + 刷新界面不许崩（用户报过崩溃）──
 	print("\n[35] 枪榴弹选技能链路")
 	_s.active = sani
-	_s._aim_skill_id = "grenade_launcher"
-	_s._skill_info_text = Skills.detail_text("grenade_launcher")
-	_s._refresh_all()
+	_s.t_set_aim_skill_id("grenade_launcher")
+	_s.t_set_skill_info_text(Skills.detail_text("grenade_launcher"))
+	_s.t_refresh_all()
 	var info: String = _s.ui_skill_info()
 	print("    说明文案长度 = %d ｜ 前 40 字：%s" % [info.length(), info.substr(0, mini(40, info.length()))])
 	_chk(info.length() > 0, "选中枪榴弹后应能生成技能说明（不崩）")
 	_chk(int(Skills.get_def("grenade_launcher")["cost"]) == 2, "枪榴弹仍是 2 精力")
-	_s._aim_skill_id = ""
-	_s._skill_info_text = ""
+	_s.t_set_aim_skill_id("")
+	_s.t_set_skill_info_text("")
 
 	# ── 36. 直升机普攻（真实 _fire 路径）+ 坠机（真实受伤路径）──
 	print("\n[36] 直升机普攻与坠机（真实路径）")
@@ -1931,15 +1931,15 @@ func _initialize() -> void:
 	he2.has_moved = false
 	_s.active = he2
 	_s.phase = _s.Phase.AIMING
-	_s._aim_active = true
-	_s._aim_valid = true
-	_s._aim_origin = Vector2.ZERO
-	_s._aim_now = Vector2(200, 0)
-	_s._aim_float_pos = Vector2(20.5, 6.5)
-	_s._planned_cell = Vector2i(20, 6)
-	_s._aim_skill_id = ""
+	_s.t_set_aim_active(true)
+	_s.t_set_aim_valid(true)
+	_s.t_set_aim_origin(Vector2.ZERO)
+	_s.t_set_aim_now(Vector2(200, 0))
+	_s.t_set_aim_float_pos(Vector2(20.5, 6.5))
+	_s.t_set_planned_cell(Vector2i(20, 6))
+	_s.t_set_aim_skill_id("")
 	var e0: int = he2.energy_points()
-	_s._fire()
+	_s.t_fire()
 	var rockets := 0
 	for it in _s.field.items:
 		var pp: Projectile = it["p"]
@@ -1956,9 +1956,9 @@ func _initialize() -> void:
 		var pp2: Projectile = it2["p"]
 		if pp2.kind == Projectile.KIND_ROCKET: rockets2 += 1
 	print("    齐射完成：场上火箭（含在飞）%d 发 ｜ 已出膛波次 %d" % [
-		rockets2, (_s._salvo_dbg.get("spawns", []) as Array).size()])
+		rockets2, (_s.t_salvo_dbg().get("spawns", []) as Array).size()])
 	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，3.5 秒内 16 发基本都在飞）")
-	_chk((_s._salvo_dbg.get("spawns", []) as Array).size() == int(Level.heli()["salvo_pairs"]),
+	_chk((_s.t_salvo_dbg().get("spawns", []) as Array).size() == int(Level.heli()["salvo_pairs"]),
 		"8 次齐射全部出膛（第 93 轮：4 -> 8）")
 	_chk(_s.active != he2, "发射完即进入下一回合（无需等待落地）")
 	# 坠机：走"受伤"这条真实路径（第 97 轮：力量归零才坠机）
@@ -1971,10 +1971,10 @@ func _initialize() -> void:
 	nb.cell = Vector2i(he2.cell.x + 1, he2.cell.y)
 	nb.power_cur = nb.power_max
 	var nb0: int = nb.power_cur
-	_s._after_damage_to_unit(he2)
+	_s.t_after_damage_to_unit(he2)
 	_chk(not he2.tags.has("crashing"), "还剩 15 点力量：受伤路径也【不】坠机（第 97 轮）")
 	he2.power_cur = 0
-	_s._after_damage_to_unit(he2)
+	_s.t_after_damage_to_unit(he2)
 	print("    受伤路径：crashing=%s" % he2.tags.has("crashing"))
 	_chk(he2.tags.has("crashing"), "力量归零后【受伤】必须触发坠机（真实路径）")
 	await create_timer(0.7).timeout
@@ -1987,41 +1987,41 @@ func _initialize() -> void:
 	# ── 37. 手榴弹走真实 GM 路径爆炸 + 出界防护 ──
 	print("\n[37] 手榴弹 GM 路径与出界防护")
 	_s.clear_projectiles()
-	for k in _s._grenade_models.keys():
+	for k in _s.t_grenade_models().keys():
 		pass
 	var sani3: Unit = null
 	for u in _s.units:
 		if u.name == "萨尼铁塔": sani3 = u
 	var g3 := Ordnance.make_grenade(sani3, Vector2(7.5, 7.5), true)
-	_s._spawn_grenade_model(Vector2i(7, 7), g3)
+	_s.t_spawn_grenade_model(Vector2i(7, 7), g3)
 	print("    落地后 GM 在途 = %d（skill=%s delay=%d）" % [
 		_s.gm.pending.size(),
 		String(_s.gm.pending[0].skill_id) if _s.gm.pending.size() > 0 else "-",
 		int(_s.gm.pending[0].delay) if _s.gm.pending.size() > 0 else -1])
 	_chk(_s.gm.pending.size() == 1, "手榴弹落地必须由 GM 登记")
 	for i in 4:
-		await _s._gm_step()                       # 真实路径：回合边界 -> GM 到期 -> 爆炸
+		await _s.t_gm_step()                       # 真实路径：回合边界 -> GM 到期 -> 爆炸
 	var frag := 0
 	for it in _s.field.items:
 		var pp3: Projectile = it["p"]
 		if pp3.kind == Projectile.KIND_FRAGMENT and pp3.alive: frag += 1
 	print("    4 个回合边界后：破片 %d 枚 ｜ 残留模型 %d ｜ GM 在途 %d" % [
-		frag, _s._grenade_models.size(), _s.gm.pending.size()])
+		frag, _s.t_grenade_models().size(), _s.gm.pending.size()])
 	_chk(frag == 8, "手榴弹 4 回合后应爆炸并撒出 8 枚破片（真实 GM 路径）")
-	_chk(_s._grenade_models.is_empty(), "爆炸后地上模型应清掉")
+	_chk(_s.t_grenade_models().is_empty(), "爆炸后地上模型应清掉")
 	# 出界防护：钳制 + 移动不会跑出地图
 	var he3: Unit = null
 	for u in _s.units:
 		if Unit.base_name(u.name).begins_with("俯冲轰炸直升机"): he3 = u
 	print("    钳制：(-5, 999) -> %s ｜ (9999, -3) -> %s" % [
-		_s._clamp_cell(Vector2i(-5, 999)), _s._clamp_cell(Vector2i(9999, -3))])
-	var c1: Vector2i = _s._clamp_cell(Vector2i(-5, 999))
-	_chk(_s._in_bounds(c1) and _s._in_bounds(_s._clamp_cell(Vector2i(9999, -3))),
+		_s.t_clamp_cell(Vector2i(-5, 999)), _s.t_clamp_cell(Vector2i(9999, -3))])
+	var c1: Vector2i = _s.t_clamp_cell(Vector2i(-5, 999))
+	_chk(_s.t_in_bounds(c1) and _s.t_in_bounds(_s.t_clamp_cell(Vector2i(9999, -3))),
 		"任何格子都会被钳进地图内（永不出界）")
-	_s._do_move(he3, Vector2i(-8, -8))
+	_s.t_do_move(he3, Vector2i(-8, -8))
 	await create_timer(0.4).timeout
-	print("    强制向场外移动后：位置 %s ｜ 在界内=%s" % [he3.cell, _s._in_bounds(he3.cell)])
-	_chk(_s._in_bounds(he3.cell), "单位不可能被移动到地图外")
+	print("    强制向场外移动后：位置 %s ｜ 在界内=%s" % [he3.cell, _s.t_in_bounds(he3.cell)])
+	_chk(_s.t_in_bounds(he3.cell), "单位不可能被移动到地图外")
 
 	# ── 38. 普攻/技能统一入口（本轮重构的防回归核心）──
 	# 病根：一次普攻有四条并行入口，每加一个角色要改四处；漏一处就出 bug
@@ -2086,16 +2086,16 @@ func _initialize() -> void:
 	_s.clear_projectiles()
 	_s.active = heli_b
 	_s.phase = _s.Phase.IDLE
-	_s._attack_target_unit(foe_b, false)
+	_s.t_attack_target_unit(foe_b, false)
 	print("    点目标入口：火箭 %d 发 ｜ 已出手=%s ｜ 精力 %d" % [
 		_count_kind(Projectile.KIND_ROCKET), heli_b.has_acted, heli_b.energy_points()])
 	_chk(_count_kind(Projectile.KIND_ROCKET) == 0, "精力不足时不许出弹")
 	_chk(not heli_b.has_acted, "精力不足时不许占掉这一次行动（否则玩家白亏一回合）")
 	# AI 出手：打不出也必须自己收尾（不然 AI 回合卡死，以前靠 9 秒看门狗兜）
-	_s._turn_just_finished = null
+	_s.t_set_turn_just_finished(null)
 	_s.active = heli_b
 	var tc_b0: int = _s.gm.turn_count
-	_s._ai_attack(heli_b, {"target": foe_b, "aim": Vector2(14.5, 10.5)})
+	_s.t_ai_attack(heli_b, {"target": foe_b, "aim": Vector2(14.5, 10.5)})
 	await create_timer(0.4).timeout          # 回合收尾是异步的（_finish_turn -> _gm_step -> _next_turn）
 	print("    AI 入口：火箭 %d 发 ｜ 推进了回合边界=%s" % [
 		_count_kind(Projectile.KIND_ROCKET), _s.gm.turn_count > tc_b0])
@@ -2108,7 +2108,7 @@ func _initialize() -> void:
 	heli_b.cell = Vector2i(10, 10)
 	foe_b.cell = Vector2i(12, 10)
 	foe_b.power_cur = foe_b.power_max
-	var broke_plan := Ai.plan(_s._ai_ctx(heli_b))
+	var broke_plan := Ai.plan(_s.t_ai_ctx(heli_b))
 	print("    精力 0 的直升机 AI 选择：%s（%s）" % [
 		broke_plan.get("action", "-"), broke_plan.get("note", "-")])
 	_chk(String(broke_plan.get("action", "")) != "attack",
@@ -2117,7 +2117,7 @@ func _initialize() -> void:
 		"付不起普攻时所有 AI 都必须选【休息】（用户口径第 86 轮）")
 	# 对照：同一个人，精力够就该打（说明上面选休息不是别的原因）
 	heli_b.energy = heli_b.energy_max
-	var paid_plan := Ai.plan(_s._ai_ctx(heli_b))
+	var paid_plan := Ai.plan(_s.t_ai_ctx(heli_b))
 	print("    精力满的同一个直升机：%s" % paid_plan.get("action", "-"))
 	_chk(String(paid_plan.get("action", "")) == "attack", "精力够就该打（对照）")
 	heli_b.energy = 0
@@ -2150,40 +2150,40 @@ func _initialize() -> void:
 		#     免得回合推进把刚放下的状态（俯冲准备 / 哨兵）当场消费掉，干扰效果计数。
 		_reset_skill_scene(caster)
 		_s.active = caster
-		_s._turn_just_finished = caster
-		var ok_shared: bool = _s._perform_skill(caster, sid_s, aim, tcell)
+		_s.t_set_turn_just_finished(caster)
+		var ok_shared: bool = _s.t_perform_skill(caster, sid_s, aim, tcell)
 		var eff_shared := _skill_effect(sid_s, caster)
 		# ② AI 入口
 		_reset_skill_scene(caster)
 		_s.active = caster
-		_s._turn_just_finished = caster
-		_s._ai_skill(caster, {"skill": sid_s, "aim": aim, "cell": tcell})
+		_s.t_set_turn_just_finished(caster)
+		_s.t_ai_skill(caster, {"skill": sid_s, "aim": aim, "cell": tcell})
 		var eff_ai := _skill_effect(sid_s, caster)
 		# ③ 玩家真实入口：拖拽类走 _fire，点格子类走 _choose_skill + _confirm_cell_target，
 		#    点一下类（哨兵）走 _choose_skill
 		_reset_skill_scene(caster)
 		_s.active = caster
-		_s._turn_just_finished = caster
+		_s.t_set_turn_just_finished(caster)
 		var eff_ui := -1
 		if aim_kind == Skills.AIM_DRAG:
 			_s.phase = _s.Phase.AIMING
-			_s._aim_active = true
-			_s._aim_valid = true
-			_s._aim_origin = Vector2.ZERO
-			_s._aim_now = Vector2(220, 0)
-			_s._aim_float_pos = aim
-			_s._planned_cell = tcell
-			_s._aim_skill_id = sid_s
-			_s._fire()
+			_s.t_set_aim_active(true)
+			_s.t_set_aim_valid(true)
+			_s.t_set_aim_origin(Vector2.ZERO)
+			_s.t_set_aim_now(Vector2(220, 0))
+			_s.t_set_aim_float_pos(aim)
+			_s.t_set_planned_cell(tcell)
+			_s.t_set_aim_skill_id(sid_s)
+			_s.t_fire()
 			eff_ui = _skill_effect(sid_s, caster)
 		elif aim_kind == Skills.AIM_CELL:
-			_s._choose_skill(sid_s)
-			var targeting: bool = _s._cell_targeting
-			_s._confirm_cell_target(tcell)
+			_s.t_choose_skill(sid_s)
+			var targeting: bool = _s.t_cell_targeting()
+			_s.t_confirm_cell_target(tcell)
 			eff_ui = _skill_effect(sid_s, caster)
 			_chk(targeting, "%s：点格子类技能会进入选格阶段（不拖拽、不投标记球）" % sid_s)
 		else:
-			_s._choose_skill(sid_s)
+			_s.t_choose_skill(sid_s)
 			eff_ui = _skill_effect(sid_s, caster)
 		print("    %s（cast=%s aim=%s）：共享=%d ｜ AI=%d ｜ 玩家入口=%d" % [
 			sid_s, cast_kind, aim_kind, eff_shared, eff_ai, eff_ui])
@@ -2191,12 +2191,12 @@ func _initialize() -> void:
 		_chk(eff_ai == eff_shared, "%s：AI 入口与统一入口效果一致" % sid_s)
 		_chk(eff_ui == eff_shared, "%s：玩家入口与统一入口效果一致" % sid_s)
 		_reset_skill_scene(caster)
-	_s._turn_just_finished = null
+	_s.t_set_turn_just_finished(null)
 	# 精力不足用不出技能：不扣精力、不进状态
 	var sani_z: Unit = _unit_by("萨尼铁塔", 0)
 	sani_z.energy = 0
 	_s.active = sani_z
-	var ok_poor: bool = _s._perform_skill(sani_z, "grenade_launcher", Vector2(14.5, 10.5), Vector2i(14, 10))
+	var ok_poor: bool = _s.t_perform_skill(sani_z, "grenade_launcher", Vector2(14.5, 10.5), Vector2i(14, 10))
 	print("    精力 0 用枪榴弹：成功=%s ｜ 精力 %d ｜ 弹道物 %d" % [
 		ok_poor, sani_z.energy_points(), _count_kind(Projectile.KIND_GRENADE)])
 	_chk(not ok_poor and sani_z.energy_points() == 0, "精力不足时技能不许施放、也不许扣成负数")
@@ -2208,12 +2208,12 @@ func _initialize() -> void:
 	var missing_hooks: Array = []
 	for u in _s.units:
 		for id in Passives.damaged_hooks(u):
-			if not _s._passive_hooks.has(String(id)):
+			if not _s.t_passive_hooks().has(String(id)):
 				missing_hooks.append(String(id))
 	print("    钩子表 = %s ｜ 直升机受伤被动 = %s" % [
-		_s._passive_hooks.keys(), Passives.damaged_hooks(heli_p)])
+		_s.t_passive_hooks().keys(), Passives.damaged_hooks(heli_p)])
 	_chk(missing_hooks.is_empty(), "battle_scene 的钩子表覆盖所有 on_damaged 被动（漏了 %s）" % [missing_hooks])
-	_chk(not _s._passive_hooks.is_empty(), "钩子表不是空的（否则坠机这类被动会静默失效）")
+	_chk(not _s.t_passive_hooks().is_empty(), "钩子表不是空的（否则坠机这类被动会静默失效）")
 
 	# ── 39. 极端情况：双方英雄同时全灭（不进队列的国王/公主还活着）──
 	# 以前这里会 _next_turn -> _start_round -> _next_turn 无限递归，栈溢出（AI 演算里真实发生）
@@ -2231,7 +2231,7 @@ func _initialize() -> void:
 	for u in _s.units:
 		if u.has_turn() and u.is_king == false and u.is_alive():
 			u.power_cur = 0
-			_s._on_unit_died(u)
+			_s.t_on_unit_died(u)
 			killed += 1
 	_s.queue = TurnQueue.new(_s.rng)
 	_s.queue.rebuild(_s.units)
@@ -2240,10 +2240,10 @@ func _initialize() -> void:
 	print("    打死 %d 人 ｜ 能进队列的还剩 %s ｜ 第 %d 轮" % [killed, left_actors, round0])
 	_chk(left_actors[0] == 0 and left_actors[1] == 0, "测试前提：场上已没有能进队列的单位")
 	_s.gm.ai_enabled = false
-	_s._turn_just_finished = null
+	_s.t_set_turn_just_finished(null)
 	_s.active = null
 	var tcb: int = _s.gm.turn_count
-	_s._next_turn()                       # 关键：这里以前会递归到栈溢出
+	_s.t_next_turn()                       # 关键：这里以前会递归到栈溢出
 	await create_timer(1.2).timeout
 	var left2 := TurnFlow.hero_counts(_s.units)
 	print("    1.2 秒后：轮次 %d（+%d）｜ 能行动的 %s ｜ 推进边界 %d ｜ 胜负已分=%s" % [
@@ -2265,22 +2265,22 @@ func _initialize() -> void:
 	he_e.cell = Vector2i(10, 10)
 	he_e.visual.position = Vector3(10.5, he_e.hover, 10.5)
 	_s.gm.ai_enabled = false
-	_s._turn_just_finished = null
+	_s.t_set_turn_just_finished(null)
 	_s.active = he_e
 	# 发起一次移动：AI 走位函数必须等它走完才返回（摇杆期间不许开火）
 	_do_move_probe_start = Time.get_ticks_msec()
-	await _s._ai_move(he_e, Vector2i(10, 20))
+	await _s.t_ai_move(he_e, Vector2i(10, 20))
 	print("    走位结束：逻辑格 %s ｜ 视觉位置 (%.2f, %.2f) ｜ 还在走=%s ｜ 用时 %.1f 秒（2.5 格/秒）" % [
-		he_e.cell, _s._unit_pos(he_e).x, _s._unit_pos(he_e).y, he_e.visual.is_walking(),
+		he_e.cell, _s.t_unit_pos(he_e).x, _s.t_unit_pos(he_e).y, he_e.visual.is_walking(),
 		(Time.get_ticks_msec() - _do_move_probe_start) / 1000.0])
 	_chk(not he_e.visual.is_walking(), "AI 走位函数会等走完（移动中不释放技能/普攻）")
-	_chk(_s._unit_pos(he_e).distance_to(Vector2(10.5, 20.5)) < 0.05,
+	_chk(_s.t_unit_pos(he_e).distance_to(Vector2(10.5, 20.5)) < 0.05,
 		"走完后视觉位置 = 脚下格中心（不会停在半路）")
 	_chk(he_e.visual.walk_speed > 2.4 and he_e.visual.walk_speed < 2.6,
 		"直升机移动速度 = 2.5 格/秒（第 86 轮）")
 	# 站定后开火：所有齐射都从脚下这个位置出膛
 	_s.clear_projectiles()
-	_s._ai_attack(he_e, {"target": mate_e, "aim": Vector2(10.5, 30.5)})
+	_s.t_ai_attack(he_e, {"target": mate_e, "aim": Vector2(10.5, 30.5)})
 	var wave1: Array[Vector2] = []
 	var ids1: Array = []
 	for it in _s.field.items:
@@ -2288,12 +2288,12 @@ func _initialize() -> void:
 		if pp.kind == Projectile.KIND_ROCKET:
 			wave1.append(pp.from)
 			ids1.append(pp.id)
-	var here: Vector2 = _s._unit_pos(he_e)
+	var here: Vector2 = _s.t_unit_pos(he_e)
 	var near_fire := 0
 	for f in wave1:
 		if f.distance_to(here) < 0.6:
 			near_fire += 1
-	var salvo0: Dictionary = _s._salvo_dbg
+	var salvo0: Dictionary = _s.t_salvo_dbg()
 	print("    第一波 %d 发：出膛 %s ｜ 当前位置 (%.2f, %.2f) ｜ 基准 %s" % [
 		wave1.size(), wave1, here.x, here.y, salvo0.get("base", "-")])
 	_chk(wave1.size() == 2, "第一波应有左右各一发")
@@ -2336,7 +2336,7 @@ func _initialize() -> void:
 	he_c.power_cur = 0                     # 力量归零（第 97 轮：只有归零才坠机）
 	var hp_p0: int = bud_p.power_cur
 	var hp_e0: int = bud_e.power_cur
-	_s._after_damage_to_unit(he_c)          # 真实受伤路径 -> 坠机
+	_s.t_after_damage_to_unit(he_c)          # 真实受伤路径 -> 坠机
 	print("    触发坠机：crashing=%s" % he_c.tags.has("crashing"))
 	_chk(he_c.tags.has("crashing"), "敌方直升机力量归零 -> 坠机（走受伤主路径）")
 	await create_timer(0.8).timeout
@@ -2367,10 +2367,10 @@ func _initialize() -> void:
 	arch_t.energy = arch_t.energy_max
 	_s.clear_projectiles()
 	_s.gm.clear_all_sentries()
-	_s._turn_just_finished = null
+	_s.t_set_turn_just_finished(null)
 	_s.active = arch_t
 	var hp_t0: int = he_t.power_cur
-	_s._attack_target_unit(he_t, false)
+	_s.t_attack_target_unit(he_t, false)
 	var arrow_y := -1.0
 	var arrow_to := Vector2.ZERO
 	for it3 in _s.field.items:
@@ -2397,55 +2397,55 @@ func _initialize() -> void:
 	he_p.cell = Vector2i(10, 10)
 	he_p.visual.position = Vector3(10.5, he_p.hover, 10.5)
 	he_p.tags.erase("dive_ready")
-	_s._dive_clear(he_p)
+	_s.t_dive_clear(he_p)
 	_s.gm.ai_enabled = false
-	_s._turn_just_finished = he_p       # 让 _finish_turn() 的幂等保护生效：别让回合机马上把准备状态消费掉
-	_s._clear_pending()
+	_s.t_set_turn_just_finished(he_p) # 让 _finish_turn() 的幂等保护生效：别让回合机马上把准备状态消费掉
+	_s.t_clear_pending()
 	_s.active = he_p
-	_s._choose_skill("dive_bomb")
+	_s.t_choose_skill("dive_bomb")
 	var want_cells: Dictionary = Targeting.disc_cells(Vector2(10.5, 10.5), 20.0, _s.PW, _s.PH, _s.PX, _s.PY)
 	print("    进入选格：粉色格 %d（期望 %d）｜ 目标格在集合里=%s ｜ 已选格=%s" % [
 		_s.cell_targets.size(), want_cells.size(), _s.cell_targets.has(Vector2i(14, 10)),
-		_s._pending_kind])
-	_chk(_s._cell_targeting, "俯冲轰炸进入【点格子】阶段（不拖拽）")
+		_s.t_pending_kind()])
+	_chk(_s.t_cell_targeting(), "俯冲轰炸进入【点格子】阶段（不拖拽）")
 	_chk(_s.cell_targets.size() == want_cells.size() and _s.cell_targets.size() > 100,
 		"可选格 = 20 格圆盘内的所有格子（粉色高亮）")
 	_chk(_s.cell_targets.has(Vector2i(14, 10)) and not _s.cell_targets.has(Vector2i(10, 35)),
 		"射程内是可选格、射程外不是")
 	# 第一次点：只出黄勾，不放技能
-	var cast1: bool = _s._click_cell_target(Vector2i(14, 10))
+	var cast1: bool = _s.t_click_cell_target(Vector2i(14, 10))
 	print("    第一次点 (14,10)：施放=%s ｜ 待确认=%s ｜ 目标格=%s" % [
-		cast1, _s._pending_kind, _s._pending_cell])
-	_chk(not cast1 and _s._pending_kind == "cell" and _s._pending_cell == Vector2i(14, 10),
+		cast1, _s.t_pending_kind(), _s.t_pending_cell()])
+	_chk(not cast1 and _s.t_pending_kind() == "cell" and _s.t_pending_cell() == Vector2i(14, 10),
 		"第一次点只出黄勾（两次点击确认）")
 	_chk(not he_p.tags.has("dive_ready"), "第一次点不许真的放技能")
 	# 点另一格：黄勾跟着移动（仍然不放）
-	_s._click_cell_target(Vector2i(15, 10))
-	_chk(_s._pending_cell == Vector2i(15, 10) and not he_p.tags.has("dive_ready"),
+	_s.t_click_cell_target(Vector2i(15, 10))
+	_chk(_s.t_pending_cell() == Vector2i(15, 10) and not he_p.tags.has("dive_ready"),
 		"改点别的格子只是移动黄勾")
 	# 第二次点同一格：确认施放
-	var cast2: bool = _s._click_cell_target(Vector2i(15, 10))
+	var cast2: bool = _s.t_click_cell_target(Vector2i(15, 10))
 	print("    第二次点 (15,10)：施放=%s ｜ 目标=%s ｜ 粉色格残留=%d" % [
 		cast2, he_p.tags.get("dive_ready", "-"), _s.cell_targets.size()])
 	_chk(cast2 and he_p.tags.has("dive_ready") and he_p.tags["dive_ready"] == Vector2i(15, 10),
 		"第二次点同一格才真的进入俯冲准备")
-	_chk(_s.cell_targets.is_empty() and not _s._cell_targeting, "放完技能后粉色高亮要收干净")
+	_chk(_s.cell_targets.is_empty() and not _s.t_cell_targeting(), "放完技能后粉色高亮要收干净")
 	# 超程的格子：不画勾、不施放
-	_s._dive_clear(he_p)
+	_s.t_dive_clear(he_p)
 	he_p.tags.erase("dive_ready")
 	he_p.energy = he_p.energy_max
 	he_p.has_acted = false
 	_s.active = he_p
-	_s._choose_skill("dive_bomb")
+	_s.t_choose_skill("dive_bomb")
 	var far_cell := Vector2i(10, 40)         # 距 (10.5,10.5) 约 29.5 格 > 20
-	var cast3: bool = _s._click_cell_target(far_cell)
-	print("    点超程格 %s：施放=%s ｜ 待确认=%s" % [far_cell, cast3, _s._pending_kind])
-	_chk(not cast3 and _s._pending_kind == "" and not he_p.tags.has("dive_ready"),
+	var cast3: bool = _s.t_click_cell_target(far_cell)
+	print("    点超程格 %s：施放=%s ｜ 待确认=%s" % [far_cell, cast3, _s.t_pending_kind()])
+	_chk(not cast3 and _s.t_pending_kind() == "" and not he_p.tags.has("dive_ready"),
 		"超出 20 格的格子点了不作数（提示重新点）")
-	_s._clear_pending()
+	_s.t_clear_pending()
 	_s.cell_targets = {}
-	_s._cell_targeting = false
-	_s._show_action_menu()
+	_s.t_set_cell_targeting(false)
+	_s.t_show_action_menu()
 
 	# ── 44. 火箭也能被箭击落（炮弹类统一模板，第 84 轮）──
 	print("\n[44] 火箭被箭击落")
@@ -2463,17 +2463,17 @@ func _initialize() -> void:
 	# 弹道物互相判定是"水平面重叠"：两条弹道必须在同一行，否则永远不会撞上
 	var rk_s := Ordnance.make_rocket(he_s, Vector3(4.5, 2.0, 5.5), Vector2(16.0, 5.5), false)
 	_s.field.register(rk_s)
-	var ar_s: Projectile = _s._spawn_arrow(bud_s, Vector3(16.0, 0.75, 5.5), Vector3(4.0, 0.55, 5.5),
+	var ar_s: Projectile = _s.t_spawn_arrow(bud_s, Vector3(16.0, 0.75, 5.5), Vector3(4.0, 0.55, 5.5),
 		null, false, false)
 	_chk(rk_s.hit_tags.has(Projectile.KIND_ARROW) and Ballistics.can_shoot_down(Projectile.KIND_ARROW, rk_s),
 		"火箭声明自己怕箭（炮弹类统一模板）")
-	_s._debug_log.clear()                    # 日志是环形缓冲：先清空，再看这一段里有没有"空爆"
+	_s.t_debug_log().clear()                    # 日志是环形缓冲：先清空，再看这一段里有没有"空爆"
 	for i4 in 400:
 		_s.field.step(1.0 / 60.0)
 		if not rk_s.alive:
 			break
 	var burst := false
-	for lg4 in _s._debug_log:
+	for lg4 in _s.t_debug_log():
 		if String(lg4).contains("空爆"):
 			burst = true
 	print("    火箭 alive=%s 原因='%s' 位置 %s ｜ 箭 alive=%s ｜ 空爆日志=%s" % [
@@ -2503,7 +2503,7 @@ func _initialize() -> void:
 	tgt_v.pr = 0
 	var hp_v: int = tgt_v.power_cur
 	var frags0: int = _count_kind(Projectile.KIND_FRAGMENT)
-	_s._debug_log.clear()
+	_s.t_debug_log().clear()
 	var rk_v := Ordnance.make_rocket(he_v, Vector3(4.5, he_v.hover + 0.25, 5.5),
 		Vector2(16.0, 5.5), false)
 	_s.field.register(rk_v)
@@ -2513,7 +2513,7 @@ func _initialize() -> void:
 			break
 	var landed_log := false
 	var burst_log := false
-	for lg5 in _s._debug_log:
+	for lg5 in _s.t_debug_log():
 		if String(lg5).contains("当成在"):
 			landed_log = true
 		if String(lg5).contains("空爆"):
@@ -2544,34 +2544,34 @@ func _initialize() -> void:
 	sani_g.has_moved = false
 	_s.active = sani_g
 	var gp_cell := Vector2i(20, 20)
-	var gp: Projectile = _s._spawn_grenade_shot(sani_g, Vector2(20.5, 20.5), "grenade_launcher")
+	var gp: Projectile = _s.t_spawn_grenade_shot(sani_g, Vector2(20.5, 20.5), "grenade_launcher")
 	for i6 in 900:
 		_s.field.step(1.0 / 60.0)
 		if not gp.alive:
 			break
 	print("    落地：alive=%s 模型=%s ｜ GM：%s" % [
-		gp.alive, _s._grenade_models.has(gp_cell), _s.gm.pending_desc()])
-	_chk(not gp.alive and _s._grenade_models.has(gp_cell), "枪榴弹落地：地上立起弹体模型")
+		gp.alive, _s.t_grenade_models().has(gp_cell), _s.gm.pending_desc()])
+	_chk(not gp.alive and _s.t_grenade_models().has(gp_cell), "枪榴弹落地：地上立起弹体模型")
 	_chk(_s.gm.decoupled_count() == 1, "落地后 GM 里这一条已和投出者解耦")
 	# 投出者阵亡（用户报的 bug：萨尼扔完就死 -> 手榴弹不炸了）
 	var pend0: int = _s.gm.pending.size()
 	sani_g.power_cur = 0
-	_s._on_unit_died(sani_g)
+	_s.t_on_unit_died(sani_g)
 	print("    萨尼阵亡：GM 待引爆 %d -> %d ｜ 解耦条数 %d" % [
 		pend0, _s.gm.pending.size(), _s.gm.decoupled_count()])
 	_chk(_s.gm.pending.size() == pend0 and _s.gm.decoupled_count() == 1,
 		"投出者阵亡不会取消已落地的手榴弹")
-	_s._debug_log.clear()
+	_s.t_debug_log().clear()
 	for i7 in int(Skills.get_def("grenade_launcher")["delay_turns"]):
-		_s._gm_step()                        # 真实路径：GM 回合边界 -> 到点引爆
+		_s.t_gm_step()                        # 真实路径：GM 回合边界 -> 到点引爆
 	var boom := false
-	for lg6 in _s._debug_log:
+	for lg6 in _s.t_debug_log():
 		if String(lg6).contains("手榴弹爆炸"):
 			boom = true
 	print("    %d 个回合边界后：爆炸日志=%s ｜ 模型还在=%s" % [
-		int(Skills.get_def("grenade_launcher")["delay_turns"]), boom, _s._grenade_models.has(gp_cell)])
+		int(Skills.get_def("grenade_launcher")["delay_turns"]), boom, _s.t_grenade_models().has(gp_cell)])
 	_chk(boom, "投出者已阵亡，手榴弹照样到点爆炸")
-	_chk(not _s._grenade_models.has(gp_cell), "爆炸后弹体模型必须回收（不能留在地上）")
+	_chk(not _s.t_grenade_models().has(gp_cell), "爆炸后弹体模型必须回收（不能留在地上）")
 	_s.clear_projectiles()
 
 	# ── 47. 队列：阵亡当场移出 / 复活压回队头（第 87 轮：修"复活饥饿"）──
@@ -2582,14 +2582,14 @@ func _initialize() -> void:
 	_s.queue.rebuild(_s.units)
 	var in_q0: bool = _s.queue.p_queue.has(qv) or _s.queue.e_queue.has(qv)
 	qv.power_cur = 0
-	_s._on_unit_died(qv)
+	_s.t_on_unit_died(qv)
 	var in_q1: bool = _s.queue.p_queue.has(qv) or _s.queue.e_queue.has(qv)
 	print("    阵亡前在队列=%s ｜ 阵亡后在队列=%s ｜ %s" % [in_q0, in_q1, _s.queue.dump()])
 	_chk(in_q0 and not in_q1, "阵亡的人当场移出队列（不是跳到队尾）")
 	# 模拟"他不在队列里"的处境（旧实现里全灭重排就会把他甩掉，活过来也没回合）
 	_s.queue.rebuild(_s.units)
 	var in_q2: bool = _s.queue.p_queue.has(qv) or _s.queue.e_queue.has(qv)
-	_s._revive_hero(qv)
+	_s.t_revive_hero(qv)
 	var eqv: Array[Unit] = _s.queue.p_queue if qv.side == UnitData.Side.PLAYER else _s.queue.e_queue
 	print("    重排时在队列=%s ｜ 复活后队头=%s（本方 %d 人）" % [
 		in_q2, eqv[0].name if eqv.size() > 0 else "-", eqv.size()])
@@ -2610,7 +2610,7 @@ func _initialize() -> void:
 			if first_rev == null:
 				first_rev = u9
 			u9.power_cur = 0
-			_s._on_unit_died(u9)
+			_s.t_on_unit_died(u9)
 			px_n += 1
 	var e_only: bool = not _s.queue.has_side(UnitData.Side.PLAYER) \
 		and _s.queue.has_side(UnitData.Side.ENEMY)
@@ -2623,7 +2623,7 @@ func _initialize() -> void:
 		px_n, not _s.queue.has_side(UnitData.Side.PLAYER), after_q])
 	_chk(e_only, "一方全灭 -> 那条队列清空，对面连续行动（不会卡住）")
 	_chk(not after_q.has("-"), "全灭期间对面照常一个一个动")
-	_s._revive_hero(first_rev)
+	_s.t_revive_hero(first_rev)
 	var got_turn := false
 	for i10 in 3:
 		if _s.queue.current() == first_rev:
@@ -2661,7 +2661,7 @@ func _initialize() -> void:
 	_s.field.register(p89_rk)
 	# 出膛之后立刻让发射者阵亡（用户报的"火箭落地不造伤"就是这个）
 	p89_he.power_cur = 0
-	_s._on_unit_died(p89_he)
+	_s.t_on_unit_died(p89_he)
 	for p89_i in 900:
 		_s.field.step(1.0 / 60.0)
 		if not p89_rk.alive:
@@ -2672,7 +2672,7 @@ func _initialize() -> void:
 		"发射者阵亡后火箭落地照样造伤（发射单里是开火那一刻的快照）")
 	_s.clear_projectiles()
 	p89_he.power_cur = p89_he.power_max
-	_s._revive_hero(p89_he)
+	_s.t_revive_hero(p89_he)
 
 	# ── 49. 技能移动也要触发哨兵（第 89 轮）──
 	print("\n[49] 技能移动触发哨兵")
@@ -2697,16 +2697,16 @@ func _initialize() -> void:
 	p89_dive.visual.visible = true
 	p89_dive.energy = p89_dive.energy_max
 	p89_dive.tags["dive_ready"] = Vector2i(10, 26)   # 目标在射界内（6 格）
-	_s._debug_log.clear()
+	_s.t_debug_log().clear()
 	_s.active = null
-	_s._turn_just_finished = p89_dive      # 收尾的 _finish_turn 变空操作（别把 AI 回合带起来）
-	var p89_began: bool = _s._dive_begin(p89_dive)
+	_s.t_set_turn_just_finished(p89_dive) # 收尾的 _finish_turn 变空操作（别把 AI 回合带起来）
+	var p89_began: bool = _s.t_dive_begin(p89_dive)
 	for p89_i2 in 1200:
-		_s._dive_tick(1.0 / 60.0)
+		_s.t_dive_tick(1.0 / 60.0)
 		if not p89_dive.tags.has("diving"):
 			break
 	var p89_locked := false
-	for p89_lg in _s._debug_log:
+	for p89_lg in _s.t_debug_log():
 		if String(p89_lg).contains("哨兵锁定"):
 			p89_locked = true
 	print("    开始=%s ｜ 哨兵队列=%d ｜ 日志有哨兵锁定=%s" % [
@@ -2727,24 +2727,24 @@ func _initialize() -> void:
 	p89_btn.tags.erase("diving")
 	p89_btn.body_y = -1.0
 	_s.active = p89_btn
-	var p89_ai0: bool = _s._ai_turn
-	_s._ai_turn = false
-	_s._show_action_menu()
+	var p89_ai0: bool = _s.t_ai_turn()
+	_s.t_set_ai_turn(false)
+	_s.t_show_action_menu()
 	var p89_cost: int = AttackProfile.cost_of(p89_btn)
-	var p89_ok_txt: String = _s._btn_attack.text
-	_chk(p89_cost > 0 and not _s._btn_attack.disabled, "精力够（%d 点）：普攻按钮可点" % p89_cost)
+	var p89_ok_txt: String = _s.t_btn_attack().text
+	_chk(p89_cost > 0 and not _s.t_btn_attack().disabled, "精力够（%d 点）：普攻按钮可点" % p89_cost)
 	p89_btn.energy = 0
-	_s._show_action_menu()
+	_s.t_show_action_menu()
 	print("    精力满：文本='%s' ｜ 精力 0：disabled=%s 提示='%s'" % [
-		p89_ok_txt, _s._btn_attack.disabled, _s._btn_attack.tooltip_text])
-	_chk(_s._btn_attack.disabled, "精力不足：普攻按钮置灰")
+		p89_ok_txt, _s.t_btn_attack().disabled, _s.t_btn_attack().tooltip_text])
+	_chk(_s.t_btn_attack().disabled, "精力不足：普攻按钮置灰")
 	# 灰了之后硬调也不许进瞄准流程
-	_s._menu_attack()
+	_s.t_menu_attack()
 	_chk(_s.phase == _s.Phase.MENU, "精力不足时 _menu_attack 直接返回（不进入瞄准）")
 	p89_btn.energy = p89_btn.energy_max
-	_s._show_action_menu()
-	_chk(not _s._btn_attack.disabled, "精力恢复后按钮重新可点")
-	_s._ai_turn = p89_ai0                     # 还原：别把还在跑的 AI 回合保护关掉
+	_s.t_show_action_menu()
+	_chk(not _s.t_btn_attack().disabled, "精力恢复后按钮重新可点")
+	_s.t_set_ai_turn(p89_ai0) # 还原：别把还在跑的 AI 回合保护关掉
 
 	# ── 51. 枪榴弹破片方向随机（第 89 轮）──
 	print("\n[51] 枪榴弹破片方向随机")
@@ -2754,8 +2754,8 @@ func _initialize() -> void:
 		if p89_u3.visual != null:
 			p89_u3.visual.position = Vector3(2.5, p89_u3.hover, 44.5)
 	var p89_x: GameMaster.Pending = _s.gm.schedule_grenade(Vector2i(20, 30), "萨尼铁塔", 0, 4)
-	_s._debug_log.clear()
-	_s._explode_grenade(p89_x)
+	_s.t_debug_log().clear()
+	_s.t_explode_grenade(p89_x)
 	var p89_dirs: Array[float] = []
 	for p89_it in _s.field.items:
 		var p89_pp: Projectile = p89_it["p"]
@@ -2809,9 +2809,9 @@ func _initialize() -> void:
 	var p89_dv_hp: int = p89_dv.power_cur
 	var p89_tgt_hp: int = p89_tgt.power_cur
 	_s.active = p89_dv                      # 别设 null：可能还有 AI 协程在跑，它要用 active
-	_s._turn_just_finished = p89_dv          # 让收尾的 _finish_turn 变成空操作（别把 AI 回合带起来）
-	_s._cast_dive(p89_dv, Vector2i(10, 10))
-	_s._dive_begin(p89_dv)
+	_s.t_set_turn_just_finished(p89_dv) # 让收尾的 _finish_turn 变成空操作（别把 AI 回合带起来）
+	_s.t_cast_dive(p89_dv, Vector2i(10, 10))
+	_s.t_dive_begin(p89_dv)
 	await create_timer(7.0).timeout          # 爬升 1.6s + 停 0.5s + 弹落 1s + 返航 1.6s
 	print("    技能结束：diving=%s ｜ 直升机 %d -> %d ｜ 目标格 %d -> %d" % [
 		p89_dv.tags.has("diving"), p89_dv_hp / 1000, p89_dv.power_cur / 1000,
@@ -2849,14 +2849,14 @@ func _initialize() -> void:
 	p89_nb.armor_cur = 0
 	p89_nb.pr = 0
 	var p89_nb_hp: int = p89_nb.power_cur
-	_s._debug_log.clear()
-	var p89_shell: Projectile = _s._spawn_shell(p89_kill, Vector2(20.5, 20.5), false)
+	_s.t_debug_log().clear()
+	var p89_shell: Projectile = _s.t_spawn_shell(p89_kill, Vector2(20.5, 20.5), false)
 	for p89_i4 in 900:
 		_s.field.step(1.0 / 60.0)
 		if not p89_shell.alive:
 			break
 	var p89_crashed := false
-	for p89_lg2 in _s._debug_log:
+	for p89_lg2 in _s.t_debug_log():
 		if String(p89_lg2).contains("坠机"):
 			p89_crashed = true
 	await create_timer(1.0).timeout                     # 等坠机动画（0.45 秒）与结算
@@ -2873,11 +2873,11 @@ func _initialize() -> void:
 	_s.gm.clear_all_sentries()
 	_s.phase = _s.Phase.IDLE
 	_s.active = null
-	_s._place_kind = "巡飞弹发射器"
+	_s.t_set_place_kind("巡飞弹发射器")
 	_chk(int(_s.place_left.get("巡飞弹发射器", 0)) == 1,
 		"沙盒里有巡飞弹发射器，且每个场景上限 1 台（数量来自表格）")
 	_s.place_left["巡飞弹发射器"] = 1
-	_s._place_at(Vector2i(10, 10))
+	_s.t_place_at(Vector2i(10, 10))
 	var p90_lp: Placeable = null
 	for p90_pl in _s.placeables:
 		if Loiter.is_launcher(p90_pl):
@@ -2897,26 +2897,26 @@ func _initialize() -> void:
 	p90_tgt.armor_cur = p90_tgt.power_max
 	p90_tgt.cell = Vector2i(10, 16)                 # 距发射器 6 格（射程内）
 	p90_tgt.visual.position = Vector3(10.5, 0.0, 16.5)
-	_s._tick_loiter_launchers(0.2)                  # 第一次采样：只是记下位置
+	_s.t_tick_loiter_launchers(0.2)                  # 第一次采样：只是记下位置
 	var p90_n0: int = _count_kind(Projectile.KIND_LOITER)
-	_s._tick_loiter_launchers(0.2)                  # 位置没变 -> 不算"在动"
+	_s.t_tick_loiter_launchers(0.2)                  # 位置没变 -> 不算"在动"
 	_chk(_count_kind(Projectile.KIND_LOITER) == p90_n0,
 		"站着不动的角色不会触发发射器（只打运动中的）")
 	# 区分敌我（第 91 轮）：友军从旁边走过也不打
 	var p91_friend: Unit = _unit_by("Gerald", 0)
 	p91_friend.cell = Vector2i(10, 16)
 	p91_friend.visual.position = Vector3(10.5, 0.0, 16.5)
-	_s._tick_loiter_launchers(0.2)
+	_s.t_tick_loiter_launchers(0.2)
 	p91_friend.cell = Vector2i(10, 15)
 	p91_friend.visual.position = Vector3(10.5, 0.0, 15.5)
-	_s._tick_loiter_launchers(0.2)
+	_s.t_tick_loiter_launchers(0.2)
 	print("    友军（我方 Gerald）在射程内走动：巡飞弹 %d 发" % p90_n0)
 	_chk(_count_kind(Projectile.KIND_LOITER) == p90_n0, "友军在射程内移动不会触发发射器（区分敌我）")
 	# 动一下（浮点位置变了）-> 下一帧采样就该发射
 	p90_tgt.cell = Vector2i(10, 15)
 	p90_tgt.visual.position = Vector3(10.5, 0.0, 15.5)
-	_s._debug_log.clear()
-	_s._tick_loiter_launchers(0.2)
+	_s.t_debug_log().clear()
+	_s.t_tick_loiter_launchers(0.2)
 	var p90_mun: Projectile = null
 	for p90_it in _s.field.items:
 		var p90_pp: Projectile = p90_it["p"]
@@ -2939,21 +2939,21 @@ func _initialize() -> void:
 	# 冷却期间再动也不给第二发
 	p90_tgt.cell = Vector2i(10, 14)
 	p90_tgt.visual.position = Vector3(10.5, 0.0, 14.5)
-	_s._tick_loiter_launchers(0.2)
+	_s.t_tick_loiter_launchers(0.2)
 	_chk(_count_kind(Projectile.KIND_LOITER) == 1, "冷却没到 -> 不许再发射（每 5 个回合一枚）")
 	# ── Q/E 制导：越按越快 + 有上下限 + 松手带惯性 ──
 	if p90_mun != null:
 		var p90_h0: float = p90_mun.heading
-		_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)          # 刚按下
+		_s.t_loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)          # 刚按下
 		var p90_d1: float = absf(wrapf(p90_mun.heading - p90_h0, -PI, PI))
 		for p90_i in 30:
-			_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)      # 按住半秒
+			_s.t_loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)      # 按住半秒
 		var p90_h1: float = p90_mun.heading
-		_s._loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)
+		_s.t_loiter_steer_apply(p90_mun, 1.0, 1.0 / 60.0)
 		var p90_d2: float = absf(wrapf(p90_mun.heading - p90_h1, -PI, PI))
 		var p90_w: float = p90_mun.turn_w
 		var p90_h2: float = p90_mun.heading
-		_s._loiter_steer_apply(p90_mun, 0.0, 1.0 / 60.0)          # 松手
+		_s.t_loiter_steer_apply(p90_mun, 0.0, 1.0 / 60.0)          # 松手
 		var p90_w_off: float = p90_mun.turn_w
 		var p90_d_off: float = absf(wrapf(p90_mun.heading - p90_h2, -PI, PI))
 		print("    Q/E 制导：第一帧转 %.3f° ｜ 按住半秒后每帧 %.3f° ｜ 角速度 %.1f°/秒 ｜ 松手后 %.1f°/秒（还在转 %.3f°）" % [
@@ -2964,19 +2964,19 @@ func _initialize() -> void:
 		_chk(p90_w_off > 0.0 and p90_d_off > 0.0, "松手带惯性：角速度还在，继续转一点再停")
 		_chk(absf(p90_w_off) < absf(p90_w), "松手后角速度在衰减（%.1f -> %.1f）" % [p90_w, p90_w_off])
 		# ── 第 91/92 轮：场上有多发时只有"最先那发"受控，多余的永远不受控 ──
-		_s._fire_loiter(p90_lp, Vector2(10.5, 10.5), p90_tgt)     # 真实发射路径 -> 被标记为多余
+		_s.t_fire_loiter(p90_lp, Vector2(10.5, 10.5), p90_tgt)     # 真实发射路径 -> 被标记为多余
 		var p91_b: Projectile = null
 		for p91_it in _s.field.items:
 			var p91_pp: Projectile = p91_it["p"]
 			if p91_pp.kind == Projectile.KIND_LOITER and p91_pp.alive and p91_pp != p90_mun:
 				p91_b = p91_pp
 		print("    场上两发：受控的是%s ｜ 第二发 no_control=%s" % [
-			"最先那发" if _s._loiter_pick_control() == p90_mun else "？",
+			"最先那发" if _s.t_loiter_pick_control() == p90_mun else "？",
 			p91_b.no_control if p91_b != null else "-"])
 		_chk(p91_b != null and p91_b.no_control, "后来发射的那一发被标记成多余（不受控）")
-		_chk(_s._loiter_pick_control() == p90_mun, "只有最先发射的那一发受 Q/E 控制")
+		_chk(_s.t_loiter_pick_control() == p90_mun, "只有最先发射的那一发受 Q/E 控制")
 		p90_mun.kill("test_kill")               # 第一发爆炸
-		_chk(_s._loiter_pick_control() == null and p91_b.alive,
+		_chk(_s.t_loiter_pick_control() == null and p91_b.alive,
 			"第一发爆炸后不再接管：多余的那发还在飞，但永远不受控")
 		# ── 近炸引信：把敌方角色挪到感应范围里（第 92 轮：只认敌方、直径 1.5 格）──
 		var p90_vic: Unit = _unit_by("Alette", 1)
@@ -2989,17 +2989,17 @@ func _initialize() -> void:
 		p92_friend.power_cur = p92_friend.power_max
 		p92_friend.cell = Vector2i(int(floor(p91_b.pos().x)), int(floor(p91_b.pos().y)))
 		p92_friend.visual.position = Vector3(p91_b.pos().x, 0.0, p91_b.pos().y)
-		_s._tick_loiter_fuse()
+		_s.t_tick_loiter_fuse()
 		_chk(p91_b.alive, "感应范围里只有友军 -> 不引爆（第 92 轮：只认敌方）")
 		p92_friend.cell = Vector2i(2, 44)                      # 友军走开
 		p92_friend.visual.position = Vector3(2.5, 0.0, 44.5)
 		p90_vic.cell = Vector2i(int(floor(p91_b.pos().x)), int(floor(p91_b.pos().y)))
 		p90_vic.visual.position = Vector3(p91_b.pos().x, 0.0, p91_b.pos().y)
 		var p90_vhp: int = p90_vic.power_cur
-		_s._debug_log.clear()
-		_s._tick_loiter_fuse()
+		_s.t_debug_log().clear()
+		_s.t_tick_loiter_fuse()
 		var p90_fuse := false
-		for p90_lg in _s._debug_log:
+		for p90_lg in _s.t_debug_log():
 			if String(p90_lg).contains("近炸引信"):
 				p90_fuse = true
 		print("    近炸引信：触发=%s ｜ 目标力量 %d -> %d ｜ 巡飞弹还在=%s" % [
@@ -3011,11 +3011,11 @@ func _initialize() -> void:
 	var p90_far := Ordnance.make_loiter(-1, "巡飞弹发射器", Vector2(2.5, 40.5), 0.0, _s.rng)
 	p90_far.flown = Loiter.MAX_DIST - 0.01
 	_s.field.register(p90_far)
-	_s._debug_log.clear()
+	_s.t_debug_log().clear()
 	for p90_i2 in 5:
 		_s.field.step(1.0 / 60.0)
 	var p90_boom := false
-	for p90_lg2 in _s._debug_log:
+	for p90_lg2 in _s.t_debug_log():
 		if String(p90_lg2).contains("巡飞弹引爆"):
 			p90_boom = true
 	print("    飞满 %d 格：引爆=%s ｜ 还在场上=%s" % [
@@ -3037,7 +3037,7 @@ func _initialize() -> void:
 	p93_he.power_cur = p93_he.power_max
 	p93_he.tags.erase("crashing")
 	p93_he.visual.visible = true
-	_s._debug_log.clear()
+	_s.t_debug_log().clear()
 	# 真实战里就是"瞄准×2 + 散布"把落点算到了 y<0（只有从上往下打的敌方会遇到）
 	var p93_rk := Ordnance.make_rocket(p93_he, Vector3(12.5, p93_he.hover + 0.25, 40.5),
 		Vector2(10.5, -6.0), false, _s.rng)
@@ -3048,7 +3048,7 @@ func _initialize() -> void:
 			break
 	var p93_boom := false
 	var p93_out := false
-	for p93_lg in _s._debug_log:
+	for p93_lg in _s.t_debug_log():
 		if String(p93_lg).contains("火箭落地"):
 			p93_boom = true
 		if String(p93_lg).contains("飞到边界"):
@@ -3060,9 +3060,9 @@ func _initialize() -> void:
 	# 齐射落点必须钳在可行动区域内 —— 这样根本不会飞到界外
 	_s.clear_projectiles()
 	_s.active = p93_he
-	_s._turn_just_finished = p93_he
-	_s._rocket_salvo(p93_he, Vector2(10.5, 2.5))
-	var p93_pts: Array = _s._salvo_dbg.get("rolled", [])
+	_s.t_set_turn_just_finished(p93_he)
+	_s.t_rocket_salvo(p93_he, Vector2(10.5, 2.5))
+	var p93_pts: Array = _s.t_salvo_dbg().get("rolled", [])
 	var p93_outside := 0
 	for p93_pt in p93_pts:
 		var p93_v: Vector2 = p93_pt
@@ -3089,16 +3089,16 @@ func _initialize() -> void:
 	p94_sani.visual.position = Vector3(10.5, 0.0, 20.5)
 	p94_archer.cell = Vector2i(10, 26)          # 站在弹道正上方：箭沿 y 往下飞
 	p94_archer.visual.position = Vector3(10.5, 0.0, 26.5)
-	var p94_gp: Projectile = _s._spawn_grenade_shot(p94_sani, Vector2(10.5, 40.5), "grenade_launcher")
+	var p94_gp: Projectile = _s.t_spawn_grenade_shot(p94_sani, Vector2(10.5, 40.5), "grenade_launcher")
 	# 先飞一会儿，让手榴弹离开萨尼铁塔身前（不然箭一生成就撞上别人）
 	for p94_i in 30:
 		_s.field.step(1.0 / 60.0)
 	var p94_alive0: bool = p94_gp.alive
 	var p94_can: bool = p94_alive0 and Ballistics.can_shoot_down(Projectile.KIND_ARROW, p94_gp)
-	var p94_models0: int = _s._grenade_models.size()
+	var p94_models0: int = _s.t_grenade_models().size()
 	var p94_pend0: int = _s.gm.pending.size()
-	_s._debug_log.clear()
-	var p94_ar: Projectile = _s._spawn_arrow(p94_archer, Vector3(10.5, 0.75, 26.5),
+	_s.t_debug_log().clear()
+	var p94_ar: Projectile = _s.t_spawn_arrow(p94_archer, Vector3(10.5, 0.75, 26.5),
 		Vector3(10.5, 0.4, 20.0), null, false, false)
 	for p94_i2 in 400:
 		_s.field.step(1.0 / 60.0)
@@ -3106,7 +3106,7 @@ func _initialize() -> void:
 			break
 	var p94_shot := false
 	var p94_gone := false
-	for p94_lg in _s._debug_log:
+	for p94_lg in _s.t_debug_log():
 		if String(p94_lg).contains("击落"):
 			p94_shot = true
 		if String(p94_lg).contains("直接消失"):
@@ -3115,14 +3115,14 @@ func _initialize() -> void:
 	for p94_i3 in 360:
 		_s.field.step(1.0 / 60.0)
 	print("    枪榴弹：飞行中 alive=%s ｜ 被击落=%s ｜ 消亡原因='%s' ｜ 模型 %d -> %d ｜ GM %d -> %d ｜ 直接消失=%s" % [
-		p94_alive0, p94_shot, p94_gp.removed_reason, p94_models0, _s._grenade_models.size(),
+		p94_alive0, p94_shot, p94_gp.removed_reason, p94_models0, _s.t_grenade_models().size(),
 		p94_pend0, _s.gm.pending.size(), p94_gone])
 	_chk(p94_can, "枪榴弹声明自己怕箭（炮弹类统一模板，飞行中可以被击落）")
 	_chk(not p94_gp.alive and p94_gp.removed_reason == "shot_down",
 		"飞行中的枪榴弹真的被箭打掉了（飞行模型消失）")
 	_chk(p94_shot, "日志里写明「被箭矢击落」")
 	_chk(p94_gone, "日志写明整发直接消失（不落地、不爆炸）")
-	_chk(_s._grenade_models.size() == p94_models0 and _s.gm.pending.size() == p94_pend0,
+	_chk(_s.t_grenade_models().size() == p94_models0 and _s.gm.pending.size() == p94_pend0,
 		"被击落的枪榴弹不落地：不立弹体模型、不登记 GM 计时（第 96 轮：不会过一会儿又炸）")
 	_s.clear_projectiles()
 
@@ -3143,11 +3143,11 @@ func _initialize() -> void:
 	gerald.begin_turn()
 	gerald.energy = gerald.energy_max
 	_s.active = gerald
-	_s._menu_attack()
+	_s.t_menu_attack()
 	var p96_hl: bool = _s.attackable.has(p96_heli.cell)
-	var p96_aim: bool = _s._can_aim_unit(p96_heli)
+	var p96_aim: bool = _s.t_can_aim_unit(p96_heli)
 	var p96_pw0: int = p96_heli.power_cur
-	var p96_ok: bool = _s._perform_basic(gerald, _s._cc(p96_heli.cell), p96_heli)
+	var p96_ok: bool = _s.t_perform_basic(gerald, _s.t_cc(p96_heli.cell), p96_heli)
 	print("    相邻：直升机高 %0.1f 格 ｜ 紫格高亮=%s ｜ 可瞄准=%s ｜ 出手=%s ｜ 直升机力量 %d -> %d ｜ 已行动=%s" % [
 		p96_heli.body_h(), p96_hl, p96_aim, p96_ok, p96_pw0 / 1000, p96_heli.power_cur / 1000,
 		gerald.has_acted])
@@ -3161,12 +3161,12 @@ func _initialize() -> void:
 	alette.begin_turn()
 	alette.energy = alette.energy_max
 	_s.active = alette
-	_s._menu_attack()
+	_s.t_menu_attack()
 	print("    弓箭手（4 格外）：紫格高亮=%s ｜ 可瞄准=%s" % [
-		_s.attackable.has(p96_heli.cell), _s._can_aim_unit(p96_heli)])
-	_chk(_s.attackable.has(p96_heli.cell) and _s._can_aim_unit(p96_heli),
+		_s.attackable.has(p96_heli.cell), _s.t_can_aim_unit(p96_heli)])
+	_chk(_s.attackable.has(p96_heli.cell) and _s.t_can_aim_unit(p96_heli),
 		"远程不受这条限制：照样能瞄准直升机")
-	_s._cancel_to_menu()
+	_s.t_cancel_to_menu()
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])
 	if _fails.is_empty():
