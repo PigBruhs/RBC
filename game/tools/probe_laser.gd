@@ -28,10 +28,12 @@ func _chk(cond: bool, label: String) -> void:
 		_fails.append(label)
 
 
-## 造一条穿过该单位的水平光束（6 格高），推进 frames 帧后统一结算，返回力量池掉的血（千分比）。
-## 测试用：把单位临时抬到 5.5 格，让 6 格高的光束确实穿过它的身体（地面单位身体只有 [0,1]）。
+## 造一条穿过该单位的水平光束，推进 frames 帧后统一结算，返回力量池掉的血（千分比）。
+## 测试用：把单位临时抬到"光束高度 ± 0.5"，让水平光束确实穿过它的身体。
+## ⚠ 光束高度是 `Laser.BASE_HEIGHT`（第 102 轮：6 -> 3），**别再写死 5.5/6** ——
+##   写死的话光束(3.0)会从身体([0,1])上方飞过，覆盖 0 帧、后面一串断言全部级联失败。
 func _beam_drop(u: Unit, frames: int) -> int:
-	u.hover = 5.5
+	u.hover = Laser.BASE_HEIGHT - 0.5
 	var cx := float(u.cell.x) + 0.5
 	var cz := float(u.cell.y) + 0.5
 	var beam: LaserBeam = _s.t_spawn_laser("reaper_laser",
@@ -67,7 +69,11 @@ func _initialize() -> void:
 	_s.placeables.clear()
 
 	print("\n[0] 类型登记与契约常量")
-	_chk(Laser.BASE_HEIGHT == 6.0, "Laser.BASE_HEIGHT = 6.0（Reaper 蓝环离地 6 格）")
+	# 第 102 轮用户口径「激光初始高度减为 3」；⚠ 蓝环**仍在 6 格**（ReaperModel.RING_Y），两者解耦
+	_chk(absf(Laser.BASE_HEIGHT - 3.0) < 0.0001,
+		"Laser.BASE_HEIGHT = 3.0（光柱起点；蓝环仍 6 = ReaperModel.RING_Y，实际 %.1f）" % Laser.BASE_HEIGHT)
+	_chk(absf(ReaperModel.RING_Y - 6.0) < 0.0001,
+		"ReaperModel.RING_Y = 6.0（环没跟着降，实际 %.1f）" % ReaperModel.RING_Y)
 	# 第 101 轮：用户口径「光柱理解为**直径 0.5 格**的圆柱」→ 判定半径 0.25（原 0.5）
 	_chk(absf(Laser.HIT_R - 0.25) < 0.0001 and absf(Laser.HIT_R * 2.0 - 0.5) < 0.0001,
 		"Laser.HIT_R = 0.25（= 直径 0.5 格，实际 %.3f）" % Laser.HIT_R)
@@ -94,7 +100,7 @@ func _initialize() -> void:
 	print("\n[1] 帧伤：30 帧 × 2 点/帧 = 60 点魔法伤害，且只结算一次")
 	gerald.power_cur = gerald.power_max
 	gerald.cell = Vector2i(10, 10)
-	gerald.hover = 5.5                  # 身体抬到 [5.5, 6.5]，让 6 格高的光束穿过去
+	gerald.hover = Laser.BASE_HEIGHT - 0.5   # 身体抬到"光束高度 ± 0.5"，让水平光束穿过去
 	var p0: int = gerald.power_cur
 	var beam: LaserBeam = _s.t_spawn_laser("reaper_laser",
 		Vector3(10.5, Laser.BASE_HEIGHT, 6.5), Vector3(10.5, Laser.BASE_HEIGHT, 14.5))

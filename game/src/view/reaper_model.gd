@@ -13,7 +13,9 @@
 #   · 整体高 12.0 格（= body_h）、横向直径 6.0 格（= body_r × 2）
 #     ⚠ **视觉包围盒必须与碰撞圆柱一致** —— 否则打起来会"看着打到了却没伤害"
 #       （碰撞圆柱在 core：Targeting.unit_body_r / unit_body_h 读 Unit.body_r / body_height）
-#   · 蓝环中心离地 **正好 6.0 格**（= Laser.BASE_HEIGHT，激光从环里打出来）
+#   · 蓝环中心离地 **正好 6.0 格**（用户第 99 轮口径）。
+#     ⚠ **与光柱起点解耦**：第 102 轮用户说"激光初始高度减为 3"，改的是 `Laser.BASE_HEIGHT`
+#     （光柱判定的起点），**蓝环仍然在 6 格**（这里是外观的发射口）。两个数各管各的。
 #
 # 挂法（与 heli_model.gd 同一个套路）：UnitVisual._build_model() 里
 #   ReaperModel.attach(self, _faction_color())  -> 作为 UnitVisual 的子节点挂上去，
@@ -23,7 +25,9 @@
 class_name ReaperModel
 extends Node3D
 
-## 蓝环中心离地高度（格）。= 激光基准高度，**不能改**（用户口径 + 探针断言）。
+## 蓝环中心离地高度（格）。**用户第 99 轮口径 + probe_reaper 断言，不能改**。
+## ⚠ 它与"光柱起点高度"（`Laser.BASE_HEIGHT`，第 102 轮 = 3）是**两个独立的数**：
+##   环是外观上的发射口，光柱起点是判定几何 —— 用户只要求后者减为 3。
 const RING_Y := 6.0
 ## 环的中心线半径 / 径向厚度：比 y=6 处的大脑袋半径（≈1.70）略大，看起来是"嵌在头上"。
 const RING_R := 1.85

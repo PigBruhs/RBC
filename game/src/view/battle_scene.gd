@@ -2711,8 +2711,10 @@ func _reaper_laser_volley(u: Unit, slice: bool) -> void:
 	await get_tree().create_timer(Reaper.WARN_SEC).timeout
 	var spec := Reaper.beam_arc_spec(u, GridMath.unit_pos(tgt), tgt, slice)
 	_spawn_reaper_laser(u, spec)
-	_log("  👁 %s：**一根动态光柱**（R=%.1f 格，扫过弧长 %.1f 格，总 %.1f 秒）" % [
-		"竖切" if slice else "横扫", float(spec["r"]), float(spec["half_len"]) * 2.0, float(spec["sec"])])
+	var span: float = (float(spec["near_len"]) + float(spec["far_len"])) if slice \
+			else float(spec["half_len"]) * 2.0
+	_log("  👁 %s：**一根动态光柱**（R=%.1f 格，扫过 %.1f 格，总 %.1f 秒）" % [
+		"竖切" if slice else "横扫", float(spec["r"]), span, float(spec["sec"])])
 	# 等动画跑完（+0.35 秒收尾：最后一帧的碰撞与光束消失都看得见）
 	await get_tree().create_timer(float(spec["sec"]) + 0.35).timeout
 	_set_reaper_ring(u, REAPER_RING_IDLE)
@@ -2720,7 +2722,12 @@ func _reaper_laser_volley(u: Unit, slice: bool) -> void:
 
 ## 真激光（动态光柱）：一根 beam 活满整个动画，落点每帧由 LaserBeam 沿弧推进。
 ##   · `life = 总时长` -> 动画一结束 `Runner.tick` 就**统一结算**（帧数 × 每帧伤害）
-##   · `_reaper_laser_log` 留给探针观测"这一击发了什么"（现在每击只有 1 条）
+##   · **忽略发射者自己**（第 102 轮修用户报的"Reaper 激光自伤"）：光柱起点就在 Reaper
+##     自己的身体圆柱里（body_r=3 / body_h=12），不忽略的话每帧都判定命中它自己
+##     → 120 帧 × 2 点 = 240 点/击。
+##     ⚠️ **只忽略发射者本人**：友伤是用户明确要的（"一切碰撞都要有伤害"），
+##     召唤物 / 玩家方 / 友军照样吃伤害。
+##   · `_reaper_laser_log` 留给探针观测"这一击发了什么"（每击只有 1 条）
 func _spawn_reaper_laser(u: Unit, spec: Dictionary) -> LaserBeam:
 	_reaper_laser_log.append(spec)
 	var beam: LaserBeam = t_spawn_laser("reaper_laser", spec["from"], Reaper.arc_point(spec, 0.0))
@@ -2728,6 +2735,8 @@ func _spawn_reaper_laser(u: Unit, spec: Dictionary) -> LaserBeam:
 		beam.arc_spec = spec
 		beam.arc_sec = float(spec["sec"])
 		beam.life = beam.arc_sec
+		if u != null and not beam.ignore_units.has(u):
+			beam.ignore_units.append(u)      # 只忽略发射者自己；其它一律照打（友伤保留）
 	return beam
 
 

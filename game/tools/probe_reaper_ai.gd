@@ -229,9 +229,10 @@ func _initialize() -> void:
 		var sp: Dictionary = log_[0]
 		print("      首条光束：from=%s to=%s 距离=%.1f 帧=%d 伤害=%d‰" % [
 			str(sp["from"]), str(sp["to"]), sp["dist"], sp["frames"], sp["dmg_milli"]])
-		# 口径（用户原话 + Lead 确认）：**起点离地 6 格、末端落到目标身上** = 斜光束
+		# 口径（用户原话）：**起点离地 = Laser.BASE_HEIGHT、末端落到目标身上** = 斜光束。
+		# ⚠ 第 102 轮用户把起点高度从 6 改成 3（蓝环仍在 6 格，两者解耦）。
 		_chk(absf(float(sp["from"].y) - Reaper.BASE_HEIGHT) < 0.01,
-			"起点在 Reaper 蓝环（离地 6 格）")
+			"起点在光柱起点高度（离地 %.1f 格；蓝环仍在 %.1f）" % [Reaper.BASE_HEIGHT, ReaperModel.RING_Y])
 		_chk(absf(float(sp["to"].y) - Targeting.aim_height(Reaper.nearest_enemy(rp, units))) < 0.01,
 			"末端落在目标身体高度（斜射，不是水平线）")
 		# "越远格数越多、每格伤害越低"：同一角度下比较 6 格与 12 格

@@ -20,7 +20,8 @@ func _initialize() -> void:
 	_expect(g.get("armor", 0) == 52, "Gerald 护甲 = 52（不能被 'armour break' 污染）", fails)
 	_expect(g.get("armor_break", 0) == 16, "Gerald 破甲 = 16", fails)
 	_expect(g.get("energy_max", 0) == 5, "Gerald 精力上限 = 5", fails)
-	_expect(g.get("move", 0) == 5, "Gerald 移动 = 5", fails)
+	# 第 102 轮：移动力调整（投掷手 →12；其余角色翻倍；直升机不动）
+	_expect(g.get("move", 0) == 10, "Gerald 移动 = 10（第 102 轮：5 翻倍，实际 %d）" % int(g.get("move", 0)), fails)
 	_expect(g.get("role", -1) == UnitData.Role.MELEE, "Gerald 是近战", fails)
 	_expect(g.get("pr", -1) == 800, "Gerald 物抗解析为 高（原文 physical resistence high）", fails)
 
@@ -726,8 +727,9 @@ func _initialize() -> void:
 	var sani := Unit.from_data(by_name["萨尼铁塔"])
 	_expect(int(by_name["萨尼铁塔"]["power"]) == 26 and int(by_name["萨尼铁塔"]["armor"]) == 5,
 		"萨尼铁塔 26 力 / 5 甲", fails)
-	_expect(int(by_name["萨尼铁塔"]["move"]) == 6 and int(by_name["萨尼铁塔"]["energy_max"]) == 4,
-		"移动 6 / 精力 4", fails)
+	_expect(int(by_name["萨尼铁塔"]["move"]) == 12 and int(by_name["萨尼铁塔"]["energy_max"]) == 4,
+		"萨尼铁塔 移动 12（第 102 轮：6 翻倍）/ 精力 4（实际 %d / %d）" % [
+			int(by_name["萨尼铁塔"]["move"]), int(by_name["萨尼铁塔"]["energy_max"])], fails)
 	_expect(int(by_name["萨尼铁塔"]["armor_break"]) == 8, "破甲 8", fails)
 	_expect(Skills.skills_for(sani).has("grenade_launcher"), "她有【枪榴弹】", fails)
 	_expect(not Skills.skills_for(Unit.from_data(by_name["Alette"])).has("grenade_launcher"),
@@ -873,27 +875,40 @@ func _initialize() -> void:
 		"敌方镜像对称（公主 3 格前、英雄重生在国王前 3 格那一行）", fails)
 	_expect(absf(Level.cam_yaw("arena") - Level.cam_yaw("field")) < 0.001, "两个关卡相机角度一致（与测试场同角度）", fails)
 
-	# ── Reaper 战（第 99 轮：第一个 Boss 关）──
+	# ── Reaper 战（第 99 轮：第一个 Boss 关；第 102 轮改成 41×81 + 斜对角布局）──
 	print("\n── Reaper 战场景 ──")
 	_expect(Level.gw("reaper") == 100 and Level.gh("reaper") == 100, "Reaper 战物理边界 100×100", fails)
 	var pr98: Array = Level.play_rect("reaper")
-	_expect(pr98[0] == 0 and pr98[1] == 0 and pr98[2] == 65 and pr98[3] == 81,
-		"Reaper 战可到达格子 65×81（实际 %s）" % [str(pr98)], fails)
-	_expect(Level.play_w("reaper") == 65 and Level.play_h("reaper") == 81, "65×81 的宽高读数一致", fails)
-	# 左边尽头与皇室竞技场一致：玩家老国王居中在 play 区正中那一行、两个公主在国王前 3 格 ±5
+	# 第 102 轮用户口径：「把宽改为 41」-> 65×81 变成 41×81
+	_expect(pr98[0] == 0 and pr98[1] == 0 and pr98[2] == 41 and pr98[3] == 81,
+		"Reaper 战可到达格子 41×81（第 102 轮：宽 65 -> 41，实际 %s）" % [str(pr98)], fails)
+	_expect(Level.play_w("reaper") == 41 and Level.play_h("reaper") == 81, "41×81 的宽高读数一致", fails)
+	# 第 102 轮用户口径：「初始位置排在长的两端（即左下角和右上角）」
 	var rk98: Vector2i = Level.king_cell(UnitData.Side.PLAYER, "reaper")
-	_expect(rk98.y == 81 / 2 and rk98.x == 2,
-		"老国王在左端、居中于 81 格正中那一行（与皇室竞技场同一行约定，实际 %s）" % [str(rk98)], fails)
-	_expect(rk98 == Level.king_cell(UnitData.Side.PLAYER, "reaper")
-		and Level.king_cell(UnitData.Side.ENEMY, "reaper").x == 62,
-		"敌方国王（Reaper 站位）在右端", fails)
+	_expect(rk98 == Vector2i(4, 4),
+		"玩家老国王在**左下角** (4,4)（第 102 轮斜对角布局，实际 %s）" % [str(rk98)], fails)
+	_expect(Level.king_cell(UnitData.Side.ENEMY, "reaper") == Vector2i(36, 76),
+		"Reaper 在**右上角** (36,76)（实际 %s）" % [str(Level.king_cell(UnitData.Side.ENEMY, "reaper"))], fails)
+	# Reaper body_r=3 不能出界（x 0~40 / y 0~80）
+	var rkc: Vector2i = Level.king_cell(UnitData.Side.ENEMY, "reaper")
+	_expect(rkc.x + 3 <= 40 and rkc.y + 3 <= 80, "Reaper 圆柱（半径 3）没有伸出可到达区", fails)
+	# 双方沿对角相向推进（不再是纯 +x / -x）
+	_expect(Level.in_play(rk98, "reaper"), "老国王站在可到达区内", fails)
 	var rpads98: Array[Vector2i] = Level.pad_cells(UnitData.Side.PLAYER, "reaper")
-	_expect(rpads98.size() == 2 and rpads98[0] == Vector2i(5, 35) and rpads98[1] == Vector2i(5, 45),
-		"两个公主在国王前 3 格、左右各 5 格（实际 %s）" % [str(rpads98)], fails)
+	_expect(rpads98.size() == 2 and rpads98[0] == Vector2i(2, 12) and rpads98[1] == Vector2i(12, 2),
+		"两个公主 = 国王前 3 格 ± 左右各 5 格（第 102 轮，实际 %s）" % [str(rpads98)], fails)
 	_expect(Level.respawn_cells(UnitData.Side.PLAYER, "reaper").size() == 5,
 		"玩家侧五个英雄重生点（用户口径「对应的五个重生的」）", fails)
-	_expect(Level.respawn_cells(UnitData.Side.ENEMY, "reaper").size() == 5,
-		"敌方（Reaper）侧也是五个重生点", fails)
+	# 第 102 轮：敌方出生点改到 Reaper 前方 7 格（不再生成在它身体底下），数量 3
+	var e_spawn: Array = Level.respawn_cells(UnitData.Side.ENEMY, "reaper")
+	_expect(e_spawn.size() == 3, "敌方三个重生点（第 102 轮，实际 %d）" % e_spawn.size(), fails)
+	var rk_center := Vector2(float(rkc.x) + 0.5, float(rkc.y) + 0.5)
+	var min_d := 999.0
+	for c in e_spawn:
+		var cc: Vector2i = c
+		min_d = minf(min_d, rk_center.distance_to(Vector2(float(cc.x) + 0.5, float(cc.y) + 0.5)))
+	_expect(min_d > 3.0 + 0.5,
+		"敌方出生点都不在 Reaper 身体里（最近 %.2f 格 > 半径 3 + 0.5）" % min_d, fails)
 	var rp_pads: Array = Level.pad_cells(UnitData.Side.PLAYER, "reaper")
 	_expect(rp_pads.size() == 2, "玩家两个公主（pad）位置", fails)
 	# 出场名单：玩家 = 老国王 + 两个公主 + 五个英雄；敌方 = 只有 Reaper（召唤物由它自己产生）

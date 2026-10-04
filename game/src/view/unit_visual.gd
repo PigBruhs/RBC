@@ -345,6 +345,18 @@ func _build_thrower(body_mat: Material, dark_mat: Material, metal_mat: Material)
 
 
 # ── 头顶指示器：上方黄色精力条 + 下方「力量/护甲」方块 + 数字 ──────────────────
+## 大块头（Reaper 这类）要把头顶指示器抬到**模型之上**，否则力量/护甲条会被自己挡住。
+## 口径：条底 = `body_h()`（身体底面高度）+ `body_height`（身高，来自数据行的 body_h）
+##   + 0.35 余量，再减去原本的悬浮高度 ORB_HEIGHT。
+## ⚠ **默认角色逐字不变**：一般单位 `body_h()`=0.30、`body_height`=1.00 -> top=1.30 < ORB_HEIGHT(1.62)
+##   -> maxf 取 0，位置与改动前完全一致。只有 Reaper（body_height=12）这类才会被抬高。
+func _body_lift() -> float:
+	if unit == null:
+		return 0.0
+	var top := unit.body_h() + unit.body_height
+	return maxf(0.0, top + 0.35 - ORB_HEIGHT)
+
+
 func _build_orb() -> void:
 	_orb_image = Image.create(ORB_PX, ORB_PX_H, false, Image.FORMAT_RGBA8)
 	_orb_texture = ImageTexture.create_from_image(_orb_image)
@@ -359,7 +371,7 @@ func _build_orb() -> void:
 	var extra_h := float(ORB_PX_H - ORB_PX) * _orb_sprite.pixel_size * 0.5
 	# 戴王冠的角色把指示器整体抬高，否则王冠会被力量/护甲方块挡住（用户要看得到王冠）
 	var crown_lift := 0.50 if _is_crowned() else 0.0
-	_orb_sprite.position = Vector3(0, ORB_HEIGHT + extra_h + crown_lift, 0)
+	_orb_sprite.position = Vector3(0, ORB_HEIGHT + extra_h + crown_lift + _body_lift(), 0)
 	add_child(_orb_sprite)
 
 
@@ -372,7 +384,7 @@ func _build_label() -> void:
 	_label.modulate = Color(1, 1, 1, 0.85)
 	_label.outline_size = 14
 	_label.outline_modulate = Color(0, 0, 0, 0.9)
-	_label.position = Vector3(0, ORB_HEIGHT + 0.42 + (0.50 if _is_crowned() else 0.0), 0)
+	_label.position = Vector3(0, ORB_HEIGHT + 0.42 + (0.50 if _is_crowned() else 0.0) + _body_lift(), 0)
 	_label.no_depth_test = true
 	add_child(_label)
 

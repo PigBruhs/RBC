@@ -24,7 +24,8 @@ extends RefCounted
 var id: String = ""
 ## 每帧伤害（点）。spawn / make_beam 会按 id 从 Laser.DMG_PER_FRAME 取
 var dmg_per_frame: int = 2
-## 起点（Reaper 的蓝环：离地 Laser.BASE_HEIGHT）
+## 起点（光柱**判定几何**的起点：离地 `Laser.BASE_HEIGHT`，第 102 轮 = 3 格。
+## ⚠ 这不是蓝环高度 —— 环仍是 6 格，见 `view/reaper_model.gd` 的 `RING_Y`）
 var a: Vector3 = Vector3.ZERO
 ## 终点（**已按地形截断**；Reaper 的"末端是攻击目标"，所以可以比起点低）
 var b: Vector3 = Vector3.ZERO

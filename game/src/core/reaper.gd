@@ -17,9 +17,10 @@
 # 所以本文件只提供 `frames_at(dist, total_frames, total_angle)` 这一个换算，
 # 伤害 = 帧数 × 每帧伤害（"reaper_laser" = 2 点/帧），**不需要任何按距离查表**。
 #
-# ── 高度差（用户原话）────────────────────────────────────────────────────────
-# 激光**从离地 BASE_HEIGHT=6 格发射，但末端是攻击目标** -> 光束永远是
-# "Reaper 身上（离地 6）→ 目标身上（离地 6）"的一条**水平线**；横扫时**终点沿弧线走**。
+# ── 高度差 ───────────────────────────────────────────────────────────────────
+# 激光**从离地 BASE_HEIGHT=3 格发射（第 102 轮口径："激光初始高度减为 3"），末端是攻击目标**
+# （落在目标身体高度 ≈ 0.5）-> 光柱是一条**斜射线**，横扫时落点沿弧移动。
+# ⚠️ **蓝环离地 6 格**是另一件事（`view/reaper_model.gd` 的 `RING_Y`），两者解耦。
 # ══════════════════════════════════════════════════════════════════════════════
 class_name Reaper
 extends RefCounted
@@ -28,8 +29,9 @@ extends RefCounted
 enum Step { SUMMON, SWEEP, SLICE }
 const CYCLE: Array = [Step.SUMMON, Step.SWEEP, Step.SLICE]
 
-## 激光基准高度（= 蓝环离地高度，与 Laser.BASE_HEIGHT 对齐）
-const BASE_HEIGHT := 6.0
+## 光柱**起点**离地高度（= `Laser.BASE_HEIGHT`，第 102 轮：6 → **3**）。
+## ⚠️ 这不是蓝环高度 —— 环仍是 6 格（`ReaperModel.RING_Y`），两者解耦。
+const BASE_HEIGHT := 3.0
 
 ## 横扫：中轴 = "Reaper → 最近敌人"，落点从左扫到右；总时长固定 2 秒。
 ## ⚠️ 旧的 `SWEEP_HALF_DEG = 60`（固定半角）**已删除** —— 第 100 轮改成**固定弧长**：
@@ -195,7 +197,7 @@ static func summon_cells(reaper: Unit, units: Array[Unit], count: int) -> Array[
 # （R=40 时两者相差 < 0.1 格，R=4 时差 1.5 格，所以近距离真弧更稳）。
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 落点单侧扫过的**弧长**（格）：R = 40 时左右合计 2×3.5 = 7 格（用户建议值）
+## 横扫：落点单侧扫过的**弧长**（格）：R = 40 时左右合计 2×3.5 = 7 格（用户建议值）
 const ARC_HALF_LEN := 3.5
 ## 近距离保护①：单侧半角上限。R 小的时候 3.5/R 会爆炸（R=1 时 200°），
 ## 所以角度封顶 30° —— 近距离扫过的弧长自然变短（R=4 时约 4.2 格），但不会甩一整圈。
@@ -203,12 +205,29 @@ const ARC_MAX_HALF_DEG := 30.0
 ## 近距离保护②：R 小于它就直接把落点钉在 T 上（不扫）—— 贴脸时"扫过 7 格"没有意义。
 const ARC_MIN_R := 1.0
 
+## 竖切：落点沿中轴扫过的距离（格）。第 102 轮用户口径"范围翻倍"：总行程 7 → **14 格**
+## （配合 `SLICE_SEC` 不变 = 1.6 秒 → 扫掠速度 4.375 → **8.75 格/秒，翻倍**）。
+##
+## ⚠️ **近/远刻意不对称**（这是实测逼出来的，不是随手写的）：
+##   站在中轴上的单位被覆盖的时间 = `far_len / (near_len + far_len) × 总时长`
+##   （落点越过它之后会一直覆盖它，直到光柱够不到它）。
+##   所以"近 7 / 远 7"（总 14 格）的覆盖比例仍是 50% —— 实测 55 → 52 帧，**没有减半**；
+##   而"近 10.5 / 远 3.5"（总行程同样是 14 格）实测 55 → 28 帧 ≈ **真正减半**。
+##   用户要的是"速度翻倍 → 每格伤害减半"，所以取后者。
+##   （要改回对称的 7/7：把下面两个常量都设成 7.0 即可。）
+const SLICE_NEAR_LEN := 10.5
+const SLICE_FAR_LEN := 3.5
+## 竖切近端保护：近侧那一头不许扫到 Reaper 身后（落点至少离 P 这么远）。
+## 例：R = 5 格时，"近侧 10.5 格"会跑到 P 背后 5.5 格 —— 这里把它钳成 4 格（5 − 1）。
+const SLICE_NEAR_MARGIN := 1.0
+
 
 ## 一次动态光柱的规格（**一根 beam** 用它活满整个动画）。
 ##   mode = "arc"    -> 横扫：落点在圆上按角度扫（左 → 右）
-##   mode = "radial" -> 竖切：落点沿中轴平移（**远侧 → 近侧**，即从 T 外侧扫回 T 内侧）
+##   mode = "radial" -> 竖切：落点沿中轴平移（**近侧 → 远侧**，第 102 轮用户口径反向）
 ## 返回的字段里 `from` / `to` / `dist` / `frames` / `dmg_milli` / `angle_deg` 是给探针看的
-## 兼容字段（`to` = t=0 的落点）；弧形参数在 `center / pivot / axis / r / half_angle / half_len / sec`。
+## 兼容字段（`to` = t=0 的落点）；弧形参数在 `center / pivot / axis / r / half_angle / half_len / sec`，
+## 竖切另有 `near_len` / `far_len`（两个方向的距离，因为近端要防"扫到身后"）。
 static func beam_arc_spec(reaper: Unit, target_pos: Vector2, tgt: Unit = null,
 		slice: bool = false) -> Dictionary:
 	var p := GridMath.unit_pos(reaper)
@@ -219,24 +238,29 @@ static func beam_arc_spec(reaper: Unit, target_pos: Vector2, tgt: Unit = null,
 	else:
 		axis = axis.normalized()
 	var sec: float = SLICE_SEC if slice else SWEEP_SEC
-	# 半角：固定弧长 3.5 格 / R，再被 ARC_MAX_HALF_DEG 封顶（近距离保护①）
+	# 横扫：半角 = 固定弧长 3.5 格 / R，再被 ARC_MAX_HALF_DEG 封顶（近距离保护①）
 	var half_angle: float = ARC_HALF_LEN / maxf(r, ARC_MIN_R)
 	half_angle = minf(half_angle, deg_to_rad(ARC_MAX_HALF_DEG))
 	if r < ARC_MIN_R:
 		half_angle = 0.0                     # 近距离保护②：贴脸 -> 落点钉在 T 上
+	# 竖切：近端钳住（不许跑到 P 身后），远端固定；总行程 = near_len + far_len（R 够大时 = 14 格）
+	var near_len: float = minf(SLICE_NEAR_LEN, maxf(r - SLICE_NEAR_MARGIN, 0.0))
+	var far_len: float = SLICE_FAR_LEN
 	var end_y: float = BASE_HEIGHT
 	if tgt != null:
 		end_y = Targeting.aim_height(tgt)     # 末端落在目标身上（斜射，不是水平线）
 	var spec := {
 		"mode": "radial" if slice else "arc",
-		"from": Vector3(p.x, BASE_HEIGHT, p.y),
+		"from": Vector3(p.x, BASE_HEIGHT, p.y),   # BASE_HEIGHT = 光柱起点高度（第 102 轮 = 3）
 		"center": target_pos,                # 落点所在圆/中轴的参考点 T
 		"pivot": p,                          # 圆心 P.xz
 		"axis": axis,                        # 单位：P -> T
 		"tangent": Vector2(-axis.y, axis.x), # 单位：中轴的左手法线（横扫的"左→右"方向）
 		"r": r,
 		"half_angle": half_angle,
-		"half_len": r * half_angle,          # 单侧弧长（格）—— 日志/探针用
+		"half_len": far_len if slice else r * half_angle,   # 日志/探针用的"单侧扫过量"
+		"near_len": near_len,                # 竖切专用：近端（<= SLICE_NEAR_LEN，且不越过 P）
+		"far_len": far_len,                  # 竖切专用：远端（= SLICE_FAR_LEN）
 		"sec": sec,
 		"frames": int(sec * FRAME_HZ),
 		"dist": r,
@@ -251,20 +275,20 @@ static func beam_arc_spec(reaper: Unit, target_pos: Vector2, tgt: Unit = null,
 
 
 ## 动画进度 t ∈ [0,1] 时的落点 E(t)（3D；y 恒为 `end_y` = 目标身体高度）。
-## · arc    ：**以 P（Reaper 蓝环）为圆心、R 为半径**的圆上取角度
+## · arc    ：**以 P（光柱起点）为圆心、R 为半径**的圆上取角度
 ##            `angle(T-P) + lerp(-half, +half, t)` —— 角速度恒定；
 ##            t = 0.5 时角度正好是中轴 -> 落点正好落在 T 上（左 → 目标 → 右）
-## · radial ：沿中轴的偏移 u = lerp(+half_len, -half_len, t) —— **远侧 → 近侧**，匀速
+## · radial ：沿中轴的偏移 u = lerp(-near_len, +far_len, t) —— **近侧 → 远侧**，匀速
 static func arc_point(spec: Dictionary, t: float) -> Vector3:
 	var k := clampf(t, 0.0, 1.0)
-	var center: Vector2 = spec["center"]      # T（中轴上的参考点；t=0.5 时落点在这）
+	var center: Vector2 = spec["center"]      # T（中轴上的参考点；竖切 t=0.5 附近经过它）
 	var pivot: Vector2 = spec["pivot"]        # P.xz（圆弧的圆心）
 	var axis: Vector2 = spec["axis"]
 	var r: float = float(spec["r"])
 	var half: float = float(spec["half_angle"])
 	var pos := center
 	if String(spec.get("mode", "arc")) == "radial":
-		var u := lerpf(float(spec["half_len"]), -float(spec["half_len"]), k)
+		var u := lerpf(-float(spec["near_len"]), float(spec["far_len"]), k)
 		pos = center + axis * u
 	else:
 		var ang := axis.angle() + lerpf(-half, half, k)
@@ -276,7 +300,7 @@ static func arc_point(spec: Dictionary, t: float) -> Vector3:
 static func arc_offset(spec: Dictionary, t: float) -> float:
 	var k := clampf(t, 0.0, 1.0)
 	if String(spec.get("mode", "arc")) == "radial":
-		return lerpf(float(spec["half_len"]), -float(spec["half_len"]), k)
+		return lerpf(-float(spec["near_len"]), float(spec["far_len"]), k)
 	return float(spec["half_angle"]) * (2.0 * k - 1.0) * float(spec["r"])
 
 
