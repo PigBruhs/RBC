@@ -1,5 +1,35 @@
 # 数据模型、接口与存档 Schema（v1）
 
+> # ⚠️ 本文件已过时 —— 保留仅供追溯早期设计
+>
+> **当前生效的口径一律以 [`docs/规格.md`](规格.md) 为准**，数值表以 [`bc_stat.md`](../bc_stat.md) 为准。
+> 本文件描述的是**实装之前**设想的数据契约；此后游戏已迭代到第 96 轮，实际数据层长成了另一个样子：
+>
+> | 本文件的设想 | 实际实现 |
+> |---|---|
+> | `UnitData` / `LevelData` 是 `Resource`（`.tres`） | `UnitData` 是**纯 const 表**（`game/src/core/unit_data.gd`，由 `bc_stat.md` 经 `tools/make_unit_data.py` 生成，**勿手改**）；关卡是 `Level.DEFS` 字典（`game/src/core/level.gd`） |
+> | `UnitState` 是独立类型 | 实际叫 `Unit`（`game/src/core/unit.gd`），并且**多出** `tags` 状态袋、`hover`/`body_y` 高度轴、`no_turn`、`is_king`、`home_cell` |
+> | `BattleState` / `BattleSetup` / `ActionRequest` / `BattleEvent[]` | **均未实装**。玩家意图直接表现为 `battle_scene` 的 `ui_*` 方法；表现由直接调用驱动，没有事件数组 |
+> | 存档 JSON Schema + migrations + `BC1:` 存档码 | **从未实装**（`game/src` 下没有任何存档模块） |
+> | 兵种原型表 / 12×12 关卡 / 弹道 ActionRequest 字段 | 全部作废：兵种见 `bc_stat.md`，关卡见 `Level.DEFS`，弹道是真实弹道物 |
+> | `alive == (power_cur > 0)`、`energy_used_this_turn` 等不变量 | 这些**仍然有效**，见 `unit.gd`（`is_alive()` / `energy_used_this_turn`） |
+>
+> ## 仍然有效、后续代码必须遵守的部分
+>
+> 1. **取整三件套**：伤害 `floor`、倍率连乘 `round_half_up`、命中率 `ceil`。
+> 2. **定点数千分比**：所有池子内部整数千分比（力量 41 → 41000），禁浮点比较；文档与 UI 显示"点"。
+> 3. **双池分离**：`power_max/power_cur`、`armor_max/armor_cur` 必须分开存；`energy_used_this_turn` 跟着单位走。
+> 4. **抗性存整数档位**（0/200/400/800/1000），不存浮点比例。
+> 5. **`miss`（没打中）与 `damage`（打不动）语义分开**；字段只许加、不许改名。
+> 6. **`preview` 与 `resolve` 必须共用同一份公式**（现状 `Rules.preview` / `Rules.resolve` ✓）。
+> 7. **32 位 LCG 可复现随机**（`RngService`，禁 Godot 内建 RNG）。
+> 8. **命名**：文件 `snake_case.gd`、类 `PascalCase`、常量 `UPPER_SNAKE`；坐标 `Vector2i(x, y)`；"格数"一律曼哈顿距离。
+> 9. **同一算法全局只有一处实现**。
+>
+> 想看**现状**的数据契约，读 [`docs/规格.md`](规格.md) 与 `game/src/core/` 下的实际代码（每个文件顶部都写了职责）。
+>
+> ---
+
 > 配套 `docs/design_v1.md`。本文件定义 v1 的**数据契约**：兵种原型、关卡、战斗输入、战斗状态、行动请求、事件流、存档格式。规则判定细节见 `docs/spec_rules.md`。
 >
 > 设计原则：
