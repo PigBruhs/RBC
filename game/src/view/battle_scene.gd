@@ -92,6 +92,14 @@ var attack: BasicAttack = null
 ## 见 view/skill_runner.gd）。字段名不叫 skills —— 那是 core 的类名。
 var skills_mod: SkillRunner = null
 
+## 回合机 + 行棋寻路 + 单位生命周期模块（P2b 拆出，见 view/turn_runner.gd）。
+## 下面的同名薄包装转发到它；_process / _ready / 回调 Callable / 别人的调用点都照旧。
+var turn: TurnRunner = null
+
+## 行动菜单状态机（二级行动菜单 / 普攻菜单 / 技能入口 / 沙盒道具详情，
+## 见 view/action_menu.gd）。菜单节点本身仍是 _action_menu / _attack_menu 等字段，声明留在本类。
+var action_menu: ActionMenu = null
+
 var _zoom: float = 15.0
 
 var _cam_focus: Vector3 = Vector3.ZERO      # 相机注视的地面点（WASD 平移）
@@ -684,6 +692,23 @@ func _refresh_upgrades() -> void:
 		ui.refresh_upgrades(selected)
 
 
+# ── 跨模块事实接口：这三个动作**别的模块也会调**，所以宿主必须留一个公开入口 ──
+#   basic_attack.gd   -> _st._show_action_menu() / _st._push_unit_stats(...)
+#   skill_runner.gd   -> _st._show_action_menu() / _st._hide_action_menu() / _st._push_unit_stats(...)
+# 实现在 view/action_menu.gd，这里只是"跨模块那一步"的转发 —— 别删（删了那两个模块会炸）。
+# 这也是 task-7 得到的判据：**包装能不能删，取决于有没有别的模块通过 `_st.` 调它。**
+func _show_action_menu() -> void:
+	action_menu.show_action_menu()
+
+
+func _hide_action_menu() -> void:
+	action_menu.hide_action_menu()
+
+
+func _push_unit_stats(u: Unit) -> void:
+	action_menu.push_unit_stats(u)
+
+
 ## 注：上面的 `_refresh_upgrades()` 全仓零引用 —— 保留是因为 `check_wrappers` 把它
 ## 登记成了 `battle_ui.gd` 的包装（覆盖顺带纳入的）。加点 UI 已按用户要求整体移除
 ## （规格 §九：左下角只保留队列可视化），所以它永远不会有调用方；
@@ -706,6 +731,8 @@ func _ready() -> void:
 	sink = ProjectileSink.new(self)      # 弹道物与爆炸结算模块
 	attack = BasicAttack.new(self)       # 普攻唯一入口模块
 	skills_mod = SkillRunner.new(self)   # 技能编排模块（唯一入口 perform_skill）
+	turn = TurnRunner.new(self)         # 回合机 / 寻路 / 单位生命周期模块
+	action_menu = ActionMenu.new(self)   # 行动菜单状态机
 	# 弹道物场：只做物理与上报，后果由 ProjectileSink 处理
 	# ⚠️ 这里传的是**模块方法**（Callable 事实接口）：改名即断，两处都在本函数里
 	field = ProjectileField.new()
@@ -951,40 +978,7 @@ func count_impact_rings() -> int:
 ## 一发炮弹的结算：12 破甲 + 12 力量（无视 50% 物抗），范围内所有单位（含友军）都吃
 
 func _spawn_units() -> void:
-	# 用户口径：**场景解耦** —— 花名册（UnitData.UNITS/ENEMIES）只存"定义"，
-	# 由【当前关卡的 roster】决定本场景有哪些角色、各站哪一格。
-	var defs: Dictionary = {}
-	for d in UnitData.UNITS:
-		defs[String(d["name"])] = d
-	for d in UnitData.ENEMIES:
-		defs[String(d["name"])] = d
-	var roster: Array = Level.roster()
-	for entry in roster:
-		var nm := String(entry[0])
-		if not defs.has(nm):
-			_log("[关卡] 名单里的 %s 不在花名册里，跳过" % nm)
-			continue
-		var u := Unit.from_data(defs[nm])
-		var bname := Unit.base_name(u.name)
-		if bname == "老国王":
-			u.is_king = true
-			u.no_turn = true                     # 老国王不进队列，由 GM 每 5 回合开一炮
-		elif Passives.has(u, "always_sentry"):
-			u.no_turn = true                     # 公主：没有自己的回合
-		u.cell = Vector2i(int(entry[2]), int(entry[3]))
-		u.home_cell = u.cell
-		if bname.begins_with(HELI_PREFIX):
-			u.hover = float(Level.heli().get("hover_h", 2.0))
-		units.append(u)
-	for u in units:
-		var v := UnitVisual.new()
-		add_child(v)
-		v.setup(u)          # 待机浮动的 Tween 由 UnitVisual 自己管理（走路时自动让位）
-	# 常备哨兵（公主）：没有自己的回合，一直处于哨兵状态
-	for u in units:
-		if Passives.has(u, "always_sentry"):
-			var s := gm.add_sentry(u, maxi(1, u.rng_min), maxi(1, u.rng_max))
-			_log("[常备哨兵] %s 一直处于警戒：射界 %d~%d" % [u.name, s.rng_min, s.rng_max])
+	turn.spawn_units()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -992,12 +986,7 @@ func _spawn_units() -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 
 func _start_round() -> void:
-	round_no += 1
-	queue = TurnQueue.new(rng)
-	var n := queue.rebuild(units)
-	_log("—— 第 %d 轮开始，队列 %d 人：%s ——" % [round_no, n, queue.dump()])
-	round_started.emit(round_no)
-	_next_turn()
+	turn.start_round()
 
 
 ## 场上有没有"能进队列的"单位（英雄；国王与公主是 no_turn，不算）
@@ -1012,108 +1001,10 @@ func _has_actor() -> bool:
 ## 会无限递归直到栈溢出（AI 自动演算里真实发生过，轮次直接冲到 1023）。
 ## 正确做法：推进 GM 回合边界（复活计时就走在这里），等人回来再开新一轮。
 func _begin_next_round() -> void:
-	if not _has_actor():
-		_log("  ⏳ 场上没有可行动单位（英雄都在等复活）：推进回合边界")
-		var steps := 0
-		while not _has_actor() and steps < 200 and not game_over:
-			steps += 1
-			await _gm_step()
-		if not _has_actor():
-			# 极端兜底：推了这么多边界还是没人能行动 -> 结束战斗，绝不允许卡死
-			_log("  ⚠ 连续 %d 个回合边界都没有可行动单位，判定战斗结束" % steps)
-			if not game_over:
-				_show_result(false)
-			return
-	if game_over:
-		return
-	_start_round()
+	await turn.begin_next_round()
 
 func _next_turn() -> void:
-	fx.clear_hints()
-	phase = Phase.IDLE
-	selected = null
-	_aim_active = false
-	_arrow_root.visible = false
-	for u in units:
-		if u.visual != null:
-			u.visual.set_active(false)
-			u.visual.set_selected(false)
-
-	var u := queue.current()
-	if u == null:
-		# 本轮走完：存活单位重置行动标记，开新一轮
-		for x in units:
-			if x.is_alive():
-				x.begin_turn()
-		if _check_over():
-			return
-		await _begin_next_round()
-		return
-
-	# 用户口径第 87 轮：死人【当场移出队列】，所以队列里不会有尸体 ——
-	# current() 只会返回活人（它自己也会顺手清一遍，兜底）。
-
-	# 最后一人机制（用户新规则）：某一方只剩 1 人时，立刻刷新队列，
-	# 把当前回合交给这个孤军，然后对面每人一回合，再轮回孤军。
-	if _check_last_stand():
-		u = queue.current()
-		if u == null:
-			await _begin_next_round()
-			return
-
-	# 不变式（用户报过 bug）：常规模式下绝不允许同一方连续两回合。
-	# 队列理论上不会这样，一旦出现（例如某条路径多推进了一次）就地纠正：这回合让给对面。
-	# 例外：对面队列是空的（全在等复活）—— 那时本来就该他连着动，不算违规。
-	var other_side := 1 - u.side
-	if not queue.last_stand and _last_turn_side != -1 and u.side == _last_turn_side \
-			and queue.has_side(other_side):
-		_log("  ⚠ 检测到同一方连续行动，已纠正：%s 让位" % u.name)
-		queue.advance(u)
-		var other := queue.current()
-		if other != null and other.side != _last_turn_side:
-			u = other
-		_log("     改为 %s（%s）行动" % [u.name, "我方" if u.side == UnitData.Side.PLAYER else "敌方"])
-	_last_turn_side = u.side
-	_turn_watch_t = 0.0
-	if _dive_begin(u):
-		active = u
-		u.begin_turn()
-		return
-	_holy_sani_check(u)
-	active = u
-	u.begin_turn()
-	_turn_just_finished = null            # 新回合开始，解除幂等保护
-	gm.on_turn_begin(u)                   # 被动机会：只有他自己的回合开始才重置（杰拉尔德弹反）
-	# 哨兵状态持续到"自己的下一个回合"——所以自己的回合一开始就撤掉警戒
-	if gm.has_sentry(u):
-		gm.clear_sentry_for(u)
-		_log("  %s 的【哨兵】警戒结束" % u.name)
-	if u.visual != null:
-		u.visual.set_active(true)
-	turn_started.emit(u)
-
-	_log("轮到 %s（%s）行动%s" % [u.name, Unit.role_name(u.role),
-		"（敌方阵营 · 玩家操控）" if u.is_manual() and u.side == UnitData.Side.ENEMY else ""])
-
-	# 加农炮 AI（老国王）：不管哪一方，轮到他就朝最近的敌对单位打一发
-	if Passives.has(u, "cannon_ai"):
-		await get_tree().create_timer(UnitData.DUMMY_SKIP_DELAY * 0.6).timeout
-		_fire_cannon_ai(u)
-		return
-
-	# 通用 AI（用户口径：敌方整队由 AI 接管；我方只在"自动演算"模式下交给 AI）
-	if _is_ai_unit(u):
-		_ai_take_turn(u)
-		return
-
-	# 没有 AI 的假人：轮到它时停顿一下自动跳过，否则测试/试玩会卡住。
-	# 注意：阵营是敌方但标记了 controllable 的角色由玩家操作，**不自动跳过**。
-	if not u.is_manual():
-		await get_tree().create_timer(UnitData.DUMMY_SKIP_DELAY).timeout
-		_finish_turn()
-		return
-
-	_show_action_menu()
+	await turn.next_turn()
 
 
 ## ── 通用 AI（用户口径：给每个 AI 索敌优先级与规则，全图视野）────────────────
@@ -1184,7 +1075,7 @@ func _ai_take_turn(u: Unit) -> void:
 		"skill":
 			_ai_skill(u, plan)
 		"rest":
-			_menu_rest()
+			action_menu.menu_rest()
 		"move":
 			var mv2 = plan.get("move_to", null)
 			if mv2 != null:
@@ -1308,7 +1199,7 @@ func _finish_turn() -> void:
 		var before_e := active.energy
 		active.energy = mini(active.energy_max, active.energy + Rules.points_to_milli(bonus_e))
 		if active.energy != before_e:
-			_push_unit_stats(active)
+			action_menu.push_unit_stats(active)
 			_log("  🧨 %s 本回合没有移动：【装填】精力 +%d（%d→%d）" % [
 				active.name, bonus_e, before_e / 1000, active.energy / 1000])
 	_turn_just_finished = active
@@ -1320,7 +1211,7 @@ func _finish_turn() -> void:
 	active = null
 	selected = null
 	queue.advance(who)
-	_hide_action_menu()
+	action_menu.hide_action_menu()
 	_clear_pending()
 	fx.clear_hints()
 	_refresh_all()
@@ -1333,40 +1224,7 @@ func _finish_turn() -> void:
 
 ## 把一个单位的三池变化立刻推到表现层与详情栏（休息、加点、Debug 改值都走这里）
 
-func _push_unit_stats(u: Unit) -> void:
-	if u != null and u.visual != null:
-		u.visual.update_orb()
-	_refresh_detail()
-
-
 ## 点沙盒道具：把它的描述与数据写进下方属性栏（用户要求）
-
-func _show_placeable_info(p: Placeable) -> void:
-	_placeable_info_text = _placeable_info(p)
-	_refresh_detail()
-
-
-## 道具信息文字（UI 直接显示）
-func _placeable_info(p: Placeable) -> String:
-	var txt := "[b][color=#9fe8ff]%s[/color][/b]（沙盒道具 · %dx%d）\n" % [p.name, p.w, p.h]
-	txt += "位置 (%d, %d)\n" % [p.cell.x, p.cell.y]
-	txt += "[b]力量[/b] %s / %s　　[b]护甲[/b] %s / %s\n" % [
-		_fmt(p.power_cur), _fmt(p.power_max), _fmt(p.armor_cur), _fmt(p.armor_max)]
-	txt += "物抗 %s　魔抗 %s\n" % [Unit.tier_name(p.pr), Unit.tier_name(p.mr)]
-	txt += "阻挡移动：%s　　阻挡远程：%s\n" % [
-		"是" if p.block_move else "否", "是" if p.block_ranged else "否"]
-	txt += "[color=#ffd866]说明：[/color]"
-	if p.name == "木刺":
-		txt += "尖桩拒马，挡住地面单位；但箭矢可以从上方越过，不阻挡远程。"
-	elif Loiter.is_launcher(p):
-		txt += "巡飞弹发射器：判定范围 %d 格，只打**进入范围的正在移动的敌方角色**，" % int(Loiter.LAUNCH_RANGE)
-		txt += "每 %d 个回合边界发射一枚；发射方向 = 目标方向 ±%d° 内随机。" % [
-			Loiter.LAUNCH_COOLDOWN_TURNS, int(Loiter.CONE_DEG)]
-		txt += "巡飞弹可以被玩家用 Q/E 制导（左/右转弯），近炸引信 + 飞满 %d 格自动引爆。" % int(Loiter.MAX_DIST)
-	else:
-		txt += "土堆够高，能挡住箭矢；但投掷手的抛物线攻击不受影响。"
-	return txt
-
 
 func _gm_step() -> void:
 	var due := gm.dispatch_turn_boundary()
@@ -1398,7 +1256,7 @@ func _set_gm_busy(on: bool) -> void:
 	if _btn_next != null:
 		_btn_next.disabled = on
 	if on:
-		_hide_action_menu()
+		action_menu.hide_action_menu()
 		_clear_pending()
 		fx.clear_hints()
 	else:
@@ -1416,48 +1274,17 @@ func _set_gm_busy(on: bool) -> void:
 ## 返回 true 表示重排过（调用方需要重新取 current）。
 
 func _check_last_stand() -> bool:
-	# 决策在 TurnFlow（纯函数，可无头测试）；这里只负责"真的重排队列"
-	var lone_alive: bool = queue.lone != null and queue.lone.is_alive()
-	var plan := TurnFlow.last_stand_plan(units, queue.last_stand, lone_alive)
-	if not bool(plan["changed"]):
-		return false
-	if bool(plan["want"]):
-		var lone_unit: Unit = plan["lone"]
-		var opps: Array[Unit] = plan["opponents"]
-		queue.enter_last_stand(lone_unit, opps)
-		_log("—— 进入最后一人连击：%s 独存 vs %d 人（%s）——" % [
-			lone_unit.name, opps.size(), queue.dump()])
-	else:
-		queue.exit_last_stand(units)
-		_log("—— 退出最后一人连击，回到常规循环 ——")
-	return true
+	return turn.check_last_stand()
 
 
 ## 自检：队列里不允许出现"同一方连续两回合"。
 ## 唯一例外是连击模式（孤军与对面交替，孤军仍不会连出两次）。
 
 func _queue_alternation_ok() -> bool:
-	var prev := -1
-	for u in queue.order:
-		if not u.is_alive():
-			continue
-		if u.side == prev:
-			return false
-		prev = u.side
-	return true
+	return turn.queue_alternation_ok()
 
 func _check_over() -> bool:
-	# 胜负判定是纯函数，规则**来自本场景的元数据** `Level.victory()`（用户口径第 97 轮：
-	# 不同场景的胜负条件相互独立）。缺省 = 一方老国王阵亡。
-	# 判定细节见 `core/turn_flow.gd` 顶部与 `docs/level_campaign.md`；加场景/加玩法都不用改这里。
-	var cfg := Level.victory()
-	var w := TurnFlow.check(units, cfg, gm.turn_count)
-	if w == TurnFlow.NONE:
-		return false
-	_log("  ⚑ 战斗结束：%s（%s）" % [
-		"我方胜" if w == TurnFlow.PLAYER else "敌方胜", TurnFlow.reason_text(cfg, w)])
-	_show_result(w == TurnFlow.PLAYER)
-	return true
+	return turn.check_over()
 
 
 ## 胜者界面：中央一个面板 + 「继续」按钮，点了重开（回到初始状态）
@@ -1473,176 +1300,11 @@ func _show_result(win: bool) -> void:
 ## 清账期删除 —— 全仓零引用（死代码）。胜者界面的「继续」按钮走的是 `ui_restart()` /
 ## `BattleUI` 自己的回调，不需要这个中转。
 
-func _show_action_menu() -> void:
-	if active == null:
-		return                              # 没有当前行动者就没有菜单（以前会拿 null 去算可达格）
-	_cell_targeting = false
-	cell_targets = {}
-	if _ai_turn:
-		return                              # AI 回合不弹菜单
-	phase = Phase.MENU
-	reachable = _compute_reachable(active)
-	attackable = {}
-	fx.draw_hints()
-	_action_menu.visible = true
-	_place_menu_near(active)
-	# 刚移动过就不允许休息（用户规则）；且已行动过就不能再动
-	if _btn_rest_menu != null:
-		var can_rest: bool = active != null and not active.has_moved and not active.has_acted
-		_btn_rest_menu.disabled = not can_rest
-		_btn_rest_menu.tooltip_text = "" if can_rest else "本回合已经移动过，不能再休息"
-	# 技能按钮：有技能的才亮，且精力不够时置灰并写明原因
-	if _btn_skill != null:
-		if active == null:
-			_btn_skill.disabled = true
-		else:
-			var ids := Skills.skills_for(active)
-			if ids.is_empty():
-				_btn_skill.disabled = true
-				_btn_skill.text = "技能（无）"
-				_btn_skill.tooltip_text = ""
-			else:
-				var d := Skills.get_def(ids[0])
-				_btn_skill.disabled = active.energy_points() < int(d["cost"])
-				_btn_skill.text = "%s（%d 精力）" % [d["name"], d["cost"]]
-				_btn_skill.tooltip_text = "%s\n%s" % [d["name"], d["desc"]]
-	# 普攻按钮（用户口径第 89 轮）：普攻也可能花精力（直升机 4 点）——
-	# 精力不够就置灰，按钮上直接写清要几点，不许点进去才发现打不了。
-	if _btn_attack != null:
-		var b_cost: int = 0 if active == null else AttackProfile.cost_of(active)
-		var b_ok: bool = active != null and active.energy_points() >= b_cost
-		_btn_attack.disabled = not b_ok
-		_btn_attack.text = "普攻" if b_cost <= 0 else "普攻（%d 精力）" % b_cost
-		_btn_attack.tooltip_text = "" if b_ok else "精力 %d/%d 不够：普攻需要 %d 点" % [
-			active.energy_points() if active != null else 0,
-			active.energy_max_points() if active != null else 0, b_cost]
-	_refresh_all()
-
-func _hide_action_menu() -> void:
-	if ui != null:
-		ui.hide_menus()
-
-
-func _menu_move() -> void:
-	if active == null:
-		return
-	_action_menu.visible = false
-	_attack_menu.visible = false
-	phase = Phase.MENU
-	selected = active          # 必须有选中者，_draw_hints 才会画可移动格
-	reachable = _compute_reachable(active)
-	attackable = {}
-	_clear_pending()
-	fx.draw_hints()
-	_refresh_all()
-
-func _menu_attack() -> void:
-	if active == null:
-		return
-	# 用户口径第 89 轮：精力不够时普攻按钮是灰的，这里再兜一道（防热键/脚本绕过）
-	if active.energy_points() < AttackProfile.cost_of(active):
-		return
-	# 选了普攻/技能后**二级菜单立即消失**（用户强调）
-	_action_menu.visible = false
-	_clear_pending()          # 上一轮留下的黄勾不许残留
-	# 关键：必须显式清掉技能 id。否则技能用过之后普攻会走技能分支
-	# -> 不置 has_acted -> 一回合能打两次（用户报过的老 bug）。
-	_aim_skill_id = ""
-	_skill_info_text = ""
-	# 走哪条瞄准流程由模板决定（AttackProfile.aim_of）：拖拽 / 点格子 / 点目标
-	match AttackProfile.aim_of(active):
-		AttackProfile.AIM_DRAG:
-			_begin_aim()
-		AttackProfile.AIM_CELL:
-			# 点格子类普攻（目前还没有角色用，留给以后"选一块地"的普攻模板）
-			_cell_targeting = true
-			phase = Phase.CHOOSE_TARGET
-			reachable = {}
-			attackable = {}
-			cell_targets = Targeting.disc_cells(_cc(active.cell),
-				float(active.rng_max), PW, PH, PX, PY)
-			fx.clear_hints()
-			fx.draw_hints()
-			_log("  🎯 选择【%s】落点：%d 格内共 %d 个可选格（粉色高亮）" % [
-				AttackProfile.describe(active), active.rng_max, cell_targets.size()])
-			_refresh_all()
-		_:
-			phase = Phase.CHOOSE_TARGET
-			reachable = {}
-			# 只显示"当前位置能打到的格子"（紫色高亮）
-			attackable = Targeting.attack_range_cells_rect(active, PX, PY, PW, PH)
-			attack.prune_air_cells()       # 近战：够不着的空中单位那格不亮（第 96 轮）
-			fx.draw_hints()
-			_refresh_all()
-
-func _menu_rest() -> void:
-	if active == null or active.has_moved:
-		if _ai_turn:
-			_finish_turn()                   # AI 没有菜单可点，必须自己收尾，否则回合卡死
-		return
-	var before_p := active.power_cur
-	var before_a := active.armor_cur
-	var before_e := active.energy
-	active.rest()
-	# 关键：立刻把三池的变化推到表现层与详情栏，不要等下一回合
-	_push_unit_stats(active)
-	_log("%s 休息：力量 %s→%s  护甲 %s→%s  精力 %s→%s（回合结束）" % [
-		active.name, _fmt(before_p), _fmt(active.power_cur),
-		_fmt(before_a), _fmt(active.armor_cur),
-		_fmt(before_e), _fmt(active.energy)])
-	_finish_turn()
-
-
 ## 二级菜单的深色底：否则会和右侧详情面板叠在一起看不清
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 攻击二级菜单：点敌人后弹出「打力量 / 破甲」，两个按钮上直接写清楚伤害
 # ══════════════════════════════════════════════════════════════════════════════
-
-func _show_attack_menu(t: Unit) -> void:
-	_attack_target = t
-	_action_menu.visible = false
-	_attack_menu.visible = true
-
-	# 力量线（用户口径：没有"用精力加伤害"了，预览就是纯力量对护甲）
-	var pw: int = active.power_cur
-	var p: Rules.Preview = Rules.preview(pw, t.armor_cur, t.pr)
-	var power_txt := ""
-	match p.branch:
-		Rules.Branch.NO_DAMAGE:
-			power_txt = "打力量\n0（打不动）"
-		Rules.Branch.ROLL:
-			power_txt = "打力量\n1（%d%%概率）" % p.hit_percent
-		Rules.Branch.AUTO:
-			power_txt = "打力量\n%d" % p.damage
-
-	# 破甲线：固定伤害 = 攻方破甲值，无视物抗，打护甲池
-	var bd: int = active.armor_break
-	var break_txt := "破甲\n%s" % _fmt(bd)
-	if t.armor_cur <= 0:
-		break_txt = "破甲\n（护甲已空）"
-
-	_btn_power.text = power_txt
-	_btn_break.text = break_txt
-	# 用户要求：即使"打不动"也**保留选择打力量的权力**（以后可能有上 buff 之类的设计），
-	# 所以力量按钮永不置灰，只在文案上标出"打不动"。
-	_btn_power.disabled = false
-	_btn_break.disabled = (t.armor_cur <= 0)      # 对面没护甲时禁止破甲 —— 这条保留
-
-	# 菜单贴着被点的敌人显示
-	var sp := _camera.unproject_position(t.visual.global_position + Vector3(0, 0.5, 0))
-	var vp := get_viewport().get_visible_rect().size
-	_attack_menu.position = Vector2(
-		clampf(sp.x + 30.0, 8.0, vp.x - 350.0),
-		clampf(sp.y - 50.0, 60.0, vp.y - 220.0))
-	_refresh_all()
-
-func _confirm_attack(break_armor: bool) -> void:
-	var t := _attack_target
-	_attack_menu.visible = false
-	_attack_target = null
-	if t != null and t.is_alive():
-		attack.attack_target_unit(t, break_armor)
 
 ## 进入拖拽瞄准（普攻与技能共用同一套手感；具体打什么由调用方决定）
 func _begin_aim() -> void:
@@ -1776,14 +1438,14 @@ func _fire() -> void:
 		_aim_skill_id = ""
 		_skill_info_text = ""
 		if not skills_mod.perform_skill(thrower, skill_id, fpos, Vector2i(int(floor(fpos.x)), int(floor(fpos.y)))):
-			_show_action_menu()
+			action_menu.show_action_menu()
 		return
 
 	# ── 普攻：交给唯一的普攻入口（近战/弓箭/连发/投掷/火箭齐射都在里面分派）──
 	# 用户口径：投掷手是"玩家操作决定上下限"的角色，**一定要允许失误**：
 	# 这里不做任何射程/边界检查 —— 打偏、打出界都照打（炮弹飞到边界处消失）。
 	if not attack.perform_basic(thrower, fpos):
-		_show_action_menu()
+		action_menu.show_action_menu()
 
 
 ## ── 炮弹（普攻 / 地毯式轰炸共用）────────────────────────────────────────────
@@ -2028,11 +1690,11 @@ var _turn_watch_t: float = 0.0            # AI 回合看门狗
 
 ## 把格子钳进【可行动区域】内（用户口径：任何单位都不该跑到空场/场外去）
 func _in_bounds(c: Vector2i) -> bool:
-	return Level.in_play(c)
+	return turn.in_bounds(c)
 
 
 func _clamp_cell(c: Vector2i) -> Vector2i:
-	return Vector2i(clampi(c.x, PX, PX + PW - 1), clampi(c.y, PY, PY + PH - 1))
+	return turn.clamp_cell(c)
 
 
 ## 轮到它的回合：开始【爬升轰炸】（返回 true 表示本回合由它接管）
@@ -2239,44 +1901,7 @@ func _after_damage_to_placeable(pl: Placeable) -> void:
 ## 它们各自在不同时刻把 visible 改来改去，多死几次后就会卡在"看不见"。
 
 func _on_unit_died(u: Unit) -> void:
-	if u.visual == null:
-		return
-	# 幂等（第 89 轮）：一次阵亡只处理一次。
-	# 以前只有假人查 uid_dead，于是"坠机动画期间又挨了一发"会连报两次阵亡、
-	# 还会把复活计时重排一遍。复活时会 erase（_revive_hero / _on_revive_timeout）。
-	if uid_dead.has(u):
-		if not u.is_alive():
-			return
-		uid_dead.erase(u)          # 有人把他救回来了（调试/测试直接改力量也算）：重新记账
-	var dummy := u.name.begins_with("Dummy")
-	if dummy:
-		uid_dead[u] = true
-		_log("  ☠ %s 阵亡" % u.name)
-		_log("    假人不死：%s 秒后满血复活" % UnitData.DUMMY_REVIVE_SEC)
-		u.visual.visible = false
-		if _revive_timers.has(u) and _revive_timers[u] != null:
-			var old: SceneTreeTimer = _revive_timers[u]
-			if old.timeout.is_connected(_on_revive_timeout.bind(u)):
-				old.timeout.disconnect(_on_revive_timeout.bind(u))
-		var tm := get_tree().create_timer(UnitData.DUMMY_REVIVE_SEC)
-		_revive_timers[u] = tm
-		tm.timeout.connect(_on_revive_timeout.bind(u))
-	else:
-		uid_dead[u] = true
-		_log("  ☠ %s 阵亡" % u.name)
-		u.visual.visible = false
-		# 用户口径第 87 轮：**阵亡 = 当场移出回合队列**（不是跳到队尾）。
-		# 死人不再占位置，队列整圈也不再因为他变长；复活时再压回队头。
-		if queue != null:
-			queue.remove(u)
-		# 用户口径：**阵亡清除一切 buff 与状态**（哨兵警戒不保留、蓄势清零、挂起的技能作废）
-		gm.note_death(u)          # 阵亡顺序（圣萨尼要用）
-		_clear_unit_states(u)
-		# 英雄（三家将）：用户口径 —— 无限满血满护甲重生，每次等 10 个回合
-		if not u.is_king and not Passives.has(u, "always_sentry"):
-			var rt: int = Level.respawn_turns(u.name)
-			gm.schedule_hero_revive(u, rt)
-			_log("    %s 将在 %d 个回合后满血复活（位置 %s）" % [u.name, rt, _revive_cell(u)])
+	turn.on_unit_died(u)
 
 
 ## 阵亡：清空这个角色的一切状态与 buff（用户口径）
@@ -2284,15 +1909,7 @@ func _on_unit_died(u: Unit) -> void:
 ##   · 蓄势层数、被动机会记录
 ##   · 挂起未结算的技能（轨道空爆标记）
 func _clear_unit_states(u: Unit) -> void:
-	if u == null:
-		return
-	var had_sentry := gm.has_sentry(u)
-	gm.clear_sentry_for(u)
-	gm.forget_passives(u)
-	gm.cancel_pending_for(u.name)
-	Passives.clear_focus(u)
-	u.tags.clear()
-	_log("    %s 阵亡：所有状态已清除（哨兵=%s）" % [u.name, "有" if had_sentry else "无"])
+	turn.clear_unit_states(u)
 
 
 ## 英雄重生：满血满护甲 + 回到关卡给的固定格
@@ -2300,24 +1917,7 @@ func _clear_unit_states(u: Unit) -> void:
 ##   · 竞技场：**老国王正前方 3 格那一行**（两个公主之间居中）
 ## 用户口径第 87 轮：复活的人【压回自己这条队列的队头】—— 下一次轮到自己这方立刻能动。
 func _revive_hero(u: Unit) -> void:
-	if u == null:
-		return
-	if u.visual != null:
-		u.visual.visible = true
-	uid_dead.erase(u)
-	u.power_cur = u.power_max
-	u.armor_cur = u.armor_max
-	u.energy = u.energy_max
-	u.has_moved = false
-	u.has_acted = false
-	u.cell = _revive_cell(u)
-	if u.visual != null:
-		u.visual.position = Vector3(float(u.cell.x) + 0.5, u.hover, float(u.cell.y) + 0.5)
-		u.visual.update_orb()
-	_queue_revive(u)
-	_log("    %s 复活：状态已清空（阵亡时清掉的哨兵警戒等不会带回来）" % u.name)
-	_log("  ♻ %s 复活（力%s 甲%s 精力%s）→ 回到 %s" % [
-		u.name, _fmt(u.power_cur), _fmt(u.armor_cur), u.energy_points(), u.cell])
+	turn.revive_hero(u)
 
 
 ## 复活落点 = **关卡给的英雄重生点**（用户口径第 87 轮修正）。
@@ -2327,56 +1927,20 @@ func _revive_hero(u: Unit) -> void:
 ##   ② 那一格被占了就顺着英雄格往后找
 ##   ③ 全被占了才回家（出场格）—— 兜底，正常不会走到
 func _revive_cell(u: Unit) -> Vector2i:
-	var hs: Array = Level.respawn_cells(u.side)
-	if hs.is_empty():
-		hs = Level.hero_cells(u.side)
-	if hs.is_empty():
-		return u.home_cell
-	var idx := 0
-	for x in units:
-		if x == u:
-			break
-		if x.side == u.side and x.has_turn():
-			idx += 1
-	var pref: Vector2i = hs[idx % hs.size()]
-	var cands: Array[Vector2i] = [pref]
-	for c in hs:
-		var cc: Vector2i = c
-		if cc != pref:
-			cands.append(cc)
-	if not cands.has(u.home_cell):
-		cands.append(u.home_cell)
-	for c in cands:
-		if not _cell_occupied(c, u):
-			return c
-	return u.home_cell
+	return turn.revive_cell(u)
 
 
 ## 这一格上有没有别的活人（复活占位判定）
 func _cell_occupied(c: Vector2i, except: Unit) -> bool:
-	for o in units:
-		if o != except and o.is_alive() and o.cell == c:
-			return true
-	return false
+	return turn.cell_occupied(c, except)
 
 
 ## 复活的人压回自己这条队列的队头（没有回合的人——国王/公主/假人——不进队列）
 func _queue_revive(u: Unit) -> void:
-	if queue != null and u != null and u.has_turn():
-		queue.push_front(u)
+	turn.queue_revive(u)
 
 func _on_revive_timeout(u: Unit) -> void:
-	if u == null or u.visual == null:
-		return
-	_revive_timers.erase(u)
-	uid_dead.erase(u)
-	u.power_cur = u.power_max
-	u.armor_cur = u.armor_max
-	u.energy = u.energy_max
-	u.visual.visible = true
-	u.visual.update_orb()
-	_log("  ♻ %s 已满血复活（力%s 甲%s）" % [
-		u.name, _fmt(u.power_cur), _fmt(u.armor_cur)])
+	turn.on_revive_timeout(u)
 
 
 ## 兜底不变式：**活着就必须看得见**。
@@ -2385,17 +1949,10 @@ func _on_revive_timeout(u: Unit) -> void:
 ## 否则回合会卡在一个死人身上，永远轮不到下一位。
 
 func _check_active_alive() -> void:
-	if active == null or active.is_alive():
-		return
-	_log("  %s 在自己的回合中阵亡 —— 立刻结束该回合" % active.name)
-	_finish_turn()
+	turn.check_active_alive()
 
 func _sync_unit_visibility() -> void:
-	for u in units:
-		if u.visual == null:
-			continue
-		if u.is_alive() and not u.visual.visible:
-			u.visual.visible = true
+	turn.sync_unit_visibility()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2512,12 +2069,12 @@ func _unhandled_input(event: InputEvent) -> void:
 					_aim_active = false
 					_arrow_root.visible = false
 					phase = Phase.MENU
-					_show_action_menu()
+					action_menu.show_action_menu()
 				elif phase == Phase.CHOOSE_TARGET:
 					if _attack_menu.visible:
 						_attack_menu.visible = false
 					_clear_pending()
-					_show_action_menu()
+					action_menu.show_action_menu()
 				return
 		return
 
@@ -2590,7 +2147,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if t != null and t.side != active.side and attackable.has(cell) and attack.can_aim_unit(t):
 				if _same_pending("attack", cell):
 					_clear_pending()
-					_show_attack_menu(t)
+					action_menu.show_attack_menu(t)
 				else:
 					_set_pending("attack", cell, t)
 					_refresh_all()
@@ -2616,7 +2173,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if t != null and t.is_manual():
 			if t == active and t.is_alive():
 				_select_for_detail(t)
-				_show_action_menu()
+				action_menu.show_action_menu()
 			else:
 				_select_for_detail(t)
 			return
@@ -2631,7 +2188,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if pl != null:
 			# 点沙盒道具 -> 显示它的描述与数据
 			_clear_selection()
-			_show_placeable_info(pl)
+			action_menu.show_placeable_info(pl)
 			return
 		if t == null:
 			# 点空白 -> 不选任何人：收起详情栏与二级菜单，只留队列
@@ -2649,22 +2206,22 @@ func _cancel_to_menu() -> void:
 		_arrow_root.visible = false
 		_aim_skill_id = ""
 		_skill_info_text = ""
-		_show_action_menu()
+		action_menu.show_action_menu()
 		return
 	if _skill_menu != null and _skill_menu.visible:
 		_skill_menu.visible = false
-		_show_action_menu()
+		action_menu.show_action_menu()
 		return
 	if _attack_menu.visible:
 		_attack_menu.visible = false
-		_show_action_menu()
+		action_menu.show_action_menu()
 		return
 	if phase == Phase.CHOOSE_TARGET:
 		_cell_targeting = false          # 点格子类目标取消后不许残留，否则下一次点地格会误放技能
 		cell_targets = {}
 		_aim_skill_id = ""
 		_clear_pending()
-		_show_action_menu()
+		action_menu.show_action_menu()
 		return
 	if phase == Phase.MENU and _action_menu.visible:
 		# 已经在菜单里：右键只关菜单，人物仍保持选中（想取消选择就点空白处）
@@ -2700,79 +2257,20 @@ func _clear_selection() -> void:
 	_refresh_all()
 
 func _do_move(u: Unit, cell: Vector2i) -> void:
-	cell = _clamp_cell(cell)          # 任何移动都不许出界
-	# 走路动画：沿路径逐格"抬腿 + 小跳"，同时朝向转到行进方向（不是瞬移）
-	var path: Array[Vector2i] = _path_to(u, cell)
-	gm.on_move_begin(u)                     # 哨兵：这次移动的"已触发"闩清零
-	if u.visual != null and path.size() > 1:
-		u.visual.walk_path(path)
-	u.cell = cell
-	u.has_moved = true
-	if u.visual == null or path.size() <= 1:
-		# 没有走路动画（无头测试 / 原地）：直接按终点判定哨兵
-		sentry.lock(u, Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5))
-	reachable = _compute_reachable(u)      # 已移动 -> 空集合，不能再动
-	# 移动后重开菜单：此时"休息"会被禁用（移动过不能休息）
-	_show_action_menu()
-	_place_menu_near(u)
-	fx.draw_hints()
-	_refresh_all()
+	turn.do_move(u, cell)
 
 
 ## 走路中的哨兵检测：角色的逻辑格子是瞬移的，所以用视觉位置当作真实浮点位置。
 ## 用户口径："从射界外进入射界内，或者已经在射界内然后移动"都要触发。
 
 func _tick_unit_walk(_delta: float) -> void:
-	if gm.sentries.is_empty():
-		return
-	for u in units:
-		if not u.is_alive() or u.visual == null:
-			continue
-		var vis := u.visual as UnitVisual
-		if vis == null or not vis.is_walking():
-			continue
-		sentry.lock(u, Vector2(vis.position.x, vis.position.z))
+	turn.tick_unit_walk(_delta)
 
 
 ## BFS 求一条从当前格到目标格的路径（4 邻格，避开其他单位与阻挡移动的道具）
 
 func _path_to(u: Unit, goal: Vector2i) -> Array[Vector2i]:
-	var occupied := _blocked_cells()          # 沙盒道具：阻挡移动的占格
-	for o in units:
-		if o.is_alive() and o != u:
-			occupied[o.cell] = true
-	var start: Vector2i = u.cell
-	if start == goal:
-		return [start]
-	var prev := {start: start}
-	var frontier: Array[Vector2i] = [start]
-	var found := false
-	while not frontier.is_empty() and not found:
-		var nxt: Array[Vector2i] = []
-		for c in frontier:
-			for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-				var n: Vector2i = c + off
-				if not Level.in_play(n):
-					continue
-				if prev.has(n) or occupied.has(n):
-					continue
-				prev[n] = c
-				if n == goal:
-					found = true
-					break
-				nxt.append(n)
-			if found:
-				break
-		frontier = nxt
-	if not found:
-		return [start, goal]          # 兜底：直接走直线
-	var out: Array[Vector2i] = []
-	var cur: Vector2i = goal
-	while cur != start:
-		out.push_front(cur)
-		cur = prev[cur]
-	out.push_front(start)
-	return out
+	return turn.path_to(u, goal)
 
 func _select_for_detail(u: Unit) -> void:
 	_placeable_info_text = ""
@@ -2799,38 +2297,10 @@ func _pick_cell(mouse: Vector2) -> Variant:
 	return cell
 
 func _unit_at(cell: Vector2i) -> Unit:
-	for u in units:
-		if u.is_alive() and u.cell == cell:
-			return u
-	return null
+	return turn.unit_at(cell)
 
 func _compute_reachable(u: Unit) -> Dictionary:
-	var res := {}
-	if u.has_moved or not u.is_alive():
-		return res
-	var occupied := _blocked_cells()          # 沙盒道具：阻挡移动的占格
-	for o in units:
-		if o.is_alive():
-			occupied[o.cell] = true
-	var frontier: Array[Vector2i] = [u.cell]
-	var dist := {u.cell: 0}
-	while not frontier.is_empty():
-		var nxt: Array[Vector2i] = []
-		for c in frontier:
-			var d: int = dist[c]
-			if d >= u.move:
-				continue
-			for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-				var n: Vector2i = c + off
-				if not Level.in_play(n):
-					continue
-				if occupied.has(n) or dist.has(n):
-					continue
-				dist[n] = d + 1
-				res[n] = true
-				nxt.append(n)
-		frontier = nxt
-	return res
+	return turn.compute_reachable(u)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2913,12 +2383,7 @@ func _on_next_pressed() -> void:
 ## 力量被改成 >0 的死者：复活并重新显示模型
 
 func _revive_unit(u: Unit) -> void:
-	if u.visual != null:
-		u.visual.visible = true
-		u.visual.update_orb()
-	uid_dead.erase(u)                # 调试复活：把阵亡账目清掉
-	_queue_revive(u)                 # 调试复活也走同一条路：压回队列队头
-	_log("[调试] %s 力量 >0，已复活（力%s 甲%s）" % [u.name, _fmt(u.power_cur), _fmt(u.armor_cur)])
+	turn.revive_unit(u)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3073,7 +2538,7 @@ func ui_dbg_set(u: Unit, key: String, raw: String) -> bool:
 	for f in DBG_FIELDS:
 		if f[0] == key:
 			var ok: bool = _dbg_write(u, f, raw)
-			_push_unit_stats(u)
+			action_menu.push_unit_stats(u)
 			return ok
 	return false
 
@@ -3082,7 +2547,7 @@ func ui_dbg_reset(u: Unit) -> void:
 	if u == null:
 		return
 	_log("[调试] %s 的字段已还原为当前真实数值" % u.name)
-	_push_unit_stats(u)
+	action_menu.push_unit_stats(u)
 
 ## 详情面板的文字（UI 只负责显示）
 func ui_detail_text(u: Unit) -> String:
@@ -3119,13 +2584,13 @@ func ui_click_unit(u: Unit, from_queue: bool = false) -> void:
 		return
 	if u == active and u.is_manual():
 		_select_for_detail(u)
-		_show_action_menu()
+		action_menu.show_action_menu()
 		return
 	_select_for_detail(u)
 	if from_queue:
 		pass                              # 从队列表点进来只做选中，不再往日志里写提示
 	elif u.is_manual() and u == active:
-		_show_action_menu()
+		action_menu.show_action_menu()
 
 
 func ui_click_blank() -> void:
@@ -3133,11 +2598,11 @@ func ui_click_blank() -> void:
 
 
 func ui_move() -> void:
-	_menu_move()
+	action_menu.menu_move()
 
 
 func ui_attack() -> void:
-	_menu_attack()
+	action_menu.menu_attack()
 
 
 func ui_skill() -> void:
@@ -3145,7 +2610,7 @@ func ui_skill() -> void:
 
 
 func ui_rest() -> void:
-	_menu_rest()
+	action_menu.menu_rest()
 
 
 func ui_end_turn() -> void:
@@ -3186,7 +2651,7 @@ func ui_pick_skill(id: String) -> void:
 
 
 func ui_confirm_attack(break_armor: bool) -> void:
-	_confirm_attack(break_armor)
+	action_menu.confirm_attack(break_armor)
 
 
 func ui_cancel() -> void:
@@ -3195,23 +2660,18 @@ func ui_cancel() -> void:
 
 func ui_upgrade(u: Unit, key: String) -> void:
 	if Rules.apply_point(u, key):
-		_push_unit_stats(u)
+		action_menu.push_unit_stats(u)
 
 
 func ui_reset_upgrades(u: Unit) -> void:
 	Rules.reset_points(u)
-	_push_unit_stats(u)
+	action_menu.push_unit_stats(u)
 
 
 ## 打开攻击菜单（用户口径：不再有"投入精力加伤害"，预览就是纯力量对护甲）
 func ui_open_attack_menu(t: Unit) -> void:
 	if ui != null:
 		ui.show_attack_menu(t)
-
-
-func ui_open_skill_menu(ids: Array[String]) -> void:
-	if ui != null:
-		ui.show_skill_menu(ids, active)
 
 
 func _tick_heli_fx(delta: float) -> void:
@@ -3308,16 +2768,16 @@ func t_pending_root() -> Node3D:
 	return _pending_root
 
 func t_on_unit_died(u: Unit) -> void:
-	_on_unit_died(u)
+	turn.on_unit_died(u)
 
 func t_show_action_menu() -> void:
-	_show_action_menu()
+	action_menu.show_action_menu()
 
 func t_attack_target_unit(t: Unit, break_armor: bool) -> void:
 	attack.attack_target_unit(t, break_armor)
 
 func t_menu_attack() -> void:
-	_menu_attack()
+	action_menu.menu_attack()
 
 func t_pending_kind() -> String:
 	return _pending_kind
@@ -3342,7 +2802,7 @@ func t_draw_hints() -> void:
 	fx.draw_hints()
 
 func t_revive_hero(u: Unit) -> void:
-	_revive_hero(u)
+	turn.revive_hero(u)
 
 func t_spawn_shell(caster: Unit, to: Vector2, ends_turn: bool,
 		pre: float = 0.0, group: String = "", blast_r: float = Ordnance.DEFAULT_BLAST_R) -> Projectile:
@@ -3364,7 +2824,7 @@ func t_set_cam_focus(v: Vector3) -> void:
 	_cam_focus = v
 
 func t_queue_alternation_ok() -> bool:
-	return _queue_alternation_ok()
+	return turn.queue_alternation_ok()
 
 func t_tick_loiter_launchers(delta: float) -> void:
 	_tick_loiter_launchers(delta)
@@ -3418,16 +2878,16 @@ func t_choose_skill(id: String) -> void:
 	skills_mod.choose_skill(id)
 
 func t_clamp_cell(c: Vector2i) -> Vector2i:
-	return _clamp_cell(c)
+	return turn.clamp_cell(c)
 
 func t_click_cell_target(cell: Vector2i) -> bool:
 	return skills_mod.click_cell_target(cell)
 
 func t_do_move(u: Unit, cell: Vector2i) -> void:
-	_do_move(u, cell)
+	turn.do_move(u, cell)
 
 func t_in_bounds(c: Vector2i) -> bool:
-	return _in_bounds(c)
+	return turn.in_bounds(c)
 
 func t_last_flash() -> Node3D:
 	return _last_flash
@@ -3481,7 +2941,7 @@ func t_can_place_at(c: Vector2i) -> bool:
 	return _can_place_at(c)
 
 func t_check_last_stand() -> bool:
-	return _check_last_stand()
+	return turn.check_last_stand()
 
 func t_check_mats() -> Array:
 	return _check_mats
@@ -3529,7 +2989,7 @@ func t_select_for_detail(u: Unit) -> void:
 	_select_for_detail(u)
 
 func t_show_attack_menu(t: Unit) -> void:
-	_show_attack_menu(t)
+	action_menu.show_attack_menu(t)
 
 func t_skill_menu() -> PanelContainer:
 	return _skill_menu
@@ -3580,7 +3040,7 @@ func t_clear_selection() -> void:
 	_clear_selection()
 
 func t_compute_reachable(u: Unit) -> Dictionary:
-	return _compute_reachable(u)
+	return turn.compute_reachable(u)
 
 func t_dive_markers() -> Dictionary:
 	return _dive_markers
@@ -3601,10 +3061,10 @@ func t_gm_step() -> void:
 	await _gm_step()
 
 func t_menu_move() -> void:
-	_menu_move()
+	action_menu.menu_move()
 
 func t_next_turn() -> void:
-	await _next_turn()
+	await turn.next_turn()
 
 func t_on_proj_landed(p: Projectile) -> void:
 	sink.on_proj_landed(p)
@@ -3613,7 +3073,7 @@ func t_panel() -> PanelContainer:
 	return _panel
 
 func t_path_to(u: Unit, goal: Vector2i) -> Array[Vector2i]:
-	return _path_to(u, goal)
+	return turn.path_to(u, goal)
 
 func t_perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 	return skills_mod.perform_skill(u, sid, aim, cell)
@@ -3670,7 +3130,7 @@ func t_clear_pylons() -> void:
 	skills_mod.clear_pylons()
 
 func t_confirm_attack(break_armor: bool) -> void:
-	_confirm_attack(break_armor)
+	action_menu.confirm_attack(break_armor)
 
 func t_confirm_cell_target(cell: Vector2i) -> bool:
 	return skills_mod.confirm_cell_target(cell)
@@ -3691,7 +3151,7 @@ func t_is_ai_unit(u: Unit) -> bool:
 	return _is_ai_unit(u)
 
 func t_menu_rest() -> void:
-	_menu_rest()
+	action_menu.menu_rest()
 
 func t_on_blank_click() -> void:
 	_on_blank_click()
@@ -3725,7 +3185,7 @@ func t_start_carpet_bomb(caster: Unit, center: Vector2) -> void:
 	skills_mod.start_carpet_bomb(caster, center)
 
 func t_sync_unit_visibility() -> void:
-	_sync_unit_visibility()
+	turn.sync_unit_visibility()
 
 func t_tick_pending_pulse(delta: float) -> void:
 	fx.tick_pending_pulse(delta)
