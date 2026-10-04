@@ -1,6 +1,0 @@
-Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
-
-SCRIPT ERROR: Parse Error: There is already a variable named "tgt" declared in this scope.
-   at: GDScript::reload (res://tools/playtest.gd:1661)
-ERROR: Failed to load script "res://tools/playtest.gd" with error "Parse error".
-   at: load (modules/gdscript/gdscript_resource_format.cpp:46)
