@@ -14,6 +14,9 @@ tools/godot/
 # ── Godot 导入缓存 / 编辑器状态（每个机器自己生成，且体积随资源增长）────────
 game/.godot/
 *.translation
+# 包装层门禁自检（tests/check_wrappers_selftest.gd）的合成 fixture 目录：
+# 它正常跑完会自清，但**失败时故意保留**供排查 —— 别让它在仓库里留下未跟踪文件。
+game/tests/_wrapfix/
 
 # ── Python 临时脚本与缓存 ────────────────────────────────────────────────────
 __pycache__/
