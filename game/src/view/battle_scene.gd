@@ -1024,7 +1024,7 @@ var _last_flash: Node3D = null
 #
 # 用户口径：
 #   · **不再复活队友**（旧的"复活最后一个阵亡队友 / 每条命一次"整条已删除）
-#   · 随机向一名"受了伤的队友"投掷，命中恢复 20 点力量（不超上限）
+#   · 随机向一名"受了伤的队友"投掷，命中恢复 **10 点**力量（不超上限；第 103 轮：20 → 10）
 #   · 散布**复用杰拉德弹反那条曲线**（`Spread.reflect_scatter`）
 #   · 飞行中碰到**任何人或沙盒元素**都给对方回血（含敌人 —— 刻意的搞笑口径，不要"修正"）
 #
@@ -2017,15 +2017,15 @@ func ui_detail_text(u: Unit) -> String:
 func ui_click_unit(u: Unit, from_queue: bool = false) -> void:
 	if u == null or not u.is_alive():
 		return
-	if u == active and u.is_manual():
-		_select_for_detail(u)
-		action_menu.show_action_menu()
-		return
+	# 用户口径（第 103 轮）：**看属性**永远可以（下面无论如何都会 _select_for_detail），
+	# 但**行动菜单**只给"轮到它自己、且不是 AI 在操控"的单位弹。
+	# 用 _is_ai_unit 而不是 is_manual：它已经把 `ai_autoplay_player`（我方交给 AI）也算进去。
+	var can_menu: bool = u == active and not _is_ai_unit(u)
 	_select_for_detail(u)
-	if from_queue:
+	if can_menu:
+		action_menu.show_action_menu()    # 轮到它自己、且不是 AI 操控 -> 弹菜单（从队列条点进来也一样）
+	elif from_queue:
 		pass                              # 从队列表点进来只做选中，不再往日志里写提示
-	elif u.is_manual() and u == active:
-		action_menu.show_action_menu()
 
 
 func ui_click_blank() -> void:
@@ -2672,12 +2672,14 @@ func _roster_def(nm: String) -> Dictionary:
 	return {}
 
 
-## 召唤回合：二选一（确定性随机）→ 在 Reaper 周围一圈找空格 → 造敌方单位
+## 召唤回合：**加权随机**挑模板（甲 70% / 乙 20% / 丙 10%，第 103 轮）
+## → 在 Reaper 周围一圈找空格 → 造三个敌方单位
 func _reaper_do_summon(u: Unit) -> void:
-	var kit: Dictionary = Reaper.SUMMON_KITS[rng.next_int(Reaper.SUMMON_KITS.size())]
+	var kit: Dictionary = Reaper.SUMMON_KITS[Reaper.pick_kit_index(rng)]
 	var names: Array = kit["names"]
 	var cells := Reaper.summon_cells(u, units, names.size())
-	_log("  👁 召唤【%s】：%d 个落点" % [kit["desc"], cells.size()])
+	_log("  👁 召唤【%s】（权重 %d%%）：%d 个落点" % [
+		kit["desc"], int(kit.get("weight", 0)), cells.size()])
 	for i in cells.size():
 		var nm := String(names[i])
 		var d := _roster_def(nm)

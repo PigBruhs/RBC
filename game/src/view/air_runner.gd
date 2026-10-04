@@ -347,7 +347,8 @@ func hook_heli_crash(u: Unit) -> bool:
 
 ## 轮到它的回合：开始【爬升轰炸】（返回 true 表示本回合由它接管）
 ## 用户口径（第 86 轮）：不再俯冲下去，而是**均匀爬升到不会自伤的高度** ——
-## 爬到目标上方（升到 climb_h）-> 停 0.5 秒 -> 投弹（弹下落 1 秒）-> 原路返回并降回悬停高度。
+## 爬到目标上方（升到 climb_h）-> 停 0.5 秒 -> 投弹（弹下落 bomb_fall_sec 秒）-> 原路返回并降回悬停高度。
+## 第 103 轮：climb_h 4 → 7（投弹球半径 3 → 6，球顶升到 6.15 格），bomb_fall_sec 1.0 → 1.33。
 func dive_begin(u: Unit) -> bool:
 	if not u.tags.has("dive_ready"):
 		return false
@@ -403,10 +404,11 @@ func dive_tick(delta: float) -> void:
 		if float(_st._dive["hold"]) <= 0.0:
 			_st._dive["phase"] = "wait_bomb"
 			_st._dive["hold"] = float(_st._dive["hold"]) + float(cfg["bomb_fall_sec"])
-			start_bomb_fall(u, to)                            # 投弹：弹下落 1 秒
+			start_bomb_fall(u, to)                            # 投弹：弹下落 bomb_fall_sec 秒
 	elif phase == "wait_bomb":
-		# 用户口径（第 89 轮）：**投弹后先留在 4 格上等炸弹落地**再返航 ——
-		# 不然返航途中降到 3 格以下，炸弹会把自己炸到 21 血（41 - 20）。
+		# 用户口径（第 89 轮）：**投弹后先留在高空等炸弹落地**再返航 ——
+		# 不然返航途中降到爆心球顶（第 103 轮 = 6.15 格）以下，会被自己的炸弹炸到。
+		# 停满 bomb_fall_sec（= 炸弹触地那一刻）才切 back ✓ 与 start_bomb_fall 的 Tween 同一个时钟。
 		_st._dive["hold"] = float(_st._dive["hold"]) - delta
 		place_diving(u, to, hi)
 		if float(_st._dive["hold"]) <= 0.0:
@@ -474,10 +476,11 @@ func place_diving(u: Unit, pos: Vector2, h: float) -> void:
 
 
 
-## 投弹：投掷手普攻模型直径翻倍、**半径 3 格的三维球**、40 破甲 + 20 力量、不触发哨兵。
-## 用户口径（第 86 轮）：判定改成**三维球**（球心在地面、半径 3 格）——
-## 所以爬到 4 格以上投弹就炸不到自己（以前是"红圈沾格"，站多高都吃伤害）。
-## 第 95 轮：爆炸表现也照这个半径画（以前只有一个 1.2 的小闪光，看不出 3 格的范围）。
+## 投弹：投掷手普攻模型直径翻倍、**半径 drop_blast_r 的三维球**（第 103 轮：3 → 6）、
+## 20 破甲 + 120 力量（第 103 轮：40/20 → 20/120）、不触发哨兵。
+## 用户口径（第 86 轮）：判定是**三维球**（球心在离地 0.15 格、半径 drop_blast_r）——
+## 所以爬升高度必须 > 球顶（`climb_h > 0.15 + drop_blast_r`，第 103 轮 = 6.15 → 取 7.0）才炸不到自己。
+## 第 95 轮：爆炸表现也照这个半径画（以前只有一个 1.2 的小闪光，看不出范围）。
 func drop_bomb(u: Unit, at: Vector2) -> void:
 	var cfg := Level.heli()
 	var radius := float(cfg["drop_blast_r"])

@@ -77,7 +77,7 @@ func _initialize() -> void:
 	# 第 101 轮：用户口径「光柱理解为**直径 0.5 格**的圆柱」→ 判定半径 0.25（原 0.5）
 	_chk(absf(Laser.HIT_R - 0.25) < 0.0001 and absf(Laser.HIT_R * 2.0 - 0.5) < 0.0001,
 		"Laser.HIT_R = 0.25（= 直径 0.5 格，实际 %.3f）" % Laser.HIT_R)
-	_chk(Laser.dmg_per_frame_of("reaper_laser") == 2, "reaper_laser 的帧伤 = 2 点/帧")
+	_chk(Laser.dmg_per_frame_of("reaper_laser") == 1, "reaper_laser 的帧伤 = 1 点/帧（第 103 轮：2 减半）")
 	_chk(Laser.dmg_per_frame_of("没登记的 id") == Laser.DEFAULT_DMG_PER_FRAME,
 		"未登记的 id 走缺省帧伤 = %d" % Laser.DEFAULT_DMG_PER_FRAME)
 	_chk(Projectile.KIND_LASER == "laser", "Projectile.KIND_LASER = \"laser\"")
@@ -97,7 +97,7 @@ func _initialize() -> void:
 	var gid := gerald.get_instance_id()
 
 	# ══════════════════════════════════════════════════════════════════════════
-	print("\n[1] 帧伤：30 帧 × 2 点/帧 = 60 点魔法伤害，且只结算一次")
+	print("\n[1] 帧伤：30 帧 × 1 点/帧 = 30 点魔法伤害，且只结算一次（第 103 轮：2 -> 1 点/帧）")
 	gerald.power_cur = gerald.power_max
 	gerald.cell = Vector2i(10, 10)
 	gerald.hover = Laser.BASE_HEIGHT - 0.5   # 身体抬到"光束高度 ± 0.5"，让水平光束穿过去
@@ -106,7 +106,7 @@ func _initialize() -> void:
 		Vector3(10.5, Laser.BASE_HEIGHT, 6.5), Vector3(10.5, Laser.BASE_HEIGHT, 14.5))
 	_chk(beam != null, "t_spawn_laser 返回一条激光")
 	_chk(_s.t_laser_count() == 1, "在途激光数 = 1")
-	_chk(beam.dmg_per_frame == 2, "这条激光的每帧伤害 = 2")
+	_chk(beam.dmg_per_frame == 1, "这条激光的每帧伤害 = 1（第 103 轮：2 减半）")
 	_chk(beam.hit_tags.is_empty(), "LaserBeam.hit_tags 为空（没有任何东西能击落它）")
 	_chk(beam.sentry_trigger == false, "LaserBeam.sentry_trigger = false（不惊动哨兵）")
 	for i in 30:
@@ -116,7 +116,7 @@ func _initialize() -> void:
 	_chk(nf == 30, "30 帧后覆盖帧数 = 30（实际 %d）" % nf)
 	var hits: Array = _s.t_settle_all_lasers()
 	_chk(hits.size() == 1, "统一结算返回 1 条 Hit（实际 %d）" % hits.size())
-	_chk(gerald.power_cur == p0 - 60000, "力量池 -60 点（%d -> %d）" % [p0 / 1000, gerald.power_cur / 1000])
+	_chk(gerald.power_cur == p0 - 30000, "力量池 -30 点（30 帧 × 1 点/帧，%d -> %d）" % [p0 / 1000, gerald.power_cur / 1000])
 	_chk(hits.size() == 1 and String(hits[0].text).contains("点魔法伤害"),
 		"日志写明魔法伤害：%s" % (String(hits[0].text).strip_edges() if hits.size() == 1 else "—"))
 	_chk(_s.t_laser_count() == 0, "结算后在途激光数 = 0（不会二次结算）")
@@ -139,7 +139,7 @@ func _initialize() -> void:
 	_chk(n2 == n1, "移出后帧数不再增长（%d -> %d）" % [n1, n2])
 	var p1: int = gerald.power_cur
 	_s.t_settle_all_lasers()
-	_chk(gerald.power_cur == p1 - 20000, "最终按 10 帧结算 = 20 点（实际 %d）" % ((p1 - gerald.power_cur) / 1000))
+	_chk(gerald.power_cur == p1 - 10000, "最终按 10 帧结算 = 10 点（实际 %d）" % ((p1 - gerald.power_cur) / 1000))
 
 	# ══════════════════════════════════════════════════════════════════════════
 	print("\n[3] 地形阻挡：土堆拦（停在那一格）、木刺不拦")
@@ -178,12 +178,13 @@ func _initialize() -> void:
 	var d_full := _beam_drop(gerald, 10)
 	gerald.armor_cur = 0
 	var d_zero := _beam_drop(gerald, 10)
-	_chk(d_full == 20000 and d_zero == 20000,
+	# 10 帧 × 1 点/帧 = 10 点（第 103 轮：每帧伤害由 2 减半为 1）
+	_chk(d_full == 10000 and d_zero == 10000,
 		"护甲拉满 / 清零的伤害一样（各 %d / %d 点）—— 无视护甲" % [d_full / 1000, d_zero / 1000])
 	gerald.armor_cur = gerald.armor_max
 	gerald.mr = 500
 	var d_half := _beam_drop(gerald, 10)
-	_chk(d_half == 10000, "mr = 500 -> 减半（20 -> %d 点）" % (d_half / 1000))
+	_chk(d_half == 5000, "mr = 500 -> 减半（10 -> %d 点）" % (d_half / 1000))
 	gerald.mr = 1000
 	var d_imm := _beam_drop(gerald, 10)
 	_chk(d_imm == 0, "mr = 1000（免疫）-> 0 点（被魔抗完全抵消）")

@@ -757,10 +757,10 @@ func _initialize() -> void:
 	# 第 99 轮（用户口径）：圣萨尼**不再复活队友**，改成"每个回合随机投医疗包"
 	_expect(not bool(hs.get("revive", false)) and int(hs.get("uses_per_life", 0)) == 0,
 		"圣萨尼不再复活队友（旧口径已删除）", fails)
-	_expect(bool(hs.get("medkit", false)) and int(hs.get("heal_points", 0)) == 20,
-		"圣萨尼改为投医疗包、命中回 20 点（第 99 轮）", fails)
-	_expect(Medkit.heal_points() == 20 and Medkit.heal_milli() == Rules.points_to_milli(20),
-		"Medkit 治疗量 = 20 点（实际 %d）" % (Medkit.heal_milli() / 1000), fails)
+	_expect(bool(hs.get("medkit", false)) and int(hs.get("heal_points", 0)) == 10,
+		"圣萨尼改为投医疗包、命中回 10 点（第 103 轮：20 -> 10）", fails)
+	_expect(Medkit.heal_points() == 10 and Medkit.heal_milli() == Rules.points_to_milli(10),
+		"Medkit 治疗量 = 10 点（第 103 轮，实际 %d）" % (Medkit.heal_milli() / 1000), fails)
 	# 口径：受伤 = **力量池未满**（医疗包恢复的是血，满血但掉甲的人补 0 会像 bug）
 	var probe_u := Unit.from_data(by_name["Gerald"])
 	_expect(not Medkit.is_wounded(probe_u), "满血的人不算受伤", fails)
@@ -880,18 +880,18 @@ func _initialize() -> void:
 	_expect(Level.gw("reaper") == 100 and Level.gh("reaper") == 100, "Reaper 战物理边界 100×100", fails)
 	var pr98: Array = Level.play_rect("reaper")
 	# 第 102 轮用户口径：「把宽改为 41」-> 65×81 变成 41×81
-	_expect(pr98[0] == 0 and pr98[1] == 0 and pr98[2] == 41 and pr98[3] == 81,
-		"Reaper 战可到达格子 41×81（第 102 轮：宽 65 -> 41，实际 %s）" % [str(pr98)], fails)
-	_expect(Level.play_w("reaper") == 41 and Level.play_h("reaper") == 81, "41×81 的宽高读数一致", fails)
+	_expect(pr98[0] == 0 and pr98[1] == 0 and pr98[2] == 41 and pr98[3] == 65,
+		"Reaper 战可到达格子 41×65（第 103 轮：高 81 -> 65，实际 %s）" % [str(pr98)], fails)
+	_expect(Level.play_w("reaper") == 41 and Level.play_h("reaper") == 65, "41×65 的宽高读数一致", fails)
 	# 第 102 轮用户口径：「初始位置排在长的两端（即左下角和右上角）」
 	var rk98: Vector2i = Level.king_cell(UnitData.Side.PLAYER, "reaper")
 	_expect(rk98 == Vector2i(4, 4),
 		"玩家老国王在**左下角** (4,4)（第 102 轮斜对角布局，实际 %s）" % [str(rk98)], fails)
-	_expect(Level.king_cell(UnitData.Side.ENEMY, "reaper") == Vector2i(36, 76),
-		"Reaper 在**右上角** (36,76)（实际 %s）" % [str(Level.king_cell(UnitData.Side.ENEMY, "reaper"))], fails)
+	_expect(Level.king_cell(UnitData.Side.ENEMY, "reaper") == Vector2i(36, 60),
+		"Reaper 在**右上角** (36,60)（第 103 轮地图 41×65，实际 %s）" % [str(Level.king_cell(UnitData.Side.ENEMY, "reaper"))], fails)
 	# Reaper body_r=3 不能出界（x 0~40 / y 0~80）
 	var rkc: Vector2i = Level.king_cell(UnitData.Side.ENEMY, "reaper")
-	_expect(rkc.x + 3 <= 40 and rkc.y + 3 <= 80, "Reaper 圆柱（半径 3）没有伸出可到达区", fails)
+	_expect(rkc.x + 3 <= 40 and rkc.y + 3 <= 65, "Reaper 圆柱（半径 3）没有伸出可到达区（41×65）", fails)
 	# 双方沿对角相向推进（不再是纯 +x / -x）
 	_expect(Level.in_play(rk98, "reaper"), "老国王站在可到达区内", fails)
 	var rpads98: Array[Vector2i] = Level.pad_cells(UnitData.Side.PLAYER, "reaper")
@@ -1038,11 +1038,12 @@ func _initialize() -> void:
 	var hcfg := Level.heli()
 	_expect(absf(float(hcfg["climb_speed"]) - 2.5) < 0.001,
 		"直升机技能移动速度 2.5 格/秒（含技能）", fails)
-	_expect(float(hcfg["climb_h"]) >= 3.2,
-		"爬升高度 %.1f 格要够高（投弹是三维球，半径 %.1f）" % [
-			float(hcfg["climb_h"]), float(hcfg["drop_blast_r"])], fails)
-	_expect(absf(float(hcfg["drop_hold"]) - 0.5) < 0.001 and absf(float(hcfg["bomb_fall_sec"]) - 1.0) < 0.001,
-		"投弹发生在到达后 0.5 秒、下落耗时 1 秒", fails)
+	_expect(float(hcfg["climb_h"]) > 0.15 + float(hcfg["drop_blast_r"]),
+		"爬升高度 %.1f 格要够高（投弹三维球半径 %.1f -> 球顶 %.2f）" % [
+			float(hcfg["climb_h"]), float(hcfg["drop_blast_r"]),
+			0.15 + float(hcfg["drop_blast_r"])], fails)
+	_expect(absf(float(hcfg["drop_hold"]) - 0.5) < 0.001 and absf(float(hcfg["bomb_fall_sec"]) - 1.33) < 0.001,
+		"投弹发生在到达后 0.5 秒、下落耗时 1.33 秒（第 103 轮：按新高度 7 格换算）", fails)
 	_expect(absf(UnitVisual.HELI_TILES_PER_SEC - 2.5) < 0.001
 		and absf(UnitVisual.WALK_TILES_PER_SEC - 2.0) < 0.001,
 		"直升机走路 2.5 格/秒、其他角色 2 格/秒", fails)
@@ -1053,8 +1054,8 @@ func _initialize() -> void:
 	# 第 95 轮：普攻间隔减半；投弹范围 = 半径 3 格的三维球
 	_expect(absf(float(hcfg["salvo_gap"]) - 0.5) < 0.001,
 		"直升机普攻每次齐射间隔 0.5 秒（第 95 轮：1 -> 0.5）", fails)
-	_expect(absf(float(hcfg["drop_blast_r"]) - 3.0) < 0.001,
-		"投弹范围 = 半径 3 格的三维球（第 95 轮确认）", fails)
+	_expect(absf(float(hcfg["drop_blast_r"]) - 6.0) < 0.001,
+		"投弹范围 = 半径 6 格的三维球（第 103 轮：3 -> 6）", fails)
 	print("    直升机普攻：%s" % AttackProfile.describe(heli_u2))
 	print("    Alette 普攻：%s" % AttackProfile.describe(Unit.from_data(by_name["Alette"])))
 
@@ -1412,12 +1413,22 @@ func _initialize() -> void:
 	_expect(int(rp_row.get("body_r", 0)) == 3 and int(rp_row.get("body_h", 0)) == 12,
 		"Reaper 碰撞圆柱 = 半径 3 / 高 12", fails)
 	# 召唤：**一次三个**，两个模板各三个（用户口径："召唤一次是三个人，有两个模板，每次随机一个模板"）
-	_expect(Reaper.SUMMON_KITS.size() == 2, "召唤模板有 2 个（实际 %d）" % Reaper.SUMMON_KITS.size(), fails)
+	_expect(Reaper.SUMMON_KITS.size() == 3, "召唤模板有 3 个（第 103 轮，实际 %d）" % Reaper.SUMMON_KITS.size(), fails)
 	for kit5 in Reaper.SUMMON_KITS:
 		var knames: Array = kit5.get("names", [])
 		_expect(knames.size() == 3, "模板「%s」一次召 3 个人（实际 %d）" % [kit5.get("id", "?"), knames.size()], fails)
-	_expect(Reaper.SUMMON_KITS[1]["names"] == ["萨尼铁塔", "萨尼铁塔", "萨尼铁塔"],
-		"模板 B = 三名萨尼铁塔", fails)
+	_expect(Reaper.SUMMON_KITS[2]["names"] == ["萨尼铁塔", "萨尼铁塔", "萨尼铁塔"],
+		"模板 C = 三名萨尼铁塔（第 103 轮起模板 [1] 改成三个投掷手）", fails)
+	_expect(Reaper.SUMMON_KITS[1]["names"] == ["Airburst mortar", "Airburst mortar", "Airburst mortar"],
+		"模板 B = 三个投掷手（第 103 轮新增；投掷手自带 carpet_bomb 技能）", fails)
+	# 加权 70 / 20 / 10（第 103 轮用户口径）
+	_expect(int(Reaper.SUMMON_KITS[0].get("weight", 0)) == 70
+		and int(Reaper.SUMMON_KITS[1].get("weight", 0)) == 20
+		and int(Reaper.SUMMON_KITS[2].get("weight", 0)) == 10,
+		"模板权重 = 70 / 20 / 10（实际 %d/%d/%d）" % [
+			int(Reaper.SUMMON_KITS[0].get("weight", 0)),
+			int(Reaper.SUMMON_KITS[1].get("weight", 0)),
+			int(Reaper.SUMMON_KITS[2].get("weight", 0))], fails)
 	_expect(Reaper.SUMMON_KITS[0]["names"].size() == 3, "模板 A 也是三名（2 无技能近战 + 1 带哨兵远程）", fails)
 
 	# ── 场景胜负条件（第 97 轮：胜负条件写进场景元数据，各场景相互独立）──

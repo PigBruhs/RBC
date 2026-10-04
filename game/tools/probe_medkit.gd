@@ -4,7 +4,7 @@
 # 为什么单独一个探针：这条被动**从"复活队友"整条换成了"投医疗包"**，而既有测试网里
 # 关于它的断言全是旧口径（playtest §33 ③ / run.gd 的 revive 断言）。新口径的三条特有行为
 # 在别处完全没有覆盖：
-#   ① 随机向一名"受伤的队友"投掷，命中回 20 点力量（不超上限）
+#   ① 随机向一名"受伤的队友"投掷，命中回 10 点力量（不超上限；第 103 轮：20 -> 10）
 #   ② 飞行中碰到**任何人**都给对方回血（含敌人）—— 友伤变成"友疗"
 #   ③ 没有受伤的队友 -> 不投（且有日志）
 #   ④ 同一颗种子 -> 选中同一个目标（确定性，走 RngService 而不是 randf）
@@ -120,7 +120,7 @@ func _initialize() -> void:
 	_chk(Passives.exists("holy_sani"), "被动 id 仍是 holy_sani（测试引用它，不能改名）")
 	_chk(not hs.has("revive") and not hs.has("uses_per_life"),
 		"passives.gd 里 revive / uses_per_life 已删除")
-	_chk(int(hs.get("heal_points", 0)) == 20, "回血 20 点写在被动表里（heal_points = 20）")
+	_chk(int(hs.get("heal_points", 0)) == 10, "回血 10 点写在被动表里（第 103 轮：20 -> 10，heal_points = 10）")
 	_chk(String(hs.get("desc", "")).contains("医疗包") and not String(hs.get("desc", "")).contains("复活"),
 		"说明文案已改成医疗包口径、且不含复活字样")
 
@@ -135,7 +135,7 @@ func _initialize() -> void:
 		return
 
 	# ══════════════════════════════════════════════════════════════════════════
-	print("\n[1] 投出一枚绿色箭头的医疗包，命中回 20 点力量（不超上限）")
+	print("\n[1] 投出一枚绿色箭头的医疗包，命中回 10 点力量（不超上限）")
 	_clear_path([_sani, _gerald])
 	_sani.cell = Vector2i(10, 10)
 	_gerald.cell = Vector2i(10, 12)
@@ -165,7 +165,7 @@ func _initialize() -> void:
 	var frames := _run_until_landed()
 	var hp1: int = _gerald.power_cur
 	_chk(_s.t_sani_medkit_count() == 0, "落地后在途医疗包 = 0（飞了 %d 帧）" % frames)
-	_chk(hp1 == hp0 + Medkit.heal_milli(), "命中回 20 点力量（%d -> %d，种子 %d）" % [hp0 / 1000, hp1 / 1000, hit_seed])
+	_chk(hp1 == hp0 + Medkit.heal_milli(), "命中回 10 点力量（%d -> %d，种子 %d）" % [hp0 / 1000, hp1 / 1000, hit_seed])
 	_chk(hp1 <= _gerald.power_max, "不超过力量上限")
 	_chk(_log_has("医疗包命中 Gerald"), "日志写了命中（探针可读）")
 	# 差 5 点就满血：命中只能补到上限（不会溢出）—— 同样要挑能命中的种子

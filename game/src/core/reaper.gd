@@ -15,7 +15,7 @@
 #   · 光束角速度恒定 => 该格被覆盖的帧数 ∝ atan(1/d) ≈ 1/d   -> 越远帧数越少 -> 伤害越低
 #   · 而 d 处扫过的**格子数** = 弧长 d·θ / 1 = d·θ            -> 越远格数越多
 # 所以本文件只提供 `frames_at(dist, total_frames, total_angle)` 这一个换算，
-# 伤害 = 帧数 × 每帧伤害（"reaper_laser" = 2 点/帧），**不需要任何按距离查表**。
+# 伤害 = 帧数 × 每帧伤害（"reaper_laser" = 1 点/帧，第 103 轮由 2 减半；时长同步翻倍），**不需要任何按距离查表**。
 #
 # ── 高度差 ───────────────────────────────────────────────────────────────────
 # 激光**从离地 BASE_HEIGHT=3 格发射（第 102 轮口径："激光初始高度减为 3"），末端是攻击目标**
@@ -33,18 +33,23 @@ const CYCLE: Array = [Step.SUMMON, Step.SWEEP, Step.SLICE]
 ## ⚠️ 这不是蓝环高度 —— 环仍是 6 格（`ReaperModel.RING_Y`），两者解耦。
 const BASE_HEIGHT := 3.0
 
-## 横扫：中轴 = "Reaper → 最近敌人"，落点从左扫到右；总时长固定 2 秒。
+## 横扫：中轴 = "Reaper → 最近敌人"，落点从左扫到右。
 ## ⚠️ 旧的 `SWEEP_HALF_DEG = 60`（固定半角）**已删除** —— 第 100 轮改成**固定弧长**：
 ##    单侧弧长 ARC_HALF_LEN = 3.5 格（R=40 时左右合计 7 格），所以角度随距离变小。
-const SWEEP_SEC := 2.0
+## 第 103 轮用户口径："每帧伤害减半，但是动画持续时间翻倍" → 2.0 → **4.0 秒**
+## （帧数 ×2、每帧伤害 ÷2 = **总伤害不变**；见 Laser.DMG_PER_FRAME）。
+const SWEEP_SEC := 4.0
 
-## 竖切：中轴同上，落点沿中轴 **从远侧扫回近侧**；总时长固定 1.6 秒。
+## 竖切：中轴同上，落点沿中轴 **从近侧扫到远侧**（第 102 轮反向）；总时长固定。
 ## ⚠️ 旧的 `SLICE_HALF_DEG = 30`（固定半角）同样已删除（理由同上）。
-const SLICE_SEC := 1.6
+## 第 103 轮：1.6 → **3.2 秒**（同上，总伤害不变）。
+const SLICE_SEC := 3.2
 
-## 帧率与帧伤（与 Laser 的 "reaper_laser" 约定一致：2 点/帧）
+## 帧率。帧伤的真值在 `Laser.DMG_PER_FRAME["reaper_laser"]`（第 103 轮：2 → 1 点/帧）。
 const FRAME_HZ := 60.0
-const FRAME_DMG_MILLI := 2000
+## ⚠️ **遗留预估常量，动画已经不用它算伤害**：真实伤害 = 碰撞帧数 × 每帧伤害。
+## 保留只为 `probe_reaper_ai.gd` 的 `d6 > d12` 那条"越远每格被覆盖的帧数越少"的反比断言。
+const FRAME_DMG_MILLI := 1000
 
 ## 攻击前预警：环变红多久（用户口径：2 秒）
 const WARN_SEC := 2.0
@@ -138,17 +143,46 @@ static func plan_forward(reaper: Unit, units: Array[Unit]) -> Dictionary:
 # 召唤
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 两种配置（二选一，由调用方给 seed 决定；确定性）
-##   甲：两个【没有技能的近战】+ 一个【带哨兵技能的远程】
-##       —— 用现成花名册：Gerald 是唯一近战（无主动技能），公主·左/右 带 always_sentry（哨兵被动）。
+## 三个模板（**加权随机**，权重见每条的 `weight`；第 103 轮用户口径 70 / 20 / 10）：
+##   甲（70%）：两个【没有技能的近战】+ 一个【带哨兵的远程】
+##       —— 用现成花名册：Gerald 是唯一近战（无主动技能），公主·左带 `always_sentry`（哨兵被动）。
 ##       ⚠ 不能新建角色数据行（`unit_data.gd` 不在本任务写区），所以复用现成单位再改阵营。
-##   乙：三名【萨尼铁塔】
+##       ⚠ "带哨兵"这里是**被动**（`always_sentry`）：召唤出来的公主·左是普通可行动单位
+##       （`_reaper_do_summon` 直接 `Unit.from_data`，不走 battle_scene 的 `no_turn` 分派），
+##       所以她会正常进入回合队列、并一直处于哨兵状态 —— 符合"带哨兵的远程"。
+##   乙（20%）：三个【投掷手】= `Airburst mortar`。**"有技能"自动满足**：
+##       它的技能是【地毯式轰炸】(`carpet_bomb`，owner = "Airburst mortar"，6 精力)，
+##       按名字绑定，召唤出来共用同一数据行；AI 也会优先用它（`Ai._plan_skill`）。
+##       （注意：枪榴弹 `grenade_launcher` 是**萨尼铁塔**的技能，投掷手没有。）
+##   丙（10%）：三名【萨尼铁塔】（带枪榴弹 + 圣萨尼）。
+## 三个模板的 `names.size()` 都是 3（用户口径"一次三个"）。
 const SUMMON_KITS := [
-	{"id": "A", "desc": "2 近战(无技能) + 1 远程(带哨兵)",
+	{"id": "A", "desc": "2 近战(无技能) + 1 远程(带哨兵)", "weight": 70,
 	 "names": ["Gerald", "Gerald", "公主·左"]},
-	{"id": "B", "desc": "3 名萨尼铁塔",
+	{"id": "B", "desc": "3 个投掷手(带技能：地毯式轰炸)", "weight": 20,
+	 "names": ["Airburst mortar", "Airburst mortar", "Airburst mortar"]},
+	{"id": "C", "desc": "3 名萨尼铁塔", "weight": 10,
 	 "names": ["萨尼铁塔", "萨尼铁塔", "萨尼铁塔"]},
 ]
+
+
+## 加权随机挑模板（第 103 轮用户口径：甲 70% / 乙 20% / 丙 10%）。
+## 实现：把权重当累积区间 [0,70) [70,90) [90,100)，掷一个 [0,100) 的整数看落在哪一段。
+## **必须用项目的 `RngService`**（同 seed 可复现，别用 randf()）。
+## 权重总和不要求 100（按实际总和归一化），这样以后加模板不用回头改常量。
+static func pick_kit_index(rng: RngService) -> int:
+	var total := 0
+	for kit in SUMMON_KITS:
+		total += int(kit.get("weight", 1))
+	if total <= 0 or rng == null:
+		return 0
+	var roll := rng.next_int(total)          # [0, total)
+	var acc := 0
+	for i in SUMMON_KITS.size():
+		acc += int(SUMMON_KITS[i].get("weight", 1))
+		if roll < acc:
+			return i
+	return SUMMON_KITS.size() - 1
 
 
 ## 挑召唤位：**确定性**螺旋外扩，从 Reaper 周围一圈开始找空格

@@ -1903,8 +1903,14 @@ func _initialize() -> void:
 	dummy_v.power_cur = dummy_v.power_max
 	var hp_bomb: int = dummy_v.power_cur
 	var top_h := 0.0
-	for i in 400:
-		_s.t_dive_tick(1.0 / 60.0)
+	# ⚠ 第 103 轮（投弹半径 3 → 6 之后才暴露的测试写法问题）：
+	#   炸弹的下落 `Tween` 走**真实时间**，而以前这里用**紧循环**手工推 `t_dive_tick(1/60)`
+	#   （400 次几毫秒就跑完，真实时间几乎没走）→ 循环结束时炸弹**还没落地**，
+	#   于是"投弹不能炸到自己"这条断言在**投弹后**立刻检查，而那时直升机还在返航途中。
+	#   半径 3 时它够不着自己（所以以前一直是绿的），半径 6 之后就打到了 → 假红。
+	#   正确做法：**让场景自己按真实 delta 推进**，并按真实时间等炸弹落地。
+	for i in 600:
+		await create_timer(1.0 / 60.0).timeout
 		top_h = maxf(top_h, heli.visual.position.y)
 		if not heli.tags.has("diving"):
 			break
@@ -2591,8 +2597,14 @@ func _initialize() -> void:
 	# ── 47. 队列：阵亡当场移出 / 复活压回队头（第 87 轮：修"复活饥饿"）──
 	print("\n[47] 队列：阵亡移出 / 复活压队头")
 	var qv: Unit = _unit_by("Alette", 1)
+	# ⚠ 第 103 轮：投弹从"半径 3 / 20 力量"变成"**半径 6 / 120 力量**"之后它变得真能打死人，
+	#   所以跑到这里时这位敌人**很可能已经在前面的小节里阵亡过**了。
+	#   而 `on_unit_died` 是**幂等**的（`uid_dead` 里有他 + 他已经不是 alive → 直接 return），
+	#   于是"再杀一次"不会走移除队列那一步 → 这条断言假红。
+	#   这里先把他**救活并把阵亡记账清掉**，让这一节从头复现"首次阵亡"。
 	qv.power_cur = qv.power_max
 	qv.armor_cur = qv.armor_max
+	_s.uid_dead.erase(qv)
 	_s.queue.rebuild(_s.units)
 	var in_q0: bool = _s.queue.p_queue.has(qv) or _s.queue.e_queue.has(qv)
 	qv.power_cur = 0

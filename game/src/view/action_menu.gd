@@ -29,6 +29,11 @@ func show_action_menu() -> void:
 	_st.cell_targets = {}
 	if _st._ai_turn:
 		return                              # AI 回合不弹菜单
+	# 用户口径（第 103 轮）：被 AI 操控的单位也不许弹**行动菜单**。
+	# 上面那道只拦住了「当前是不是 AI 回合」，漏了「我点的这个单位是不是 AI 在操控」——这里补后半句。
+	# ⚠ 只拦弹菜单这一步：点单位看属性走 _select_for_detail / _refresh_all，不受影响。
+	if _st._is_ai_unit(_st.active):
+		return
 	_st.phase = _st.Phase.MENU
 	_st.reachable = _st._compute_reachable(_st.active)
 	_st.attackable = {}

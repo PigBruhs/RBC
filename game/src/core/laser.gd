@@ -37,13 +37,16 @@ const HIT_R := 0.25
 const FRAME_HZ := 60.0
 
 ## 激光 id -> 每帧伤害（点）。**帧伤由激光 id 决定**，不按距离查表。
+## 第 103 轮用户口径："把每帧伤害减半，但是动画持续时间翻倍" → reaper_laser 2 → **1 点/帧**
+## （同时 `Reaper.SWEEP_SEC` 2→4、`SLICE_SEC` 1.6→3.2，帧数 ×2 —— **总伤害不变**，
+##  只是分摊到两倍时长；实测对照表见本轮的临时脚本输出）。
 const DMG_PER_FRAME := {
-	"reaper_laser": 2,
+	"reaper_laser": 1,
 }
-const DEFAULT_DMG_PER_FRAME := 2
+const DEFAULT_DMG_PER_FRAME := 1
 
 
-## 这个激光 id 的每帧伤害（点）。没登记的 id 走缺省 2 点/帧。
+## 这个激光 id 的每帧伤害（点）。没登记的 id 走缺省 1 点/帧。
 static func dmg_per_frame_of(id: String) -> int:
 	return int(DMG_PER_FRAME.get(id, DEFAULT_DMG_PER_FRAME))
 
@@ -173,7 +176,7 @@ static func _dist_point_to_seg_2d(p: Vector2, s0: Vector2, s1: Vector2) -> float
 
 ## frames_by_id 是 {目标 instance_id: 被光束覆盖的物理帧数} —— 角色与**沙盒元素**共用这一张表
 ## （实例 id 全局唯一，不会撞）；
-## dmg_per_frame 由【激光 id】决定（`"reaper_laser"` = 2 点/帧）。
+## dmg_per_frame 由【激光 id】决定（`"reaper_laser"` = **1 点/帧**，第 103 轮由 2 减半）。
 ## 伤害走 `Damage.magic_hit` / `Damage.magic_hit_placeable`（只吃魔抗、无视护甲），
 ## 返回 Array[Damage.Hit]。
 ## 已经阵亡 / 不在 units / 不在 placeables 里的目标：这一份帧伤作废（不给尸体结算）。
