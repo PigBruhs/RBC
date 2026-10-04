@@ -1019,18 +1019,165 @@ var _grenade_models: Dictionary = {}      # 格 -> Node3D（模型，不可交�
 var _last_flash: Node3D = null
 
 
-## ── 圣萨尼：她的回合开始时，复活"她回合前最后一个阵亡的可操作队友"，每条命一次 ──
+# ══════════════════════════════════════════════════════════════════════════════
+# 圣萨尼（第 98 轮新口径）：每个轮到萨尼铁塔的回合，朝一名受伤的队友投一枚**绿色箭头医疗包**
+#
+# 用户口径：
+#   · **不再复活队友**（旧的"复活最后一个阵亡队友 / 每条命一次"整条已删除）
+#   · 随机向一名"受了伤的队友"投掷，命中恢复 20 点力量（不超上限）
+#   · 散布**复用杰拉德弹反那条曲线**（`Spread.reflect_scatter`）
+#   · 飞行中碰到**任何人或沙盒元素**都给对方回血（含敌人 —— 刻意的搞笑口径，不要"修正"）
+#
+# 医疗包**不进 ProjectileField**：它不造伤、不能被击落、不惊动哨兵、也没有落地爆炸，
+# 所以在这里自己推进（复用 `Projectile` 的抛物线数学 + `Ordnance.make_arrow` 的弹道参数）。
+# `_holy_sani_check` 这个名字保持不变：`view/turn_runner.gd` 的回合开始路径按它调用。
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 在途医疗包：[{"p": Projectile, "node": Node3D, "prev": Vector3}]
+var _medkits: Array = []
+## 最近一次选中的目标名（探针断言"随机但确定"用）
+var _sani_heal_roll: String = ""
+
+
 func _holy_sani_check(u: Unit) -> void:
-	if u == null or not Passives.has(u, "holy_sani"):
+	if u == null or not Passives.has(u, "holy_sani") or not u.is_alive():
 		return
-	if u.tags.has("holy_sani_used"):
-		return
-	var mate := gm.last_dead_teammate(u.side, units)
+	var mate := Medkit.pick_target(u, units, rng)
+	_sani_heal_roll = mate.name if mate != null else ""
 	if mate == null:
+		_log("  💚 %s 的【圣萨尼】：场上没有受伤的队友，这一回合不投" % u.name)
 		return
-	u.tags["holy_sani_used"] = true
-	_log("  ✨ %s 触发【圣萨尼】：立即复活队友 %s" % [u.name, mate.name])
-	_revive_hero(mate)
+	_throw_medkit(u, mate)
+
+
+## 真实投掷路径（探针 `t_sani_throw_medkit` 也走这里）
+func _throw_medkit(sani: Unit, target: Unit) -> void:
+	var from := Vector3(float(sani.cell.x) + 0.5, 0.75, float(sani.cell.y) + 0.5)
+	var dist := Vector2(from.x, from.z).distance_to(
+		Vector2(float(target.cell.x) + 0.5, float(target.cell.y) + 0.5))
+	var land := Medkit.scatter_landing(target, dist, rng)
+	var to := Vector3(land.x, Targeting.aim_height(target), land.y)
+	var p := Ordnance.make_arrow(sani, from, to, target, false, false)
+	# ⚠ 医疗包飞得**平**（几乎不抛）：用户口径要求"飞行中碰到谁就给谁回血"。
+	# 箭矢那种大拱高（arc_scale 0.34 / 最高 4.2 格）会从所有地面角色**头顶飞过**
+	# （高度轴是物理判定），那条口径就永远不触发。压到 0.10~0.15 格：
+	# 全程高度 ≈ 0.5~0.78 格，正好在"身高 1 格"的身体区间里 —— 谁在线上谁被治。
+	p.arc_scale = 0.05
+	p.arc_min = 0.10
+	p.arc_max = 0.15
+	p.recalc_apex()
+	var node := _make_medkit_arrow(p.from.distance_to(p.to))
+	node.position = from
+	_medkits.append({"p": p, "node": node, "prev": from})
+	_log("  💚 %s 的【圣萨尼】：向 %s 投出医疗包（%.1f 格，散布 %.2f 格）" % [
+		sani.name, target.name, dist, Medkit.scatter_radius(dist)])
+
+
+## 每帧推进在途医疗包：飞行 -> 碰到什么就治什么 -> 飞完还没碰到就飘走
+func _tick_medkits(delta: float) -> void:
+	if _medkits.is_empty():
+		return
+	var keep: Array = []
+	for it in _medkits:
+		var p: Projectile = it["p"]
+		var prev: Vector3 = it["prev"]
+		p.step(delta)
+		var cur: Vector3 = p.pos3()
+		it["prev"] = cur
+		var node: Node3D = it["node"]
+		if node != null and is_instance_valid(node):
+			ProjectileField.orient(node, cur, prev, Ordnance.ARROW_TILES_PER_SEC)
+			node.position = cur
+		if _medkit_apply_hit(p, prev, cur):
+			_medkit_fx_free(node)
+			continue
+		if p.finished():
+			_log("  💚 医疗包没碰到任何人，飘走了")
+			_medkit_fx_free(node)
+			continue
+		keep.append(it)
+	_medkits = keep
+
+
+## 这一小段路径碰到了谁：① 角色（**不分敌我**，碰到谁给谁回血）② 沙盒元素（也回血）
+## 跳过投掷者自己（`p.owner_unit`）—— 否则一出膛就先给萨尼回一次血。
+func _medkit_apply_hit(p: Projectile, prev: Vector3, cur: Vector3) -> bool:
+	var u := Targeting.arrow_body_hit_seg(prev, cur, p.owner_unit, units, UNIT_BODY_R, p.hit_r)
+	if u != null:
+		_heal_unit(u)
+		return true
+	var pl := _placeable_near(cur)
+	if pl != null:
+		_heal_placeable(pl)
+		return true
+	return false
+
+
+## 回血：力量池 +20，不超过上限。**这不是伤害**，所以不走 `_after_damage_to_unit`。
+func _heal_unit(u: Unit) -> int:
+	var before: int = u.power_cur
+	u.power_cur = mini(u.power_max, u.power_cur + Medkit.heal_milli())
+	var healed: int = u.power_cur - before
+	_log("  💚 医疗包命中 %s：+%d 力量（%d → %d）" % [
+		u.name, healed / 1000, before / 1000, u.power_cur / 1000])
+	if u.visual != null:
+		u.visual.update_orb()
+	return healed
+
+
+## 沙盒元素也能被"回血"（用户口径：会给飞行中碰到的沙盒元素回血）。
+## `Placeable` 只有 `take_power_damage`（没有 heal API），所以直接按同一个池子补，照样钳上限。
+func _heal_placeable(pl: Placeable) -> int:
+	var before: int = pl.power_cur
+	pl.power_cur = mini(pl.power_max, pl.power_cur + Medkit.heal_milli())
+	var healed: int = pl.power_cur - before
+	_log("  💚 医疗包命中沙盒元素 %s：+%d 力量（%d → %d）" % [
+		pl.name, healed / 1000, before / 1000, pl.power_cur / 1000])
+	if pl.visual != null:
+		(pl.visual as PlaceableView).update_orb()
+	return healed
+
+
+## 医疗包外观：**绿色箭头**（用户口径）。几何照 `ProjectileField.make_arrow_node`
+## （细杆 + 锥形箭头，沿局部 -Z 建，配合 `ProjectileField.orient` 的朝向约定），
+## 颜色改成绿色 + 自发光，一眼看出是"回血"而不是"伤害"。
+func _make_medkit_arrow(dist_tiles: float) -> Node3D:
+	var arrow := Node3D.new()
+	arrow.name = "MedkitArrow"
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.35, 1.0, 0.45)
+	mat.emission_enabled = true
+	mat.emission = Color(0.25, 1.0, 0.40)
+	mat.emission_energy_multiplier = 1.6
+	var shaft := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.035
+	cyl.bottom_radius = 0.035
+	cyl.height = 1.0
+	shaft.mesh = cyl
+	shaft.rotation.x = PI * 0.5
+	shaft.position = Vector3(0, 0, -0.5)
+	shaft.material_override = mat
+	var head := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 0.09
+	cone.height = 0.24
+	head.mesh = cone
+	head.rotation.x = -PI * 0.5
+	head.position = Vector3(0, 0, -1.12)
+	head.material_override = mat
+	arrow.add_child(shaft)
+	arrow.add_child(head)
+	arrow.scale = Vector3.ONE * clampf(dist_tiles * 0.22, 0.6, 1.4)
+	add_child(arrow)
+	return arrow
+
+
+func _medkit_fx_free(node: Node3D) -> void:
+	if node != null and is_instance_valid(node):
+		node.queue_free()
 
 
 ## 注：原 `_spawn_fragment()` 薄包装于第 97 轮 P0 清账期删除 —— 全仓零引用。
@@ -1352,6 +1499,8 @@ func _process(delta: float) -> void:
 	# "这一帧的光束在哪里、盖住了谁"，所以必须在弹道/哨兵/走路都推进完之后再采样，
 	# 这样它看到的是本帧最终位置。累计帧伤，寿命到点的光束由模块自己统一结算。
 	laser_mod.tick(delta)
+	# 医疗包（第 98 轮 · 圣萨尼）：在途的绿色箭头自己慢慢飞（不进 ProjectileField）
+	_tick_medkits(delta)
 
 
 ## 队列条动画计时：到点就收尾；期间攒下的刷新请求在这里补做（最小间隔 0.5 秒）
@@ -2664,4 +2813,36 @@ func t_settle_all_lasers() -> Array:
 
 func t_laser_clip(a: Vector2, b: Vector2) -> Vector2:
 	return Laser.clip_by_terrain(a, b, placeables, GW, GH)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 测试 / 探针门面（t_*）：医疗包（第 98 轮 · 圣萨尼）
+#
+#   t_sani_medkit_count() -> int     在途医疗包数
+#   t_sani_heal_roll() -> String     最近一次选中的目标名（""= 没投）
+#   t_sani_throw_medkit() -> void    立刻走一次真实投掷路径（= 她的回合开始那一下）
+#   t_tick_medkits(delta) -> void    手工推进在途医疗包（探针关掉 _process 后自己推）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func t_sani_medkit_count() -> int:
+	return _medkits.size()
+
+
+func t_sani_heal_roll() -> String:
+	return _sani_heal_roll
+
+
+func t_sani_throw_medkit() -> void:
+	for u in units:
+		if u.name == "萨尼铁塔" and u.is_alive():
+			_holy_sani_check(u)
+			return
+	for u in units:                                  # 敌方镜像兜底
+		if Unit.base_name(u.name) == "萨尼铁塔" and u.is_alive():
+			_holy_sani_check(u)
+			return
+
+
+func t_tick_medkits(delta: float) -> void:
+	_tick_medkits(delta)
 

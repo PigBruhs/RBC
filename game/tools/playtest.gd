@@ -1823,14 +1823,23 @@ func _initialize() -> void:
 	mate.power_cur = 0
 	_s.t_on_unit_died(mate)
 	print("    队友阵亡：%s ｜ 她的标记=%s" % [mate.name, sani.tags.has("holy_sani_used")])
+	# 第 99 轮（用户口径）：圣萨尼**不再复活队友**，改成"每个回合随机向受伤队友投医疗包"。
+	# 所以这里改成验"不复活 + 旧标记不存在 + 受伤队友在场时会投出医疗包"。
+	var kit0: int = _s.t_sani_medkit_count()
 	_s.t_holy_sani_check(sani)
-	print("    圣萨尼之后：队友 alive=%s 位置 %s ｜ 已用标记=%s" % [
-		mate.is_alive(), mate.cell, sani.tags.has("holy_sani_used")])
-	_chk(mate.is_alive() and mate.power_cur == mate.power_max, "圣萨尼应立即复活最后一个阵亡的队友")
-	_chk(sani.tags.has("holy_sani_used"), "每条命只能触发一次")
-	# 第二条命：阵亡清状态 -> 标记被清掉，可以再用
-	sani.tags.clear()
-	_chk(not sani.tags.has("holy_sani_used"), "阵亡清状态后她又能用一次（每条命一次）")
+	print("    圣萨尼之后：队友 alive=%s 位置 %s ｜ 医疗包 %d -> %d" % [
+		mate.is_alive(), mate.cell, kit0, _s.t_sani_medkit_count()])
+	_chk(not mate.is_alive(), "圣萨尼不再复活队友（第 99 轮：旧口径已删除）")
+	_chk(not sani.tags.has("holy_sani_used"), "不再有【每条命一次】的复活标记")
+	# 把队友救回来并打伤，再投一次 -> 应该有医疗包
+	mate.power_cur = mate.power_max
+	mate.take_power_damage(Rules.points_to_milli(30))
+	var kit1: int = _s.t_sani_medkit_count()
+	_s.t_sani_throw_medkit()
+	print("    手动投一次：医疗包 %d -> %d（选中目标 = %s）" % [
+		kit1, _s.t_sani_medkit_count(), _s.t_sani_heal_roll()])
+	_chk(_s.t_sani_medkit_count() > kit1, "受伤队友在场时萨尼会投出医疗包")
+	_chk(mate.power_cur > 0, "队友仍然活着（没有被治疗逻辑弄死）")
 
 	# ── 34. 直升机：坠机被动 + 俯冲轰炸 ──
 	print("\n[34] 直升机")

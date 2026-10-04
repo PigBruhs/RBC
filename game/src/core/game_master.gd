@@ -230,7 +230,13 @@ func decoupled_count() -> int:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 阵亡顺序（圣萨尼要用）：GM 记录谁先死，萨尼铁塔的回合开始时取"最后一个阵亡的队友"
+# 阵亡顺序记录
+#
+# ⚠️ 第 98 轮：**圣萨尼已不再复活队友**（改成投医疗包，见 core/medkit.gd），
+# 所以 `last_dead_teammate()` 现在**没有生产调用方**了。之所以保留：
+#   · `note_death()` 仍被 `view/turn_runner.gd` 的阵亡路径调用（那边不在本轮写区）；
+#   · `tests/run.gd` 仍在断言 note_death + last_dead_teammate（测试不在本轮写区）。
+# 等这两处一起改的时候，再把"记录 + last_dead_teammate"整块删掉。
 # ══════════════════════════════════════════════════════════════════════════════
 var death_order: Array[String] = []
 
@@ -244,6 +250,8 @@ func note_death(u: Unit) -> void:
 
 
 ## 最后一个阵亡的、可操作的队友（不含公主/国王/假人/沙盒）
+## ⚠️ 第 98 轮起**没有生产调用方**：圣萨尼改成投医疗包，不再取"最后一个阵亡的人"。
+## 保留原因（note_death 仍被 turn_runner 调用、run.gd 仍断言本函数）见上面那段注释。
 func last_dead_teammate(side: int, units: Array[Unit]) -> Unit:
 	var by_name: Dictionary = {}
 	for u in units:

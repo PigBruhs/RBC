@@ -748,8 +748,21 @@ func _initialize() -> void:
 		"射程与投掷手一致（3-20）", fails)
 	_expect(Passives.has(sani, "holy_sani"), "她有【圣萨尼】", fails)
 	var hs := Passives.def("holy_sani")
-	_expect(bool(hs.get("revive", false)) and int(hs.get("uses_per_life", 0)) == 1,
-		"圣萨尼：每条命一次、用于复活", fails)
+	# 第 99 轮（用户口径）：圣萨尼**不再复活队友**，改成"每个回合随机投医疗包"
+	_expect(not bool(hs.get("revive", false)) and int(hs.get("uses_per_life", 0)) == 0,
+		"圣萨尼不再复活队友（旧口径已删除）", fails)
+	_expect(bool(hs.get("medkit", false)) and int(hs.get("heal_points", 0)) == 20,
+		"圣萨尼改为投医疗包、命中回 20 点（第 99 轮）", fails)
+	_expect(Medkit.heal_points() == 20 and Medkit.heal_milli() == Rules.points_to_milli(20),
+		"Medkit 治疗量 = 20 点（实际 %d）" % (Medkit.heal_milli() / 1000), fails)
+	# 口径：受伤 = **力量池未满**（医疗包恢复的是血，满血但掉甲的人补 0 会像 bug）
+	var probe_u := Unit.from_data(by_name["Gerald"])
+	_expect(not Medkit.is_wounded(probe_u), "满血的人不算受伤", fails)
+	probe_u.take_power_damage(Rules.points_to_milli(1))
+	_expect(Medkit.is_wounded(probe_u), "掉了 1 点力量就算受伤", fails)
+	probe_u.armor_cur = 0
+	probe_u.power_cur = probe_u.power_max
+	_expect(not Medkit.is_wounded(probe_u), "只掉护甲不算受伤（恢复量是力量池）", fails)
 	# 子弹阶梯（同时作用于破甲与力量）
 	for row2 in [[0.0, 1.0], [12.0, 1.0], [12.1, 0.6], [16.0, 0.6], [16.1, 0.2], [24.0, 0.2], [24.1, 0.0]]:
 		_expect(absf(Damage.bullet_mult(float(row2[0])) - float(row2[1])) < 0.001,
