@@ -175,14 +175,19 @@ static func _frag_lerp(dist: float, near_v: float, mid_v: float, far_v: float) -
 ## break_armor = true 走破甲线（固定伤害 = 攻方破甲值，无视物抗，打护甲池）
 ## bonus_milli = 额外力量（弓箭手「蓄势」）：加在"力量-护甲"那一段，所以会被抗性减伤
 ## power_mult  = 攻方力量的倍率（加农炮 = 0.5，先乘再减护甲）
+## fixed_power = true：power_override 是**已经算好的固定力量伤害**，按"只过抗性、不减护甲"结算（破片用）
 static func strike(attacker: Unit, target: Unit, break_armor: bool, rng,
 		bonus_milli: int = 0, power_mult: float = 1.0,
-		power_override: int = -1, break_override: int = -1) -> Hit:
+		power_override: int = -1, break_override: int = -1,
+		fixed_power: bool = false) -> Hit:
 	if attacker == null or target == null or not target.is_alive():
 		return null
 	var power: int = power_override if power_override >= 0 else int(floor(attacker.power_cur * power_mult)) + bonus_milli
 	var o := Combat.opts({
-		"power": power,
+		"power": power if not fixed_power else 0,
+		# ⚠ fixed_power 分支下 `power` 走的是"固定力量伤害"口径（只过抗性、不减护甲），
+		#   所以必须放进 fixed_power 字段，不能放进 power —— 否则又会去减护甲。
+		"fixed_power": power if fixed_power else 0,
 		"armor_break": (break_override if break_override >= 0 else attacker.armor_break) if break_armor else 0,
 		"rng": rng,
 	})

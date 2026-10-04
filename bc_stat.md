@@ -3,9 +3,9 @@
 | Gerald | melee | 82 | 52 | high | none | 16 | 5 | 5 | - | 10 | 6 | 2 |
 | Alette | ranged | 52 | 24 | none | mid | 5 | 8 | 7 | 1-8 | 6 | 3 | 2 |
 | Airburst mortar | thrower | 36 | 5 | none | none | 12 | 12 | 3 | 3-20 | 9 | 1 | 2 |
-| 老国王 | ranged | 100 | 50 | none | none | 0 | 0 | 0 | 1-15 | 0 | 0 | 0 |
-| 公主·左 | ranged | 25 | 0 | none | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 |
-| 公主·右 | ranged | 25 | 0 | none | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 |
+| 老国王 | ranged | 150 | 50 | mid | none | 0 | 0 | 0 | 1-15 | 0 | 0 | 0 |
+| 公主·左 | ranged | 75 | 0 | low | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 |
+| 公主·右 | ranged | 75 | 0 | low | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 |
 | 萨尼铁塔 | ranged | 26 | 5 | none | none | 8 | 4 | 6 | 1-24 | 8 | 1 | 2 |
 | 俯冲轰炸直升机（不要问那么多） | thrower | 41 | 0 | none | none | 0 | 6 | 20 | 6-40 | 9 | 1 | 2 |
 
@@ -17,9 +17,9 @@
 | Gerald (E) | melee | 82 | 52 | high | none | 16 | 5 | 5 | - | 10 | 6 | 2 | yes |
 | Alette (E) | ranged | 52 | 24 | none | mid | 5 | 8 | 7 | 1-8 | 6 | 3 | 2 | yes |
 | Airburst mortar (E) | thrower | 36 | 5 | none | none | 12 | 12 | 3 | 3-20 | 9 | 1 | 2 | yes |
-| 老国王 (E) | ranged | 100 | 50 | none | none | 0 | 0 | 0 | 1-15 | 0 | 0 | 0 | no |
-| 公主·左 (E) | ranged | 25 | 0 | none | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 | no |
-| 公主·右 (E) | ranged | 25 | 0 | none | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 | no |
+| 老国王 (E) | ranged | 150 | 50 | mid | none | 0 | 0 | 0 | 1-15 | 0 | 0 | 0 | no |
+| 公主·左 (E) | ranged | 75 | 0 | low | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 | no |
+| 公主·右 (E) | ranged | 75 | 0 | low | none | 0 | 0 | 0 | 1-12 | 0 | 0 | 0 | no |
 | 萨尼铁塔 (E) | ranged | 26 | 5 | none | none | 8 | 4 | 6 | 1-24 | 8 | 1 | 2 | yes |
 | 俯冲轰炸直升机（不要问那么多） (E) | thrower | 41 | 0 | none | none | 0 | 6 | 20 | 6-40 | 9 | 1 | 2 | yes |
 

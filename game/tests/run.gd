@@ -452,11 +452,15 @@ func _initialize() -> void:
 	for d in UnitData.ENEMIES:
 		if String(d.get("name", "")).begins_with("公主"): princess_n += 1
 	_expect(princess_n == 4, "一共 4 个公主（两边各 2）", fails)
-	_expect(int(princess_data.get("power", 0)) == 25 and int(princess_data.get("armor", 0)) == 0,
-		"公主 25 血 / 无甲", fails)
+	_expect(int(princess_data.get("power", 0)) == 75 and int(princess_data.get("armor", 0)) == 0,
+		"公主 75 血 / 无甲（第 98 轮：25 -> 75）", fails)
+	_expect(int(princess_data.get("pr", -1)) == 200,
+		"公主物抗 = 低（第 98 轮新增）", fails)
 	_expect(int(princess_data.get("rng_max", 0)) == 12, "公主射界 12 格", fails)
-	_expect(int(king_data.get("power", 0)) == 100 and int(king_data.get("armor", 0)) == 50,
-		"老国王 100 血 / 50 甲", fails)
+	_expect(int(king_data.get("power", 0)) == 150 and int(king_data.get("armor", 0)) == 50,
+		"老国王 150 血 / 50 甲（第 98 轮：100 -> 150）", fails)
+	_expect(int(king_data.get("pr", -1)) == 400,
+		"老国王物抗 = 中（第 98 轮新增）", fails)
 	_expect(int(king_data.get("rng_max", 0)) == 15 and int(king_data.get("role", -1)) == UnitData.Role.RANGED,
 		"老国王是远程、射程 15（不能被解析成投掷手）", fails)
 	var king_u := Unit.from_data(king_data)
@@ -736,7 +740,7 @@ func _initialize() -> void:
 	var gd := Skills.get_def("grenade_launcher")
 	_expect(int(gd["cost"]) == 2, "枪榴弹 2 精力", fails)
 	_expect(int(gd["delay_turns"]) == 4, "落地后 4 个回合爆炸（GM 时钟）", fails)
-	_expect(int(gd["fragments"]) == 8, "爆炸出 8 枚破片", fails)
+	_expect(int(gd["fragments"]) == 12, "爆炸出 12 枚破片（第 98 轮：8 -> 12）", fails)
 	_expect(absf(float(gd["range_max"]) - 20.0) < 0.01 and absf(float(gd["range_min"]) - 3.0) < 0.01,
 		"射程与投掷手一致（3-20）", fails)
 	_expect(Passives.has(sani, "holy_sani"), "她有【圣萨尼】", fails)
@@ -1100,9 +1104,9 @@ func _initialize() -> void:
 		and absf(Loiter.MAX_DIST - 32.0) < 0.001 and absf(Loiter.BODY_R - 0.5) < 0.001
 		and absf(Loiter.BLAST_R - 1.0) < 0.001 and absf(Loiter.FUSE_R - 0.75) < 0.001,
 		"巡飞弹：速度 4 格/秒（第 92 轮）、定高 1.5、飞 32 格、直径 1 格球、造伤直径 2 格、近炸直径 1.5 格", fails)
-	_expect(absf(Loiter.POWER - 40.0) < 0.001 and absf(Loiter.BREAK - 40.0) < 0.001
+	_expect(absf(Loiter.POWER - 80.0) < 0.001 and absf(Loiter.BREAK - 80.0) < 0.001
 		and absf(Loiter.IGNORE_RES - 0.5) < 0.001,
-		"巡飞弹伤害 = 40 破甲 + 40 力量（炮击：无视 50% 物抗）", fails)
+		"巡飞弹伤害 = 80 破甲 + 80 力量（第 98 轮翻倍；炮击：无视 50% 物抗）", fails)
 	_expect(Ballistics.is_shell_class(Projectile.KIND_LOITER)
 		and Ballistics.intercept_result(Projectile.KIND_LOITER) == "burst"
 		and Ballistics.body_impact(Projectile.KIND_LOITER) == "land",
@@ -1230,6 +1234,49 @@ func _initialize() -> void:
 	var ai_plan3 := Ai.plan(ai_ctx2)
 	print("    精力 0 + 没得打：%s" % [ai_plan3.get("note", "-")])
 	_expect(String(ai_plan3.get("action", "")) == "rest", "没精力时照旧选休息", fails)
+
+	# ── 第 98 轮口径：破片固定力量（无视护甲）/ 巡飞弹伤害翻倍 / 国王公主强化 ──
+	print("\n── 第 98 轮：破片固定力量 + 巡飞弹翻倍 + 国王公主强化 ──")
+	# 破片：力量伤害和轨道空爆一样是**固定值**，只过物抗、**不减护甲**（用户口径）
+	var fw := Unit.from_data(by_name["Gerald"])          # 拿个有护甲的目标
+	fw.armor_cur = Rules.points_to_milli(50)
+	fw.pr = 0
+	var f_hit: Damage.Hit = Damage.strike(fw, fw, true, RngService.new(1), 0, 1.0,
+		Damage.fragment_power_milli(0.0), Damage.fragment_break_milli(0.0), true)
+	_expect(f_hit != null and f_hit.result.power_dmg == Rules.points_to_milli(16),
+		"破片 0 格：16 点力量伤害【无视护甲】（目标 50 甲不影响，实际 %d 点）" % [
+			(f_hit.result.power_dmg / 1000) if f_hit != null else -1], fails)
+	_expect(f_hit != null and f_hit.result.break_dmg == Rules.points_to_milli(8),
+		"破片 0 格：另有 8 点破甲（打护甲池）", fails)
+	# 物抗仍然生效：换成"中"档（400）后力量伤害应变成 16×0.6 = 9.6 -> floor 9
+	var fw2 := Unit.from_data(by_name["Gerald"])
+	fw2.armor_cur = Rules.points_to_milli(50)
+	fw2.pr = 400
+	var f_hit2: Damage.Hit = Damage.strike(fw2, fw2, true, RngService.new(1), 0, 1.0,
+		Damage.fragment_power_milli(0.0), Damage.fragment_break_milli(0.0), true)
+	_expect(f_hit2 != null and f_hit2.result.power_dmg == Rules.points_to_milli(9),
+		"破片仍受物抗影响：中抗(400) → 16×0.6=9.6 → floor 9（实际 %d 点）" % [
+			(f_hit2.result.power_dmg / 1000) if f_hit2 != null else -1], fails)
+	# 衰减曲线没变
+	_expect(Damage.fragment_power_milli(0.0) == 16000, "破片 0 格力量 = 16", fails)
+	_expect(Damage.fragment_power_milli(3.0) == 8000, "破片 3 格力量 = 8（减半）", fails)
+	_expect(Damage.fragment_power_milli(16.0) == 0, "破片 16 格力量 = 0", fails)
+	# 巡飞弹：伤害翻倍（40+40 -> 80+80）
+	var lo := Loiter.opts(RngService.new(1))
+	_expect(lo["power"] == Rules.points_to_milli(80), "巡飞弹力量 = 80（第 98 轮翻倍，实际 %d）" % (lo["power"] / 1000), fails)
+	_expect(lo["armor_break"] == Rules.points_to_milli(80), "巡飞弹破甲 = 80（第 98 轮翻倍，实际 %d）" % (lo["armor_break"] / 1000), fails)
+	_expect(absf(float(lo["ignore_res"]) - 0.5) < 0.001, "巡飞弹仍然无视 50% 物抗", fails)
+	# 枪榴弹破片 12 枚
+	_expect(int(Skills.get_def("grenade_launcher").get("fragments", 0)) == 12,
+		"枪榴弹破片 = 12（第 98 轮：8 -> 12）", fails)
+	# 国王 150 血 / 中物抗；公主 75 血 / 低物抗
+	_expect(by_name["老国王"].get("power", 0) == 150, "老国王力量(血量) = 150", fails)
+	_expect(by_name["老国王"].get("pr", -1) == 400, "老国王物抗 = 中(400)", fails)
+	_expect(by_name["公主·左"].get("power", 0) == 75, "公主·左 力量(血量) = 75", fails)
+	_expect(by_name["公主·左"].get("pr", -1) == 200, "公主·左 物抗 = 低(200)", fails)
+	var king_e98: Dictionary = by_name.get("老国王 (E)", {})
+	if not king_e98.is_empty():
+		_expect(king_e98.get("power", 0) == 150 and king_e98.get("pr", -1) == 400, "敌方老国王镜像同步（150 / 中抗）", fails)
 
 	# ── 场景胜负条件（第 97 轮：胜负条件写进场景元数据，各场景相互独立）──
 	print("\n── 场景胜负条件（第 97 轮）──")

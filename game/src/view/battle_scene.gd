@@ -1284,9 +1284,10 @@ static func _unit_pos(u: Unit) -> Vector2:
 ## 锁定沙盒元素（用户口径：双方英雄都能打木刺/土堆）
 func _apply_attack(attacker: Unit, t: Unit, break_armor: bool,
 		silent: bool = false, bonus_milli: int = 0, power_mult: float = 1.0,
-		power_override: int = -1, break_override: int = -1) -> void:
+		power_override: int = -1, break_override: int = -1,
+		fixed_power: bool = false) -> void:
 	attack.apply_attack(attacker, t, break_armor, silent, bonus_milli, power_mult,
-		power_override, break_override)
+		power_override, break_override, fixed_power)
 
 
 ## 箭矢"身体"判定半径等常量见 Targeting / Ordnance

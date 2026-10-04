@@ -132,12 +132,15 @@ func resolve_arrow_hit(sh: Ordnance.Shot, what: Dictionary) -> void:
 			_st._log("  ✦ 子弹命中 %s：飞行 %.1f 格 ×%.0f%% → 力 %d / 甲 %d" % [
 				victim.name, bd, bmult * 100.0, bpw / 1000, bbr / 1000])
 			return
-		# 破片：伤害按"离生成点走了多远"衰减（0 格 25/25 ｜ 3 格 12/12 ｜ 16 格 0）
+		# 破片：伤害按"离生成点走了多远"衰减（0 格 16/8 ｜ 3 格 8/4 ｜ 16 格 0）
+		# ⚠ 口径（第 98 轮）：**破片的力量伤害和轨道空爆一样是固定值 —— 只受物理抗性影响、无视护甲**。
+		#   所以走 `fixed_power = true`（Damage.strike 会把它放进 Combat 的 fixed_power 字段，
+		#   那条分支是"只按抗性折算、不减护甲"）。以前它走的是普通力量线，会被目标护甲再削一刀。
 		if sh.kind == Projectile.KIND_FRAGMENT:
 			var fd: float = sh.last_hit_dist
 			_st._apply_attack(attacker, victim, true, silent, 0, 1.0,
-				Damage.fragment_power_milli(fd), Damage.fragment_break_milli(fd))
-			_st._log("  ✦ 破片命中 %s：飞行 %.1f 格 → 力 %d / 甲 %d" % [
+				Damage.fragment_power_milli(fd), Damage.fragment_break_milli(fd), true)
+			_st._log("  ✦ 破片命中 %s：飞行 %.1f 格 → 力 %d / 甲 %d（固定力量，无视护甲、只过物抗）" % [
 				victim.name, fd,
 				Damage.fragment_power_milli(fd) / 1000, Damage.fragment_break_milli(fd) / 1000])
 			return

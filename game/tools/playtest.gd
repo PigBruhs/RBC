@@ -1798,7 +1798,7 @@ func _initialize() -> void:
 	_chk(_s.t_grenade_models().has(Vector2i(6, 6)), "手榴弹落地应留下模型（不可交互）")
 	_chk(_s.gm.pending.size() == 1 and String(_s.gm.pending[0].skill_id) == "grenade",
 		"GM 应开始 4 回合倒计时")
-	# ② 4 个回合边界后爆炸 -> 8 枚破片
+	# ② 4 个回合边界后爆炸 -> 破片数见 Skills 表（第 98 轮 = 12）
 	var gcell := Vector2i(6, 6)
 	for i in 4:
 		for p in _s.gm.dispatch_turn_boundary():
@@ -1811,7 +1811,7 @@ func _initialize() -> void:
 			frags += 1
 			_chk(pp.hit_self, "手榴弹破片必须能打自己人（hit_self）") if frags == 1 else null
 	print("    爆炸后场上破片 %d 枚 ｜ 模型残留 %d" % [frags, _s.t_grenade_models().size()])
-	_chk(frags == 8, "爆炸应撒出 8 枚破片")
+	_chk(frags == int(Skills.get_def("grenade_launcher")["fragments"]), "爆炸应撒出 %d 枚破片（第 98 轮：8 -> 12）" % int(Skills.get_def("grenade_launcher")["fragments"]))
 	_chk(_s.t_grenade_models().is_empty(), "爆炸后模型应被清掉")
 	print("    爆炸闪光节点 = %s" % ("有" if _s.t_last_flash() != null and is_instance_valid(_s.t_last_flash()) else "无"))
 	_chk(_s.t_last_flash() != null and is_instance_valid(_s.t_last_flash()), "爆炸应有球状闪光（不是红圈）")
@@ -2007,7 +2007,7 @@ func _initialize() -> void:
 		if pp3.kind == Projectile.KIND_FRAGMENT and pp3.alive: frag += 1
 	print("    4 个回合边界后：破片 %d 枚 ｜ 残留模型 %d ｜ GM 在途 %d" % [
 		frag, _s.t_grenade_models().size(), _s.gm.pending.size()])
-	_chk(frag == 8, "手榴弹 4 回合后应爆炸并撒出 8 枚破片（真实 GM 路径）")
+	_chk(frag == int(Skills.get_def("grenade_launcher")["fragments"]), "手榴弹 4 回合后应爆炸并撒出 %d 枚破片（真实 GM 路径）" % int(Skills.get_def("grenade_launcher")["fragments"]))
 	_chk(_s.t_grenade_models().is_empty(), "爆炸后地上模型应清掉")
 	# 出界防护：钳制 + 移动不会跑出地图
 	var he3: Unit = null

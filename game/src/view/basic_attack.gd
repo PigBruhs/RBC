@@ -224,9 +224,10 @@ func attack_target_placeable(pl: Placeable) -> void:
 
 func apply_attack(attacker: Unit, t: Unit, break_armor: bool,
 		silent: bool = false, bonus_milli: int = 0, power_mult: float = 1.0,
-		power_override: int = -1, break_override: int = -1) -> void:
+		power_override: int = -1, break_override: int = -1,
+		fixed_power: bool = false) -> void:
 	var h: Damage.Hit = Damage.strike(attacker, t, break_armor, _st.rng, bonus_milli, power_mult,
-		power_override, break_override)
+		power_override, break_override, fixed_power)
 	if h == null:
 		return
 	_st._log(h.text)
