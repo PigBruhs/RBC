@@ -230,8 +230,13 @@ static func plan(ctx: Ctx) -> Dictionary:
 	# ③ 都没得做：还没移动 + 状态不满 -> 休息；否则朝评分最高的敌人靠过去
 	# 用户口径（第 86 轮）：**连普攻的精力都付不起时，所有 AI 都必须选休息** ——
 	# 否则会出现"没精力还硬冲上去、这回合什么也做不了"的空转（直升机 4 精力一条最明显）。
+	# 用户口径（第 93 轮）：**满状态就别休息**（休息什么都恢复不了 = 白过一回合）——
+	# 以前"满血满精力 + 前面走不动"会退回休息，看起来就是"满状态直接无操作过回合"。
 	var need_energy: int = maxi(2, AttackProfile.cost_of(me))
-	if not me.has_moved and (me.power_cur < me.power_max * 3 / 4 or me.energy_points() < need_energy):
+	var full_state: bool = me.power_cur >= me.power_max and me.armor_cur >= me.armor_max \
+		and me.energy_points() >= me.energy_max_points()
+	if not me.has_moved and not full_state \
+			and (me.power_cur < me.power_max * 3 / 4 or me.energy_points() < need_energy):
 		return {"action": "rest", "note": "回血/回精力：休息（精力 %d < %d）" % [
 			me.energy_points(), need_energy]}
 	if me.has_moved:
@@ -239,16 +244,24 @@ static func plan(ctx: Ctx) -> Dictionary:
 	var far: Unit = approach
 	if far == null:
 		return {"action": "end", "note": "没有目标"}
-	# 朝目标挪一步：在可达格里挑离它最近的
+	# 朝目标挪一步：在可达格里挑离它最近的。
+	# 第 93 轮：**哨兵回避只对远程/投掷**（和评分口径一致）——
+	# 近战躲哨兵射界会永远贴不上去，一旦所有"更近的格子"都在敌方哨兵圈里，
+	# 以前就退化成"走不动了：休息"，也就是用户报的"满状态无操作"。
 	var step: Vector2i = me.cell
 	var sd := manhattan(me.cell, far.cell)
 	for c in ctx.reachable.keys():
 		var d2 := manhattan(c, far.cell)
-		if d2 < sd and not ctx.sentry_cells.has(c):
-			sd = d2
-			step = c
-	if step == me.cell:
+		if d2 >= sd:
+			continue
+		if me.role != UnitData.Role.MELEE and ctx.sentry_cells.has(c):
+			continue
+		sd = d2
+		step = c
+	if step == me.cell and not full_state:
 		return {"action": "rest", "note": "走不动了：休息"}
+	if step == me.cell:
+		return {"action": "end", "note": "完全走不动（满状态休息也没用）"}
 	return {"action": "move", "move_to": step, "note": "向 %s 靠拢" % far.name}
 
 

@@ -376,10 +376,10 @@ func forget_projectile(id: int) -> void:
 				s.queue.remove_at(i)
 
 
-## 每两支箭之间至少间隔 100ms（用户口径：500 -> 100）
-const SENTRY_FIRE_INTERVAL := 0.1
-## 进入射界后先等这么久才射第一支（用户口径：触发延迟 0 -> 500ms -> **第 92 轮 800ms**）
-const SENTRY_TRIGGER_DELAY := 0.8
+## 每两支箭之间至少间隔 65ms（用户口径第 93 轮：100 -> 65）
+const SENTRY_FIRE_INTERVAL := 0.065
+## 进入射界后先等这么久才射第一支（用户口径：0 -> 500ms -> 800ms -> **第 93 轮 1 秒**）
+const SENTRY_TRIGGER_DELAY := 1.0
 
 
 ## 哨兵队列的每帧推进（view 每帧调用）。返回本次要发射的箭：每个哨兵最多 1 支。

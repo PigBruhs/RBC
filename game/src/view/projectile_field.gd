@@ -164,19 +164,20 @@ func step(delta: float) -> void:
 			orient(node, cur, prev, p.from.distance_to(p.to) / maxf(0.05, p.dur))
 
 		# ① 出界：飞到边界处直接移除（保留飞到边界的动画，不越界）
+		#    第 93 轮：**炮弹类改成"就地引爆"** —— 用户口径第 83 轮就是"炮弹不再因出界消失"，
+		#    可竞技场只是把边界扩到 100×100；敌方直升机在上边（y 大）朝下打，
+		#    "瞄准×2 + 散布"很容易把落点算到 y<0，于是整发凭空消失（没有空爆/直击/破片）。
 		var q := p.pos()
 		if q.x < 0.0 or q.y < 0.0 or q.x > float(grid_w) or q.y > float(grid_h):
 			var cq := Vector2(clampf(q.x, 0.0, float(grid_w)), clampf(q.y, 0.0, float(grid_h)))
 			p.removed_at = cq
 			if node != null and is_instance_valid(node):
 				node.position = Vector3(cq.x, p.height(), cq.y)
-			if p.kind == Projectile.KIND_LOITER:
-				# 巡飞弹是炸药：撞到边界就地引爆，不许凭空消失（第 90 轮）
-				p.kill("out_of_bounds")
-				_report(EV_LANDED, p)
+			p.kill("out_of_bounds")
+			if Ballistics.is_shell_class(p.kind):
+				_report(EV_LANDED, p)       # 炮弹类：按落地结算（河/空场规则在 _land_shell 里）
 			else:
-				p.kill("out_of_bounds")
-				_report(EV_OUT, p)
+				_report(EV_OUT, p)          # 箭矢类：照旧直接移除
 			retire(e)
 			items.remove_at(i)
 			continue

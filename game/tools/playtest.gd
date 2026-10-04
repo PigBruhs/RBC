@@ -28,6 +28,14 @@ func _find_qte() -> ArrowQTE:
 	return _s._find_arrow_qte()
 
 
+## 等直升机的火箭齐射全部出膛（第 93 轮：8 波 / 间隔 1 秒 = 7 秒多）
+func _wait_salvo() -> void:
+	var guard := 0.0
+	while _s._salvo_u != null and guard < 12.0:
+		guard += 0.1
+		await create_timer(0.1).timeout
+
+
 ## 把老国王 / 公主挪到地图角落，免得它们的 AI 与常备哨兵干扰确定性检查
 func _clear_ai_corner() -> void:
 	for u in _s.units:
@@ -125,8 +133,8 @@ func _basic_sig(u: Unit, victim: Unit, entry: String) -> String:
 		int(_s.field.items.size() > 0 or hit_ok > 0), ",".join(PackedStringArray(kinds)),
 		_s.field.items.size(), u.energy_points(), int(u.has_acted), hit_ok]
 	# 齐射/连发是异步的：等它把剩下的打完再交给下一次探测（免得污染下一条入口的计数）
-	# 注意：火箭每两波间隔 1 秒、共 4 波 -> 至少要等 3.1 秒
-	await create_timer(3.7).timeout
+	# 第 93 轮：直升机变成 8 波 / 间隔 1 秒 -> 要等 7 秒多，所以直接等 _salvo_u 清空
+	await _wait_salvo()
 	_s.clear_projectiles()
 	return sig
 
@@ -1150,12 +1158,13 @@ func _initialize() -> void:
 	foe25.visual.position = Vector3(5.5, 0.0, 11.5)   # 队列按视觉位置判定，这里让它站定
 	_s.gm.on_move_begin(foe25)                        # 新的一次移动：闩清零
 	_chk(_s.gm.check_unit(foe25, Vector2(5.5, 11.5)), "新的一次移动应能再次入队")
-	# 用户口径①：进入射界后先等 SENTRY_TRIGGER_DELAY（第 92 轮：500 -> 800ms）才射第一支
+	# 用户口径①：进入射界后先等 SENTRY_TRIGGER_DELAY（第 93 轮：1 秒）才射第一支
 	_chk(_s.gm.sentry_tick(0.2).is_empty(), "进入射界 200ms 内还不该开火")
 	_chk(_s.gm.sentry_tick(0.2).is_empty(), "400ms 仍不该开火")
-	_chk(_s.gm.sentry_tick(0.2).is_empty(), "600ms 仍不该开火（第 92 轮把反应时间改成 800ms）")
+	_chk(_s.gm.sentry_tick(0.2).is_empty(), "600ms 仍不该开火（第 93 轮把反应时间改成 1 秒）")
+	_chk(_s.gm.sentry_tick(0.2).is_empty(), "800ms 仍不该开火")
 	foe25.visual.position = Vector3(5.5, 0.0, 11.0)   # 目标在动（否则按"静止不追击"剔除）
-	var f1: Array = _s.gm.sentry_tick(0.3)            # 累计 900ms > 800ms
+	var f1: Array = _s.gm.sentry_tick(0.3)            # 累计 1.1 秒 > 1 秒
 	var f1_at := "(%.2f, %.2f)" % [f1[0].at.x, f1[0].at.y] if f1.size() > 0 else "-"
 	print("    延迟 %.0fms 之后：射出 %d 支，队列 %d ｜ 瞄准 %s" % [
 		GameMaster.SENTRY_TRIGGER_DELAY * 1000.0, f1.size(), _s.gm.sentry_queue_size(), f1_at])
@@ -1255,7 +1264,8 @@ func _initialize() -> void:
 		p_out.alive, p_out.removed_reason, rings_before, _s.count_impact_rings()])
 	_chk(not p_out.alive, "飞出边界的炮弹应被移除")
 	_chk(p_out.removed_reason == "out_of_bounds", "移除原因应是出界")
-	_chk(_s.count_impact_rings() == rings_before, "出界的炮弹不应产生爆炸红圈")
+	# 第 93 轮：炮弹类飞出物理边界改成"就地引爆"（敌方火箭凭空消失就是这么来的）
+	_chk(_s.count_impact_rings() == rings_before + 1, "飞出边界的炮弹就地爆炸（留下一圈红圈）")
 	_chk(p_out.removed_at.x >= -0.01 and p_out.removed_at.x <= float(_s.GW) + 0.01, "移除时应停在边界处（保留飞行动画）")
 
 	# 哨兵在自己的下一个回合开始时结束
@@ -1512,8 +1522,7 @@ func _initialize() -> void:
 	_s.clear_projectiles()
 	var hp1: int = gerald.power_cur
 	var al_hp: int = alette.power_cur
-	# 第 87 轮：反弹箭只吃 25% 力量 —— 52 × 25% = 13，所以把她的护甲压低到 8
-	# 才能看到伤害（不然 13 - 24 < 0 直接"打不动"，那是数值问题不是链路问题）
+	# 第 93 轮：反弹箭力量系数回到 75%（52 × 75% = 39），护甲照样压低到 8 方便看伤害
 	var al_armor0: int = alette.armor_cur
 	alette.armor_cur = Rules.points_to_milli(8)
 	var arrow2: Projectile = _s._spawn_arrow(alette, Vector3(5.5, 0.75, 12.5),
@@ -1545,15 +1554,15 @@ func _initialize() -> void:
 			refl.shot.caster.name, refl.from, refl.to, d_refl])
 		_chk(refl.shot.caster == alette, "反弹箭绑定的发射者必须是【原射手】，不是杰拉尔德")
 		_chk(refl.shot.caster != gerald, "反弹箭不能记在杰拉尔德头上")
-		_chk(absf(refl.shot.power_mult - 0.25) < 0.0001,
-			"反弹箭只吃 25%% 力量（第 87 轮，实际 %.2f）" % refl.shot.power_mult)
+		_chk(absf(refl.shot.power_mult - 0.75) < 0.0001,
+			"反弹箭力量系数 = 75%%（第 93 轮，实际 %.2f）" % refl.shot.power_mult)
 		_chk(d_refl <= 8.0, "7 格距离的散步很小，落点应贴在射手附近")
 	# 让反弹箭飞完：应该打回射手身上
 	for i in 900:
 		_s.field.step(1.0 / 60.0)
 		if refl != null and not refl.alive:
 			break
-	print("    反弹箭落地后：射手力量 %d -> %d（护甲 %d，25%% 力量系数）" % [
+	print("    反弹箭落地后：射手力量 %d -> %d（护甲 %d，75%% 力量系数）" % [
 		al_hp, alette.power_cur, alette.armor_cur / 1000])
 	_chk(alette.power_cur < al_hp, "反弹的箭应该打回射手身上")
 	alette.armor_cur = al_armor0                # 还原，别影响后面的检查
@@ -1933,17 +1942,20 @@ func _initialize() -> void:
 		if pp.kind == Projectile.KIND_ROCKET: rockets += 1
 	print("    一次普攻：场上火箭 %d 发 ｜ 精力 %d -> %d ｜ 回合已结束=%s" % [
 		rockets, e0, he2.energy_points(), _s.active != he2])
-	_chk(rockets == 2, "第一次齐射应左右各一发（共 4 次、8 发，每两波间隔 1 秒）")
+	_chk(rockets == 2, "第一次齐射应左右各一发（第 93 轮：共 8 次、16 发，每两波间隔 1 秒）")
 	_chk(he2.energy_points() == e0 - 4, "普攻必须消耗 4 点精力")
 	_chk(int(Level.heli()["salvo_gap"]) == 1, "第 83 轮：每两波火箭弹间隔 1 秒")
-	# 齐射是异步的：等它把 4 次打完（间隔 1 秒 -> 至少 3 秒）
-	await create_timer(3.6).timeout
+	# 齐射是异步的：等它把 8 次打完（间隔 1 秒 -> 至少 7 秒）
+	await _wait_salvo()
 	var rockets2 := 0
 	for it2 in _s.field.items:
 		var pp2: Projectile = it2["p"]
 		if pp2.kind == Projectile.KIND_ROCKET: rockets2 += 1
-	print("    齐射完成：场上火箭（含在飞）%d 发" % rockets2)
-	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，3.6 秒内 8 发基本都在飞）")
+	print("    齐射完成：场上火箭（含在飞）%d 发 ｜ 已出膛波次 %d" % [
+		rockets2, (_s._salvo_dbg.get("spawns", []) as Array).size()])
+	_chk(rockets2 >= 6, "齐射应陆续出膛（不等落地，7 秒内 16 发基本都在飞）")
+	_chk((_s._salvo_dbg.get("spawns", []) as Array).size() == int(Level.heli()["salvo_pairs"]),
+		"8 次齐射全部出膛（第 93 轮：4 -> 8）")
 	_chk(_s.active != he2, "发射完即进入下一回合（无需等待落地）")
 	# 坠机：走"受伤"这条真实路径
 	_s.clear_projectiles()
@@ -2294,7 +2306,7 @@ func _initialize() -> void:
 	print("    第二波 %d 发：出膛 %s（应与第一波同一处）" % [wave2.size(), wave2])
 	_chk(wave2.size() == 2, "第二波也应出膛（间隔 1 秒）")
 	_chk(same_spot and (he_e.visual.is_walking() == false), "站定开火：两波都从同一处出膛")
-	await create_timer(3.2).timeout          # 等 4 波打完，别污染后面
+	await _wait_salvo()                      # 等 8 波打完，别污染后面
 	_s.clear_projectiles()
 
 	# ── 41. 敌方直升机坠毁：死亡附加伤害必须打到所有人（不分敌我）──
@@ -3002,6 +3014,58 @@ func _initialize() -> void:
 	print("    飞满 %d 格：引爆=%s ｜ 还在场上=%s" % [
 		int(Loiter.MAX_DIST), p90_boom, p90_far.alive])
 	_chk(p90_boom and not p90_far.alive, "飞满 32 格自动引爆（不会一直飞）")
+	_s.clear_projectiles()
+
+	# ── 55. 火箭飞出物理边界必须就地引爆（第 93 轮：敌方火箭凭空消失的根因）──
+	print("\n[55] 火箭飞出边界 = 就地引爆")
+	_s.clear_projectiles()
+	_s.gm.clear_all_sentries()
+	var p93_he: Unit = _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 1)
+	for p93_u in _s.units:
+		p93_u.cell = Vector2i(2, 44)
+		if p93_u.visual != null:
+			p93_u.visual.position = Vector3(2.5, p93_u.hover, 44.5)
+	p93_he.cell = Vector2i(12, 40)                 # 敌方直升机在"上边"
+	p93_he.visual.position = Vector3(12.5, p93_he.hover, 40.5)
+	p93_he.power_cur = p93_he.power_max
+	p93_he.tags.erase("crashing")
+	p93_he.visual.visible = true
+	_s._debug_log.clear()
+	# 真实战里就是"瞄准×2 + 散布"把落点算到了 y<0（只有从上往下打的敌方会遇到）
+	var p93_rk := Ordnance.make_rocket(p93_he, Vector3(12.5, p93_he.hover + 0.25, 40.5),
+		Vector2(10.5, -6.0), false, _s.rng)
+	_s.field.register(p93_rk)
+	for p93_i in 900:
+		_s.field.step(1.0 / 60.0)
+		if not p93_rk.alive:
+			break
+	var p93_boom := false
+	var p93_out := false
+	for p93_lg in _s._debug_log:
+		if String(p93_lg).contains("火箭落地"):
+			p93_boom = true
+		if String(p93_lg).contains("飞到边界"):
+			p93_out = true
+	print("    火箭 alive=%s 原因='%s' ｜ 落地引爆=%s ｜ 出界移除=%s" % [
+		p93_rk.alive, p93_rk.removed_reason, p93_boom, p93_out])
+	_chk(p93_boom and not p93_out,
+		"炮弹类飞出物理边界要就地引爆（第 93 轮：以前唯一的收尾是「直接移除、无爆炸」）")
+	# 齐射落点必须钳在可行动区域内 —— 这样根本不会飞到界外
+	_s.clear_projectiles()
+	_s.active = p93_he
+	_s._turn_just_finished = p93_he
+	_s._rocket_salvo(p93_he, Vector2(10.5, 2.5))
+	var p93_pts: Array = _s._salvo_dbg.get("rolled", [])
+	var p93_outside := 0
+	for p93_pt in p93_pts:
+		var p93_v: Vector2 = p93_pt
+		if p93_v.x < float(_s.PX) + 0.5 - 0.001 or p93_v.x > float(_s.PX + _s.PW) - 0.5 + 0.001 \
+				or p93_v.y < float(_s.PY) + 0.5 - 0.001 or p93_v.y > float(_s.PY + _s.PH) - 0.5 + 0.001:
+			p93_outside += 1
+	print("    齐射落点 %d 个（第 93 轮：8 波 × 左右各一发），钳进区域外 %d 个" % [
+		p93_pts.size(), p93_outside])
+	_chk(p93_pts.size() == int(Level.heli()["rockets"]) and p93_outside == 0,
+		"直升机齐射落点全部钳在可行动区域内（%d 发）" % int(Level.heli()["rockets"]))
 	_s.clear_projectiles()
 
 	print("\n── 共 %d 项检查，失败 %d 项 ──" % [_checks, _fails.size()])

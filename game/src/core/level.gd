@@ -224,10 +224,10 @@ const HELI_DEFAULTS := {
 	"move_mult": 2.0,        # 移动速度为一般角色两倍（数据行里已给 20 格）
 	"basic_cost": 4,         # 普攻（吊射 37mm 火箭）精力消耗
 	"aim_mult": 2.0,         # 瞄准结果翻倍：先前飞 x 格，现在 2x
-	"salvo_pairs": 4,        # 一共四次
+	"salvo_pairs": 8,        # 一共八次齐射（第 93 轮：4 -> 8）
 	"salvo_gap": 1.0,        # 每次间隔 1 秒（用户口径第 83 轮：250ms -> 1s）
 	"scatter_r": 4.0,        # 落点：半径 4 格圆内随机（第 83 轮 4 -> 8，第 92 轮改回 4）
-	"rockets": 8,            # 一共 8 发
+	"rockets": 16,           # 一共 16 发（8 波 × 左右各一发；第 93 轮随波次翻倍）
 	"crash_threshold": 21,   # 力量低于 21 坠机
 	"crash_r": 2.5,          # 坠机炮击半径
 	"crash_power": 20,

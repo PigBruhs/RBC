@@ -229,7 +229,7 @@ var arrow_qte: ArrowQTE = null
 var _pending_turn_end := false            # QTE 期间攒下的"该结束回合了"
 var _ai_turn := false                     # 正在跑 AI 回合（不弹菜单、不锁操作）
 const KING_FIRE_TURNS := 5                # 老国王每 5 个回合边界开一炮（GM 计时）
-const SENTRY_AIM_BALL_R := 1.0           # 哨兵瞄准球半径（用户口径：1 格）
+const SENTRY_AIM_BALL_R := 2.0           # 哨兵瞄准球半径（用户口径第 93 轮：1 格 -> 2 格）
 const HELI_PREFIX := AttackProfile.HELI_PREFIX   # 悬浮 + 火箭齐射 + 坠机/俯冲都按这个名字前缀识别
 # 三连发的发数与间隔、谁用近战/弓箭/投掷，全部来自 AttackProfile（见 core/attack_profile.gd）
 var game_over := false                    # 分出胜负了（自动演算用）
@@ -2397,12 +2397,13 @@ var _salvo_dbg: Dictionary = {}
 
 
 ## ── 直升机的吊射 37mm 火箭：8 发、4 次齐射（左右各一发）、每次间隔 1 秒 ────────
-## 用户口径：普攻需 4 精力；瞄准同投掷手但"结果翻倍"（先前飞 x 格现在飞 2x 格）；
-## 落点 = 以瞄准落点为圆心、半径 8 格圆内随机 8 个点；每发直击范围 = 半径 1 格圆。
-## 精力消耗与"已行动"标记由 _perform_basic 统一处理（唯一入口），这里只管表现与弹道。
-##
-## 用户口径（第 86 轮）：**移动结束后才能释放技能或普攻** —— 所以不再有"边走边打"分支：
-## 一律以开火那一刻的【当前位置】为基准（未移动时就是脚下格中心），落点在开火瞬间一次掷好。
+## 用户口径第 93 轮：**波次 4 -> 8**（每波仍然左右各一发 -> 一共 16 发）。
+## 注意：8 波要 7 秒才打完，所以它有了自己的"回合占用"标记 _salvo_u ——
+##   · AI 回合看门狗在齐射期间不计时（否则 7 秒的齐射会被 9 秒看门狗砍断）
+##   · 齐射收尾时只有"这一发还是当前回合的主人"才结束回合（否则会去结束下一个人的回合）
+var _salvo_u: Unit = null
+
+
 func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var cfg := Level.heli()
 	var base := _unit_pos(u)
@@ -2424,13 +2425,19 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 		side = Vector2.RIGHT
 	var perp := Vector2(-side.y, side.x)
 	# 落点在开火瞬间一次性掷好（每波取其中两发）
+	# 第 93 轮：**落点钳进可行动区域** —— "瞄准×2 + 散布 4" 很容易把落点算到竞技场外，
+	# 那种落点会一路飞出物理边界（以前被"直接移除"，也就是敌方火箭凭空消失的主因）。
 	var rolled: Array[Vector2] = []
 	for i0 in rockets:
 		var ang0 := rng.next_float() * TAU
 		var rr0 := scatter * sqrt(rng.next_float())        # 圆内均匀
-		rolled.append(doubled + Vector2(cos(ang0) * rr0, sin(ang0) * rr0))
+		var pt := doubled + Vector2(cos(ang0) * rr0, sin(ang0) * rr0)
+		pt.x = clampf(pt.x, float(PX) + 0.5, float(PX + PW) - 0.5)
+		pt.y = clampf(pt.y, float(PY) + 0.5, float(PY + PH) - 0.5)
+		rolled.append(pt)
 	# 自检用：把这次齐射的基准与落点记下来（试玩直接读）
 	_salvo_dbg = {"base": base, "rolled": rolled, "spawns": []}
+	_salvo_u = u                                   # 齐射期间"占着回合"（看门狗让位）
 	for k in pairs:
 		(_salvo_dbg["spawns"] as Array).append(base)
 		for i in per:
@@ -2444,8 +2451,13 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 			u.name, k + 1, pairs, doubled.x, doubled.y, scatter, base.x, base.y])
 		if k < pairs - 1:
 			await get_tree().create_timer(gap).timeout
-	# 用户口径：发射完即进入下一回合，无需等待落地
-	_finish_turn()
+	_salvo_u = null
+	# 用户口径：发射完即进入下一回合，无需等待落地。
+	# 第 93 轮：**只有"这一发还是当前回合的主人"时才收尾** —— 8 波要 7 秒，
+	# 中途可能已经被看门狗/阵亡/换人收过尾了，这里再去 _finish_turn 会结束【下一个人】的回合。
+	if active == u:
+		_finish_turn()
+	_log("  🚁 %s 的火箭齐射全部出膛（%d 波 / %d 发）" % [u.name, pairs, rockets])
 
 
 ## ── 枪榴弹：地上的模型 + 4 回合后爆炸出 8 枚破片 ─────────────────────────
@@ -4503,8 +4515,11 @@ func _tick_heli_fx(delta: float) -> void:
 			continue
 		HeliFx.tick(u.visual, u, delta)
 		_heli_shadow(u)
-	# AI 回合看门狗：万一某条异步路径没结束回合，也不许把游戏卡死
-	if active != null and _is_ai_unit(active) and not get_tree().paused and _dive.is_empty():
+	# AI 回合看门狗：万一某条异步路径没结束回合，也不许把游戏卡死。
+	# 第 93 轮：直升机 8 波齐射要 7 秒（还有走路），看门狗必须让位，否则会把齐射砍断、
+	# 再由齐射的收尾去结束下一个人的回合。
+	if active != null and _is_ai_unit(active) and not get_tree().paused \
+			and _dive.is_empty() and _salvo_u == null:
 		_turn_watch_t += delta
 		if _turn_watch_t > 9.0:
 			_log("  ⚠ AI 回合超时（%.0f 秒未结束），强制结束以免软锁：%s" % [_turn_watch_t, active.name])

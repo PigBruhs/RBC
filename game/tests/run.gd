@@ -534,17 +534,18 @@ func _initialize() -> void:
 	_expect(fr_p.hit_tags.is_empty() and not fr_p.sentry_trigger, "破片是箭矢类：不会被击落、不惊动哨兵", fails)
 	_expect(fr_p.from.distance_to(fr_p.pos()) < 0.01 and not fr_p.alive == false, "破片从生成点出发", fails)
 	var fr_vals := [
-		[0.0, 12500], [1.5, 9250], [3.0, 6000], [9.5, 3000], [16.0, 0], [20.0, 0]]
+		[0.0, 16000], [1.5, 12000], [3.0, 8000], [9.5, 4000], [16.0, 0], [20.0, 0]]
 	for row in fr_vals:
 		var d: float = row[0]
 		var pw: int = Damage.fragment_power_milli(d)
 		var bk: int = Damage.fragment_break_milli(d)
 		print("    距离 %4.1f 格 → 力 %s / 甲 %s（千分比 %d）" % [d, pw / 1000.0, bk / 1000.0, pw])
-		_expect(pw == int(row[1]) and bk == int(row[1]), "破片 %.1f 格伤害 = %d 千分比" % [d, int(row[1])], fails)
-	# 用户口径（第 83 轮）：破片伤害 = 原来的一半
-	_expect(Damage.fragment_power_milli(0.0) == 12500 and Damage.fragment_break_milli(0.0) == 12500,
-		"破片贴脸伤害 12.5/12.5（原 25/25 的一半）", fails)
-	_expect(Damage.fragment_power_milli(3.0) == 6000, "破片 3 格伤害 6（原 12 的一半）", fails)
+		_expect(pw == int(row[1]), "破片 %.1f 格力量 = %d 千分比" % [d, int(row[1])], fails)
+	# 第 93 轮：破片 = **8 破甲 + 16 力量**（0 格），3 格减半
+	_expect(Damage.fragment_power_milli(0.0) == 16000 and Damage.fragment_break_milli(0.0) == 8000,
+		"破片贴脸 = 16 力量 / 8 破甲（第 93 轮）", fails)
+	_expect(Damage.fragment_power_milli(3.0) == 8000 and Damage.fragment_break_milli(3.0) == 4000,
+		"破片 3 格 = 8 力量 / 4 破甲（减半）", fails)
 
 	# ── 俯冲轰炸直升机（第 1 步：数据 + 场景元数据）──
 	print("\n── 直升机 ──")
@@ -554,8 +555,8 @@ func _initialize() -> void:
 		if String(d["name"]) == heli_name:
 			heli_d = d
 	_expect(not heli_d.is_empty(), "花名册里有直升机（名字含全角括号）", fails)
-	_expect(int(heli_d.get("power", 0)) == 41 and int(heli_d.get("armor", 0)) == 12,
-		"直升机 41 力 / 12 甲", fails)
+	_expect(int(heli_d.get("power", 0)) == 41 and int(heli_d.get("armor", 0)) == 0,
+		"直升机 41 力 / 0 甲（第 93 轮：移除护甲）", fails)
 	_expect(int(heli_d.get("energy_max", 0)) == 6 and int(heli_d.get("move", 0)) == 20,
 		"精力 6 / 移动 20", fails)
 	_expect(int(heli_d.get("role", -1)) == UnitData.Role.THROWER, "套皮投掷手", fails)
@@ -1012,10 +1013,10 @@ func _initialize() -> void:
 	_expect(due_gd.size() == 1 and String(due_gd[0].skill_id) == "grenade",
 		"投出者已阵亡，解耦的枪榴弹照样 4 个回合边界后引爆", fails)
 
-	# ── 杰拉尔德反弹：只吃 25% 力量（第 87 轮）──
+	# ── 杰拉尔德反弹：力量系数 75%（第 93 轮从 25% 改回）──
 	print("\n── 箭矢弹反力量系数 ──")
 	var refl_mult: float = float(Passives.def("arrow_deflect").get("power_mult", 1.0))
-	_expect(absf(refl_mult - 0.25) < 0.0001, "反弹箭力量系数 = 25%", fails)
+	_expect(absf(refl_mult - 0.75) < 0.0001, "反弹箭力量系数 = 75%（第 93 轮）", fails)
 	var rf_src := Unit.from_data(by_name["萨尼铁塔"])
 	rf_src.power_cur = Rules.points_to_milli(40)
 	var rf_tgt := Unit.from_data(by_name["Gerald"])
@@ -1024,8 +1025,8 @@ func _initialize() -> void:
 	rf_tgt.power_cur = rf_tgt.power_max
 	Damage.strike(rf_src, rf_tgt, false, RngService.new(13), 0, refl_mult)
 	var rf_dmg: int = rf_tgt.power_max - rf_tgt.power_cur
-	_expect(rf_dmg == Rules.points_to_milli(10),
-		"反弹伤害 = 40 × 25%% = 10（实际 %d 千分比）" % rf_dmg, fails)
+	_expect(rf_dmg == Rules.points_to_milli(30),
+		"反弹伤害 = 40 × 75%% = 30（实际 %d 千分比）" % rf_dmg, fails)
 
 	# ── 身体高度按"它现在真的在哪"算（第 89 轮）──
 	print("\n── 身体高度（第 89 轮）──")
@@ -1166,6 +1167,42 @@ func _initialize() -> void:
 	_expect(Loiter.is_target(lt_foe) and not Loiter.is_target(lt_friend)
 		and not Loiter.is_target(null),
 		"发射器只把敌方角色当目标（友军/空 都不打）", fails)
+
+	# ── 近战 AI 不许"满状态无操作过回合"（第 93 轮修的真 bug）──
+	print("\n── AI：满状态近战的走位（第 93 轮）──")
+	var ai_me := _enemy_of(by_name, "Gerald")          # 敌方近战，满状态
+	ai_me.cell = Vector2i(10, 34)
+	var ai_foe := Unit.from_data(by_name["Gerald"])    # 我方目标
+	ai_foe.cell = Vector2i(10, 24)
+	var ai_ctx := Ai.Ctx.new()
+	ai_ctx.me = ai_me
+	ai_ctx.foes = [ai_foe] as Array[Unit]
+	ai_ctx.rng = RngService.new(5)
+	var step_cells: Array[Vector2i] = []
+	for y in range(29, 34):                            # 只有这些格子更接近目标
+		step_cells.append(Vector2i(10, y))
+		ai_ctx.reachable[Vector2i(10, y)] = true
+	for y in range(25, 35):                            # 全都在敌方哨兵射界里
+		ai_ctx.sentry_cells[Vector2i(10, y)] = true
+	var ai_plan := Ai.plan(ai_ctx)
+	print("    满状态近战 + 前进格全在敌方哨兵圈：%s" % [ai_plan.get("note", "-")])
+	_expect(String(ai_plan.get("action", "")) == "move",
+		"近战不因哨兵射界放弃前进（第 93 轮：以前退化成「走不动了：休息」）", fails)
+	_expect(ai_plan.has("move_to"), "给出的落点是可达格", fails)
+	# 满状态且完全走不动：不许选休息（休息什么都恢复不了）
+	var ai_ctx2 := Ai.Ctx.new()
+	ai_ctx2.me = ai_me
+	ai_ctx2.foes = [ai_foe] as Array[Unit]
+	ai_ctx2.rng = RngService.new(5)
+	var ai_plan2 := Ai.plan(ai_ctx2)
+	print("    满状态 + 一个可达格都没有：%s" % [ai_plan2.get("note", "-")])
+	_expect(String(ai_plan2.get("action", "")) != "rest",
+		"满状态时不许选休息（第 93 轮：那等于白过一回合）", fails)
+	# 不满状态仍然要休息（保留第 86 轮口径）
+	ai_me.energy = 0
+	var ai_plan3 := Ai.plan(ai_ctx2)
+	print("    精力 0 + 没得打：%s" % [ai_plan3.get("note", "-")])
+	_expect(String(ai_plan3.get("action", "")) == "rest", "没精力时照旧选休息", fails)
 
 	# ── 汇总 ──
 	print("── 规则自检 ──")

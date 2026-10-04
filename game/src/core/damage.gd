@@ -145,14 +145,14 @@ static func bullet_mult(dist: float) -> float:
 
 
 ## ── 破片伤害曲线（用户口径，单位：格 / 点数）────────────────────────────────
-##   0 格：25 力 + 25 甲 ｜ 3 格：12 力 + 12 甲 ｜ 16 格：0（仍可命中）｜ 20 格：模型消失
+##   0 格：16 力 + 8 甲 ｜ 3 格：8 力 + 4 甲 ｜ 16 格：0（仍可命中）｜ 20 格：模型消失
 const FRAG_NEAR_DIST := 3.0
 const FRAG_FAR_DIST := 16.0
-## 用户口径（第 83 轮）：破片伤害整体降为原来的一半 —— 0 格 12.5/12.5 → 3 格 6/6 → 16 格 0
-const FRAG_NEAR_POWER := 12.5
-const FRAG_NEAR_BREAK := 12.5
-const FRAG_MID_POWER := 6.0
-const FRAG_MID_BREAK := 6.0
+## 第 93 轮：**8 破甲 + 16 力量**（0 格），3 格减半（8 力 / 4 甲），16 格归零
+const FRAG_NEAR_POWER := 16.0
+const FRAG_NEAR_BREAK := 8.0
+const FRAG_MID_POWER := 8.0
+const FRAG_MID_BREAK := 4.0
 
 static func fragment_power_milli(dist: float) -> int:
 	return _frag_lerp(dist, FRAG_NEAR_POWER, FRAG_MID_POWER, 0)
