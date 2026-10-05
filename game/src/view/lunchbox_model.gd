@@ -351,13 +351,20 @@ func t_traverse() -> Node3D:
 	return _turret
 
 
-## 枪口在**本地坐标**里的位置（探针核对"枪口离地 1.3 格 / 横向偏 0.6 格 / 朝向 theta,phi"用）
-func muzzle_local() -> Vector3:
-	var th := deg_to_rad(_theta)
-	var ph := deg_to_rad(_phi)
+## 炮口在**本地坐标**里的位置（= 支点 + 朝向 × 炮管长）。
+## ⚠ 这是炮口位置的**唯一实现** —— `battle_scene._lb_muzzle` 通过它取炮口，
+##   不要再各写一份（第 106 轮踩过：两份实现并存，用了漏掉炮管长度的那份）。
+func muzzle_local_at(theta_deg: float, phi_deg: float) -> Vector3:
+	var th := deg_to_rad(theta_deg)
+	var ph := deg_to_rad(phi_deg)
 	# 格坐标方向 (cosθ, sinθ) 在本模型里映射到世界 (x, z)
 	var dir := Vector3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th))
 	return Vector3(TURRET_X, TURRET_Y, 0.0) + dir * BARREL_LEN
+
+
+## 当前朝向下的炮口（用模块自己记的 theta/phi）
+func muzzle_local() -> Vector3:
+	return muzzle_local_at(_theta, _phi)
 
 
 func _mat(c: Color, rough: float) -> StandardMaterial3D:

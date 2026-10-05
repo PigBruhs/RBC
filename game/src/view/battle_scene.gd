@@ -1090,11 +1090,21 @@ func _lb_center(u: Unit) -> Vector2:
 	return Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 1.0)
 
 
-## 枪口世界坐标：车体中心 + 模型里的炮塔偏移（左手边 0.6 格、离地 1.3 格）
+## 炮口在**世界**坐标里的位置。
+## ⚠ 第 106 轮修正：以前这里只算到**支点**（`TURRET_Y`），**漏了沿瞄准方向的那段炮管** ——
+##   而 `LunchboxModel.muzzle_local()` 本来就对（`支点 + 方向 × BARREL_LEN`）。
+##   两个实现并存、且用了错的那个：子弹会从炮塔支点而不是炮口射出；
+##   炮管 1.2 格时，竖直方向最多差 `1.2 × sin(phi)`（phi=60° 时约 1.04 格）。
+##   现在**统一到模型那一处**，不再各算一份。
 func _lb_muzzle(u: Unit, st: Dictionary) -> Vector3:
-	var ml := Vector3(LunchboxModel.TURRET_X, LunchboxModel.TURRET_Y, 0.0)
 	var c := _lb_center(u)
-	return Vector3(c.x + ml.x, ml.y, c.y + ml.z)
+	var m := _lb_model(u)
+	var aim: Lunchbox.Aim = st["aim"]
+	if m != null:
+		var ml: Vector3 = m.muzzle_local_at(aim.theta, aim.phi)
+		return Vector3(c.x + ml.x, ml.y, c.y + ml.z)
+	# 模型还没挂上（理论上不会走到）：退回支点，至少不崩
+	return Vector3(c.x + LunchboxModel.TURRET_X, LunchboxModel.TURRET_Y, c.y)
 
 
 func _lb_model(u: Unit) -> LunchboxModel:

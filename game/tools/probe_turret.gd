@@ -28,7 +28,7 @@ func _initialize() -> void:
 	root.add_child(m)
 	await process_frame
 
-	print("[1] 炮管 = 水平放置的正六边形棱柱，长 0.70 格，比旧值大")
+	print("[1] 炮管 = 水平放置的正六边形棱柱，长 1.20 格（第 106 轮：0.70 -> 1.20）")
 	# ⚠ 必须用模块自己的门面定位炮管：车顶右侧的巡飞弹发射器**也有一圈六边形光环**
 	#   （同样 radial_segments == 6），靠"找六边形"会抓错东西。
 	var prism: MeshInstance3D = m.t_prism()
@@ -92,6 +92,56 @@ func _initialize() -> void:
 		"theta=90° 时中轴线转向另一条水平轴（%s）" % str(other))
 	_chk(absf(fwd.dot(other)) < 0.05, "theta 0° 与 90° 的中轴线**互相垂直**（%.3f）" % fwd.dot(other))
 
+	print("\n[4b] 炮管轴线**离车顶一格**（第 106 轮用户口径）")
+	# ⚠ 这条以前**一条断言都没有** —— mod-fx 独立复核时发现：把 TURRET_LIFT 改回旧值，
+	#   探针照样 23 项全绿。第 106 轮最核心的口径没有回归网，所以补上。
+	var roof_y: float = LunchboxModel.ROOF_Y
+	var want_axis: float = roof_y + LunchboxModel.TURRET_LIFT
+	var pivot_w: Vector3 = m.t_traverse().global_position
+	print("      车顶 ROOF_Y = %.3f ｜ 抬升 TURRET_LIFT = %.3f ｜ 轴线应在 y = %.3f" % [
+		roof_y, LunchboxModel.TURRET_LIFT, want_axis])
+	print("      实测高低机原点世界 y = %.3f" % pivot_w.y)
+	_chk(absf(pivot_w.y - want_axis) < 0.001,
+		"炮管轴线在 y=%.3f（实测 %.3f）" % [want_axis, pivot_w.y])
+	_chk(absf(LunchboxModel.TURRET_LIFT - 1.0) < 0.001,
+		"离**车顶** 1.0 格（用户口径『炮管离车高度改为一格』，实际 %.3f）" % LunchboxModel.TURRET_LIFT)
+
+	print("\n[4c] 支撑圆柱从**车顶**跨到**炮管**")
+	var stick2: MeshInstance3D = null
+	for c in m.get_children():
+		if c is MeshInstance3D:
+			var mm2 := (c as MeshInstance3D).mesh
+			if mm2 is CylinderMesh and (mm2 as CylinderMesh).radial_segments == 8:
+				stick2 = c
+	_chk(stick2 != null, "找得到支撑圆柱")
+	if stick2 != null:
+		var span: float = (stick2.mesh as CylinderMesh).height
+		var want_span: float = LunchboxModel.TURRET_Y - roof_y
+		print("      棍长 = %.3f ｜ 要求 = TURRET_Y(%.3f) - ROOF_Y(%.3f) = %.3f" % [
+			span, LunchboxModel.TURRET_Y, roof_y, want_span])
+		_chk(absf(span - want_span) < 0.001, "棍长正好跨过车顶到炮管（%.3f）" % want_span)
+		var want_mid: float = (roof_y + LunchboxModel.TURRET_Y) * 0.5
+		_chk(absf(stick2.position.y - want_mid) < 0.001,
+			"圆柱中点 = %.3f（要求 (ROOF_Y+TURRET_Y)/2 = %.3f）" % [stick2.position.y, want_mid])
+
+	print("\n[4d] 炮口 = 支点 + 朝向 × 炮管长（**唯一实现**）")
+	var pv0 := Vector3(LunchboxModel.TURRET_X, LunchboxModel.TURRET_Y, 0.0)
+	var mz0: Vector3 = m.muzzle_local_at(0.0, 0.0)
+	print("      theta=0 phi=0 炮口本地 = %s ｜ 支点 = %s" % [str(mz0), str(pv0)])
+	_chk(absf(mz0.y - pv0.y) < 0.001, "phi=0 时炮口与支点等高（%.3f）" % mz0.y)
+	_chk(absf((mz0 - pv0).length() - LunchboxModel.BARREL_LEN) < 0.001,
+		"炮口到支点距离 = 炮管长 %.3f（实测 %.3f）" % [
+			LunchboxModel.BARREL_LEN, (mz0 - pv0).length()])
+	# ⚠ 这条是"子弹从炮口而不是支点射出"的回归网（第 106 轮修过一个漏加炮管长度的实现）
+	var mz60: Vector3 = m.muzzle_local_at(0.0, 60.0)
+	var want_up: float = LunchboxModel.BARREL_LEN * sin(deg_to_rad(60.0))
+	print("      theta=0 phi=60 炮口本地 = %s（抬高 %.3f，要求 %.3f）" % [
+		str(mz60), mz60.y - pv0.y, want_up])
+	_chk(absf(mz60.y - (pv0.y + want_up)) < 0.001,
+		"phi=60 时炮口抬高 = BARREL_LEN × sin60° = %.3f" % want_up)
+	m.set_aim(0.0, 60.0)
+	_chk((m.muzzle_local() - mz60).length() < 0.001, "muzzle_local() 与 muzzle_local_at() 一致")
+
 	print("\n[5] 热量 -> 颜色 + 亮度（整根一起变红、变红同时变亮）")
 	var mat: StandardMaterial3D = prism.material_override as StandardMaterial3D
 	_chk(mat != null, "棱柱用**单一材质**覆盖整根 -> 天然『整根一起变红』")
@@ -131,19 +181,6 @@ func _initialize() -> void:
 	_chk(mat.emission_enabled, "热量 1 时自发光开启")
 
 	_finish()
-
-
-## 在整棵子树里找 radial_segments == 6 的 CylinderMesh
-func _find_hex(n: Node) -> MeshInstance3D:
-	for c in n.get_children():
-		if c is MeshInstance3D:
-			var mm := (c as MeshInstance3D).mesh
-			if mm is CylinderMesh and (mm as CylinderMesh).radial_segments == 6:
-				return c
-		var got := _find_hex(c)
-		if got != null:
-			return got
-	return null
 
 
 ## 棱柱中轴线在**世界**里的方向（顶面中心 - 底面中心）
