@@ -103,6 +103,34 @@ var ignore_placeable: Placeable = null
 ## 这一发不受玩家制导（第 91 轮：场上已经有别的巡飞弹时，新发射的那一发就是"多余的"）
 var no_control: bool = false
 
+# ── 子弹的地板碰撞（第 108 轮用户口径）────────────────────────────────────────
+## 「给子弹增加地板碰撞：子弹碰到地板后 **75% 的概率消失，25% 的概率反弹**」
+## · 只作用于**两种子弹**（萨尼 `KIND_BULLET` / 车 `KIND_CART_BULLET`）——
+##   炮弹/箭矢/巡飞弹各有自己的落地规则，一个都不碰（判定处按 `is_bullet_class()` 过滤）。
+## · 判定在 `projectile_field.step` 里用**线段穿越**（`prev.y > 0 且 cur.y <= 0`）——
+##   子弹 12 格/秒、一帧约 0.2 格，点采样会漏掉高速穿地。
+const FLOOR_VANISH_CHANCE := 0.75
+## 反弹次数上限 = **1 次**。理由：a) 用户只要求"25% 反弹"，没要求乒乓；
+## b) 反弹后弹道已偏离瞄准方向，再弹没有战术意义，却会延长存活、放大跨图误伤；
+## c) 上限 1 次让长期比例仍然收敛（弹过一次之后再撞地必消失）。
+const FLOOR_MAX_BOUNCES := 1
+## 已经反弹过几次（上限见 `FLOOR_MAX_BOUNCES`）
+var bounces: int = 0
+
+
+## 是不是"子弹"（两种子弹共用一套地板规则；炮弹/箭矢/巡飞弹都不算）
+func is_bullet_class() -> bool:
+	return kind == KIND_BULLET or kind == KIND_CART_BULLET
+
+
+## 撞地反弹：**把 y 关于 0 镜像**（`y -> -y`），水平方向 / 速度 / 存活距离全部不变 ——
+## 于是它沿一条**新的直线段**向上飞（不是抛物线：`arc_scale` 保持 0，**不引入重力**）。
+func mirror_about_floor() -> void:
+	y0 = -y0
+	y1 = -y1
+	bounces += 1
+	recalc_apex()
+
 static var _next_id: int = 1
 
 

@@ -186,6 +186,11 @@ func on_projectile_event(event: String, p: Projectile, extra = null) -> void:
 		ProjectileField.EV_OUT:
 			_st._log("  ✈ %s 的%s飞到边界 (%.1f, %.1f)，直接移除（无爆炸）" %
 				[p.owner_name, ProjectileField.kind_cn(p.kind), p.removed_at.x, p.removed_at.y])
+		ProjectileField.EV_FLOOR:
+			# 第 108 轮：子弹撞地（75% 消失 / 25% 反弹，见 `projectile_field.step`）。
+			# ⚠ 与 `EV_OUT` 分开只为**文案准确** —— 后续处理一样是"直接移除、无爆炸"。
+			_st._log("  ⌄ %s 的%s撞地 (%.1f, %.1f)，直接移除（无爆炸）" %
+				[p.owner_name, ProjectileField.kind_cn(p.kind), p.removed_at.x, p.removed_at.y])
 		ProjectileField.EV_HIT_PROJ:
 			var victim: Projectile = extra
 			_st._log("  💥 %s的%s 被%s击落" % [p.owner_name, ProjectileField.kind_cn(p.kind),

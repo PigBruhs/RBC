@@ -32,6 +32,10 @@ const ARROW_LINGER_SEC := 2.0
 
 # 上报给 hub 的事件名
 const EV_OUT := "out_of_bounds"       # 飞出边界
+## 子弹**撞地**（第 108 轮：地板碰撞）。⚠ 与 `EV_OUT` 分开：
+## 后续处理都是"直接移除、无爆炸"，但**文案不同** ——
+## 撞地却写"飞到边界"会误导（用户看得见战斗日志）。
+const EV_FLOOR := "floor_hit"
 const EV_HIT_PROJ := "hit_projectile" # 打中另一发弹道物
 const EV_HIT_TARGET := "hit_target"   # 打中角色/沙盒道具（直接命中型）
 const EV_HIT_BODY := "hit_body"       # 炮弹类飞行中撞到角色 -> 当成在命中处落地（用户口径第 87 轮）
@@ -45,15 +49,26 @@ var log_fn: Callable = Callable()
 var grid_w: int = 48
 var grid_h: int = 48
 
+## ── 子弹地板反弹的骰子（第 108 轮）────────────────────────────────────────────
+## ⚠ 本模块是 `RefCounted`，**没有宿主 `_st`**（那是 battle_scene 内部模块的写法）——
+## 随机源只能**注入**：`setup(..., p_rng)`（调用点 `battle_scene.gd` 由 Lead 改）。
+## 传 `null`（或老调用点不传）时退化成场自己的固定种子流 —— 既不会崩，
+## 也让概率行为在同一次运行里可复现。注入项目的 `RngService` 时与全局同一股随机流，
+## 同种子整局可复现（推荐）。
+var floor_rng: RngService = null
+
 ## 每一条：{"p": Projectile, "node": Node3D, "prev": Vector2, "linger_until": float}
 var items: Array = []
 var clock: float = 0.0            # 场自己的时间（箭矢留存计时用）
 
 
-func setup(p_parent: Node3D, p_hub: GameMaster, p_hit_test: Callable) -> void:
+func setup(p_parent: Node3D, p_hub: GameMaster, p_hit_test: Callable,
+		p_rng: RngService = null) -> void:
 	parent = p_parent
 	hub = p_hub
 	hit_test = p_hit_test
+	# 第 108 轮：地板反弹的随机源。注入则用项目的流；不注入则用场自己的固定种子流。
+	floor_rng = p_rng if p_rng != null else RngService.new(0x5EED)
 
 
 func _log(line: String) -> void:
@@ -165,6 +180,33 @@ func step(delta: float) -> void:
 			node.visible = true
 			node.position = cur
 			orient(node, cur, prev, p.from.distance_to(p.to) / maxf(0.05, p.dur))
+
+		# ①·5 子弹的地板碰撞（第 108 轮用户口径："子弹碰到地板后 75% 消失、25% 反弹"）
+		#   · **只对两种子弹**（`is_bullet_class`）：炮弹/箭矢/巡飞弹的落地规则一个字不动
+		#   · **线段穿越判定**（prev.y > 0 且 cur.y <= 0）：12 格/秒 × 一帧 ≈ 0.2 格，
+		#     点采样会漏掉"一帧跨过 y=0"的情况，所以必须用穿越（临时脚本 ⑤ 有专项验证）
+		#   · 反弹 = `mirror_about_floor()`：y 关于 0 镜像、水平不变、**不引入重力**；
+		#     上限 `FLOOR_MAX_BOUNCES` 次，超过就一律消失
+		#   · 消失走 `EV_FLOOR`（= 箭矢类"直接移除、无爆炸"）——⚠ 不能用 `EV_LANDED`：
+		#     那个事件在 sink 里是**炮弹落地结算**（会触发爆炸），子弹不该炸
+		#   · 与 `EV_OUT` 分开是为了**文案准确**（撞地 vs 飞到边界，用户看得见日志）
+		if p.is_bullet_class() and prev.y > 0.0 and cur.y <= 0.0:
+			var rng: RngService = floor_rng
+			var bounce: bool = p.bounces < Projectile.FLOOR_MAX_BOUNCES \
+				and rng != null and rng.next_float() < (1.0 - Projectile.FLOOR_VANISH_CHANCE)
+			if bounce:
+				p.mirror_about_floor()
+				if node != null and is_instance_valid(node):
+					node.position = p.pos3()
+			else:
+				p.removed_at = p.pos()
+				if node != null and is_instance_valid(node):
+					node.position = Vector3(p.removed_at.x, 0.0, p.removed_at.y)
+				p.kill("landed_on_ground")
+				_report(EV_FLOOR, p)
+				retire(e)
+				items.remove_at(i)
+				continue
 
 		# ① 出界：飞到边界处直接移除（保留飞到边界的动画，不越界）
 		#    第 93 轮：**炮弹类改成"就地引爆"** —— 用户口径第 83 轮就是"炮弹不再因出界消失"，
