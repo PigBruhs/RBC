@@ -1036,10 +1036,16 @@ func _initialize() -> void:
 	_expect(AttackProfile.cost_of(Unit.from_data(by_name["Gerald"])) == 0, "近战普攻不花精力", fails)
 	_expect(AttackProfile.aim_of(heli_u2) == AttackProfile.AIM_DRAG,
 		"直升机普攻走拖拽瞄准（与投掷手同一手感）", fails)
-	# 第 86 轮：爬升轰炸 + 2.5 格/秒
+	# 第 86 轮：爬升轰炸 + 2.5 格/秒；**第 109 轮：技能时移速翻倍 → 5.0**
 	var hcfg := Level.heli()
-	_expect(absf(float(hcfg["climb_speed"]) - 2.5) < 0.001,
-		"直升机技能移动速度 2.5 格/秒（含技能）", fails)
+	_expect(absf(float(hcfg["climb_speed"]) - 5.0) < 0.001,
+		"直升机技能移动速度 5.0 格/秒（第 109 轮：技能时移速翻倍，去程与返航都翻）", fails)
+	# 第 109 轮：技能射程 20 -> 64。⚠ 真值源是 `Skills.get_def("dive_bomb")["range_max"]`
+	# （`Level.heli()["dive_range"]` 历史遗留、当前无读取者；两处都断言，防止再次分叉）
+	_expect(absf(float(hcfg["dive_range"]) - 64.0) < 0.001,
+		"直升机技能射程 64 格（Level 侧）", fails)
+	_expect(absf(float(Skills.get_def("dive_bomb")["range_max"]) - 64.0) < 0.001,
+		"直升机技能射程 64 格（Skills 侧 = 真正生效的那个）", fails)
 	_expect(float(hcfg["climb_h"]) > 0.15 + float(hcfg["drop_blast_r"]),
 		"爬升高度 %.1f 格要够高（投弹三维球半径 %.1f -> 球顶 %.2f）" % [
 			float(hcfg["climb_h"]), float(hcfg["drop_blast_r"]),

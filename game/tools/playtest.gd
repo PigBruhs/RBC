@@ -2475,15 +2475,22 @@ func _initialize() -> void:
 	_s.t_clear_pending()
 	_s.active = he_p
 	_s.t_choose_skill("dive_bomb")
-	var want_cells: Dictionary = Targeting.disc_cells(Vector2(10.5, 10.5), 20.0, _s.PW, _s.PH, _s.PX, _s.PY)
-	print("    进入选格：粉色格 %d（期望 %d）｜ 目标格在集合里=%s ｜ 已选格=%s" % [
-		_s.cell_targets.size(), want_cells.size(), _s.cell_targets.has(Vector2i(14, 10)),
-		_s.t_pending_kind()])
+	# 第 109 轮：技能射程 20 -> 64（真值源 `Skills.get_def("dive_bomb")["range_max"]`）。
+	# ⚠ 断言不再硬编码 20，而是**读真值源**，这样以后再调射程这条会自动跟上。
+	var dive_range := float(Skills.get_def("dive_bomb")["range_max"])
+	var want_cells: Dictionary = Targeting.disc_cells(Vector2(10.5, 10.5), dive_range,
+		_s.PW, _s.PH, _s.PX, _s.PY)
+	print("    进入选格：粉色格 %d（期望 %d，射程 %.0f）｜ 目标格在集合里=%s ｜ 已选格=%s" % [
+		_s.cell_targets.size(), want_cells.size(), dive_range,
+		_s.cell_targets.has(Vector2i(14, 10)), _s.t_pending_kind()])
 	_chk(_s.t_cell_targeting(), "俯冲轰炸进入【点格子】阶段（不拖拽）")
 	_chk(_s.cell_targets.size() == want_cells.size() and _s.cell_targets.size() > 100,
-		"可选格 = 20 格圆盘内的所有格子（粉色高亮）")
-	_chk(_s.cell_targets.has(Vector2i(14, 10)) and not _s.cell_targets.has(Vector2i(10, 35)),
-		"射程内是可选格、射程外不是")
+		"可选格 = %.0f 格圆盘内的所有格子（粉色高亮）" % dive_range)
+	# 射程内取一个近格、射程外取一个**必然超程**的远格 —— 都按真值源算，别再写死坐标
+	# （写死会随射程改动假红：原来写的 (10,40) 距圆心 29.5 格，射程 64 时**已经够得着**）
+	var out_probe := Vector2i(10, 10 + int(dive_range) + 5)
+	_chk(_s.cell_targets.has(Vector2i(14, 10)) and not _s.cell_targets.has(out_probe),
+		"射程内是可选格、射程外不是（近格在内、%s 在外）" % str(out_probe))
 	# 第一次点：只出黄勾，不放技能
 	var cast1: bool = _s.t_click_cell_target(Vector2i(14, 10))
 	print("    第一次点 (14,10)：施放=%s ｜ 待确认=%s ｜ 目标格=%s" % [
@@ -2509,11 +2516,16 @@ func _initialize() -> void:
 	he_p.has_acted = false
 	_s.active = he_p
 	_s.t_choose_skill("dive_bomb")
-	var far_cell := Vector2i(10, 40)         # 距 (10.5,10.5) 约 29.5 格 > 20
+	# 第 109 轮：射程 20 -> 64，所以"超程格"要真的超过程序算出来的射程
+	# （原来写死的 (10,40) 距圆心 29.5 格，在 64 射程下**已经够得着**了 → 会假红）。
+	# 这里按真值源反推一个**必然超程**的格子：沿 +y 推 `射程 + 5` 格。
+	var over := int(dive_range) + 5
+	var far_cell := Vector2i(10, 10 + over)
 	var cast3: bool = _s.t_click_cell_target(far_cell)
-	print("    点超程格 %s：施放=%s ｜ 待确认=%s" % [far_cell, cast3, _s.t_pending_kind()])
+	print("    点超程格 %s（距圆心约 %d 格 > 射程 %.0f）：施放=%s ｜ 待确认=%s" % [
+		far_cell, over, dive_range, cast3, _s.t_pending_kind()])
 	_chk(not cast3 and _s.t_pending_kind() == "" and not he_p.tags.has("dive_ready"),
-		"超出 20 格的格子点了不作数（提示重新点）")
+		"超出 %.0f 格的格子点了不作数（提示重新点）" % dive_range)
 	_s.t_clear_pending()
 	_s.cell_targets = {}
 	_s.t_set_cell_targeting(false)

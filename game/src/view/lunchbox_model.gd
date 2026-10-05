@@ -75,6 +75,19 @@ const MUZZLE_R := 0.11
 const BARREL_PRISM_NAME := "TurretPrism"
 const BODY_ROOT_NAME := "BodyRoot"          # 车体容器（测试按名字/门面定位）
 const LOITER_ROOT_NAME := "LoiterLauncher"  # 巡飞弹发射器根（第 108 轮挪到车尾）
+## ── 巡飞弹发射器（第 109 轮：**探出车尾** + **高于炮管最高点** + 支架托住）──────────────
+## 用户口径：「我说探出车尾且比炮管顶部高」。
+## ⚠ 高度依据是**实测**、不是常数：炮管仰到 PHI_MAX(60°) 时，炮塔子树的**实际最高点 = 2.956**
+##   （不是"轴线 2.0 + 棱柱半径 0.34 = 2.34" —— 仰起后炮口/棱柱端起会更高）。
+##   所以发射器底座取 3.10（底部 > 2.956，余量 0.144）。
+## z 依据：车顶面 z∈±0.700、车体 z∈±1.000；发射器本地 z∈[-0.199,+0.150]，
+##   中心放 -1.05 -> 世界 z∈[-1.249,-0.900]：**后沿探出车体 0.249 格** ✅ 且前半仍压在车尾上方。
+const LOITER_Z := -1.05
+const LOITER_Y := 3.10
+const LOITER_POST_R := 0.060         # 支架立柱半径（从车体伸出来托住它，不能凭空浮）
+const LOITER_ARM_R := 0.050          # 水平支臂半径
+const LOITER_ARM_Z := -0.60          # 支臂起点 z（在车顶面 ±0.700 之内 -> "从车顶伸出来"）
+const LOITER_ARM_Y := 1.05           # 支臂高度（贴着车顶面 y≈1.015 上方一点）
 
 var _turret: Node3D = null                 # 方向机（绕 y 转）
 var _barrel: Node3D = null                 # 高低机（绕 x 转）
@@ -284,7 +297,7 @@ func _build_loiter_launcher() -> void:
 	#   · 发射器底座箱 0.30×0.30 -> 居中放在 z=-0.50 时占 z[-0.65,-0.35]、x[-0.15,0.15]
 	#     => 完整落在车顶面**之内**（z 余量 0.05、x 余量 0.15），不悬空
 	#   · x = 0 居中；与炮塔轴线（TURRET_X=0，在本地 z=0）**在 z 上分离 0.50 格**
-	root.position = Vector3(0.0, ROOF_Y, -0.50)
+	root.position = Vector3(0.0, LOITER_Y, LOITER_Z)
 	_body_root.add_child(root)          # 车顶设备：跟着**车体**转（不属于炮塔）
 	var box := BoxMesh.new()
 	box.size = Vector3(0.30, 0.10, 0.30)
@@ -301,8 +314,12 @@ func _build_loiter_launcher() -> void:
 	var t := MeshInstance3D.new()
 	t.mesh = tube
 	t.material_override = _metal_mat
-	t.rotation_degrees = Vector3(-25.0, 0.0, 0.0)          # 上仰 25°（与沙盒那台一致）
-	t.position = Vector3(0.0, 0.20, -0.05)
+	# 朝向（第 109 轮决定）：**朝车头(+z)上仰 25°**，即"从车尾越过车体向前发射"。
+	# 理由：车头=本地 +z（第 107 轮车体口径），车本来就是朝 +z 推进、朝 +z 打敌人的；
+	#   发射器已经在车尾外侧，若朝后上方就等于"朝背离敌人的方向发射"，读起来是反的。
+	#   朝前越过车体也与真实车载发射巢一致（车尾发射、越过驾驶室）。仰角仍是 25°。
+	t.rotation_degrees = Vector3(25.0, 0.0, 0.0)
+	t.position = Vector3(0.0, 0.20, 0.05)
 	root.add_child(t)
 	var mouth := TorusMesh.new()
 	mouth.inner_radius = 0.05
@@ -316,10 +333,39 @@ func _build_loiter_launcher() -> void:
 	var r := MeshInstance3D.new()
 	r.mesh = mouth
 	r.material_override = ring_mat
-	r.rotation_degrees = Vector3(-25.0, 0.0, 0.0)
-	r.position = Vector3(0.0, 0.27, -0.12)
+	r.rotation_degrees = Vector3(25.0, 0.0, 0.0)
+	r.position = Vector3(0.0, 0.27, 0.12)
 	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(r)
+
+	# ── 支架（第 109 轮）：**立柱 + 水平支臂**，让探出车尾的高位发射器"看起来连着车体" ──
+	# 支臂：从车顶面内 (z=LOITER_ARM_Z, y=LOITER_ARM_Y) 水平伸到立柱脚下 -> 视觉上从车顶长出来
+	var arm_len: float = absf(LOITER_Z - LOITER_ARM_Z)
+	var arm_cyl := CylinderMesh.new()
+	arm_cyl.radial_segments = 8
+	arm_cyl.top_radius = LOITER_ARM_R
+	arm_cyl.bottom_radius = LOITER_ARM_R
+	arm_cyl.height = arm_len
+	var arm := MeshInstance3D.new()
+	arm.mesh = arm_cyl
+	arm.material_override = _dark_mat
+	arm.name = "LoiterArm"
+	arm.rotation_degrees = Vector3(90.0, 0.0, 0.0)            # 圆柱轴 +y -> +z（水平）
+	arm.position = Vector3(0.0, LOITER_ARM_Y, (LOITER_ARM_Z + LOITER_Z) * 0.5)
+	_body_root.add_child(arm)          # 结构件：坐标是**模型本地**，所以挂车体容器（不是 root）
+	# 立柱：从支臂一路顶到发射器底座
+	var post_h: float = LOITER_Y - LOITER_ARM_Y
+	var post_cyl := CylinderMesh.new()
+	post_cyl.radial_segments = 8
+	post_cyl.top_radius = LOITER_POST_R
+	post_cyl.bottom_radius = LOITER_POST_R
+	post_cyl.height = post_h
+	var post := MeshInstance3D.new()
+	post.mesh = post_cyl
+	post.material_override = _dark_mat
+	post.name = "LoiterPost"
+	post.position = Vector3(0.0, LOITER_ARM_Y + post_h * 0.5, LOITER_Z)
+	_body_root.add_child(post)         # 同上：挂在立柱所在的 z（模型本地）
 
 
 # ── 对外接口（battle_scene 每帧调）──────────────────────────────────────────

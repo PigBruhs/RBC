@@ -126,6 +126,83 @@ func _build_topbar() -> void:
 	zoom_slider.custom_minimum_size = Vector2(180, 0)
 	zoom_slider.value_changed.connect(func(v: float) -> void: host.ui_set_zoom(v))
 	hb.add_child(zoom_slider)
+	_build_bossbar()
+
+
+## ── Boss 血条（第 109 轮，用户口径）─────────────────────────────────────────
+## 「**请为 Reaper 战场景增加顶部 Boss 血条，只看力量，只有这个场景有**」
+## · **只看力量**（不画护甲）—— 所以是一条单色横条 + 名字 + 数字
+## · **只有 Boss 关有**：`Level.victory_type() == "boss"` 时才显示
+##   （判据用关卡定义里的 `victory.type`，不是硬编码场景名 —— 以后加 Boss 关会自动有）
+## · 放在**顶部信息条正下方**，横跨屏幕中间，不与左下角菜单竞争空间
+var boss_box: PanelContainer = null
+var boss_name_label: Label = null
+var boss_fill: ColorRect = null
+var boss_hp_label: Label = null
+
+
+func _build_bossbar() -> void:
+	boss_box = _panel_node()
+	# 画在顶部信息条**下面**：锚定顶部、水平居中、定宽
+	boss_box.anchor_left = 0.5
+	boss_box.anchor_right = 0.5
+	boss_box.offset_left = -280
+	boss_box.offset_right = 280
+	boss_box.offset_top = 96
+	boss_box.offset_bottom = 152
+	boss_box.visible = false                      # 默认藏起来，由刷新决定
+	layer.add_child(boss_box)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	boss_box.add_child(col)
+
+	var head := HBoxContainer.new()
+	col.add_child(head)
+	boss_name_label = Label.new()
+	boss_name_label.text = "Reaper"
+	boss_name_label.add_theme_font_size_override("font_size", 18)
+	head.add_child(boss_name_label)
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(sp)
+	boss_hp_label = Label.new()
+	boss_hp_label.text = "0"
+	head.add_child(boss_hp_label)
+
+	# 血槽：底 + 填充（填充宽度按比例，用 `size_flags` 不方便 -> 直接改 `size`）
+	var trough := Panel.new()
+	trough.custom_minimum_size = Vector2(0, 18)
+	var tsb := StyleBoxFlat.new()
+	tsb.bg_color = Color(0.10, 0.08, 0.10, 0.95)
+	tsb.border_color = Color(0.55, 0.35, 0.40, 1.0)
+	tsb.set_border_width_all(2)
+	tsb.set_corner_radius_all(3)
+	trough.add_theme_stylebox_override("panel", tsb)
+	col.add_child(trough)
+	boss_fill = ColorRect.new()
+	boss_fill.color = Color(0.85, 0.16, 0.20)     # 力量 = 红
+	trough.add_child(boss_fill)
+
+
+## 刷新 Boss 血条。由 `host.refresh_all()` 每帧/每次刷新时调用。
+## `boss` 为 null 时隐藏（非 Boss 关、或 Boss 已死）。
+func update_bossbar(boss: Unit) -> void:
+	if boss_box == null:
+		return
+	if boss == null:
+		boss_box.visible = false
+		return
+	boss_box.visible = true
+	boss_name_label.text = boss.name
+	var maxp: int = maxi(1, boss.power_max)
+	var cur: int = maxi(0, boss.power_cur)
+	# ⚠ 走宿主门面 `ui_fmt`（不是 `_fmt` —— 宿主没有那个方法，写 `_fmt` 会运行时报 null）
+	boss_hp_label.text = "%s / %s" % [host.ui_fmt(cur), host.ui_fmt(maxp)]
+	# 填充宽度 = 槽宽 × 比例（槽宽取自上一帧布局；首次为 0 时跳过，下一帧自然补上）
+	var w: float = boss_fill.get_parent().size.x - 4.0
+	boss_fill.size = Vector2(maxf(0.0, w * clampf(float(cur) / float(maxp), 0.0, 1.0)), 14.0)
+	boss_fill.position = Vector2(2, 2)
 
 
 ## 右下角 >> ：放置阶段 = 结束放置；战斗中 = 结束回合
@@ -483,6 +560,26 @@ func refresh_all() -> void:
 	refresh_sandbox()
 	refresh_detail()
 	refresh_menus()
+	refresh_bossbar()
+
+
+## Boss 血条（第 109 轮）：**只有 Boss 关有**，**只看力量**。
+## 判据用关卡定义的 `victory.type == "boss"`（不硬编码场景名 —— 以后加 Boss 关自动有）。
+## Boss 名单也来自关卡定义（`victory.boss_name`），死了就隐藏。
+func refresh_bossbar() -> void:
+	if host == null or boss_box == null:
+		return
+	var v := Level.victory(Level.current)
+	if String(v.get("type", "")) != "boss":
+		boss_box.visible = false
+		return
+	var bn := String(v.get("boss_name", ""))
+	var boss: Unit = null
+	for u in host.units:
+		if u != null and u.name == bn and u.is_alive():
+			boss = u
+			break
+	update_bossbar(boss)
 
 
 func refresh_sandbox() -> void:
