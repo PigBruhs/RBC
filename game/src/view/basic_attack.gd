@@ -210,19 +210,27 @@ func volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
 func can_aim_unit(t: Unit) -> bool:
 	if _st.active == null or t == null:
 		return false
-	return t.side != _st.active.side and _st.active.in_range_of(t.cell) \
-		and Targeting.melee_reaches(_st.active, t)
+	if t.side == _st.active.side:
+		return false
+	# ⚠ 第 111 轮：雷达的**锁定**没有距离限制（用户口径「只有连接有距离限制，目标选择没有」），
+	#   而它的数据行射程是 `0-0`（没有武器）-> `in_range_of` 必然为假。
+	#   所以锁定模板**跳过射程判定**；其余模板照旧。
+	if AttackProfile.basic_of(_st.active) == AttackProfile.BASIC_LOCK:
+		return true
+	return _st.active.in_range_of(t.cell) and Targeting.melee_reaches(_st.active, t)
 
 
 ## 这个单位的普攻是否**跳过"打力量 / 破甲"三级菜单**（第二次点直接开打）。
 ## 用户口径（第 107 轮）：午餐盒的普攻是**齐射**，没有这个二选一 ——
 ## 它的 `armor_break = 0`，菜单里"破甲"那条对它是死的（实测点下去毫无反应），
 ## 而"打力量"虽然能出膛，却白让玩家多点一步。
-## ⚠ 只对**齐射类**生效：弓箭/近战/连发仍然保留三级菜单（那是它们真实的选择）。
+## 第 111 轮：雷达的**锁定**同理（更彻底 —— 它没有任何伤害，两个选项都没有意义）。
+## ⚠ 只对**齐射类 / 锁定类**生效：弓箭/近战/连发仍然保留三级菜单（那是它们真实的选择）。
 func attack_skips_power_menu(u: Unit) -> bool:
 	if u == null:
 		return false
-	return AttackProfile.basic_of(u) == AttackProfile.BASIC_SALVO
+	var b := AttackProfile.basic_of(u)
+	return b == AttackProfile.BASIC_SALVO or b == AttackProfile.BASIC_LOCK
 
 
 ## 近战的高亮格：空中单位（够不着）那一格不点亮。

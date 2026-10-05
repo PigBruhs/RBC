@@ -588,6 +588,16 @@ func radar_spread_mult(atk: Unit, dist: float) -> float:
 	return float(mod.get("mult", 1.0))
 
 
+## 雷达的**锁定目标**：全场**所有敌人**都可选 —— 用户口径：
+## 「**只有连接有距离限制，目标选择没有**」（普攻锁定无距离上限）。
+## ⚠ 为什么不能复用 `Targeting.attack_range_cells_rect`：雷达的数据行射程是 `0-0`
+##   （它没有武器），按射程算出来的可选集合是**空的** -> 实测"无法选择任何目标"。
+func _radar_all_enemy_cells(out: Dictionary) -> void:
+	for u in units:
+		if u != null and u.is_alive() and active != null and u.side != active.side:
+			out[u.cell] = true
+
+
 func _begin_unit_targeting(sid: String) -> void:
 	var d := Skills.get_def(sid)
 	var rmax: float = float(d.get("range_max", 32.0))

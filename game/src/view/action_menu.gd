@@ -129,9 +129,18 @@ func menu_attack() -> void:
 		_:
 			_st.phase = _st.Phase.CHOOSE_TARGET
 			_st.reachable = {}
-			# 只显示"当前位置能打到的格子"（紫色高亮）
-			_st.attackable = Targeting.attack_range_cells_rect(_st.active, _st.PX, _st.PY, _st.PW, _st.PH)
-			_st.attack.prune_air_cells()       # 近战：够不着的空中单位那格不亮（第 96 轮）
+			if AttackProfile.basic_of(_st.active) == AttackProfile.BASIC_LOCK:
+				# ⚠ 第 111 轮修的恶性 bug（用户报「雷达车普攻无法选择目标」）：
+				#   雷达的普攻是**锁定**，用户口径「**只有连接有距离限制，目标选择没有**」。
+				#   但这里原来一律走 `attack_range_cells_rect` —— 而雷达数据行射程是 `0-0`
+				#   （它没有武器）-> 可选集合**空** -> 一个目标都点不了。
+				#   所以锁定模板改成"**全场敌人**都可选"。
+				_st.attackable = {}
+				_st._radar_all_enemy_cells(_st.attackable)
+			else:
+				# 只显示"当前位置能打到的格子"（紫色高亮）
+				_st.attackable = Targeting.attack_range_cells_rect(_st.active, _st.PX, _st.PY, _st.PW, _st.PH)
+				_st.attack.prune_air_cells()       # 近战：够不着的空中单位那格不亮（第 96 轮）
 			# ── 难点 2 接入（第 111 轮）：被连接的友军可**无视距离**点选"被雷达锁定的目标" ──
 			_st._radar_add_locked_targets(false, _st.active, _st.attackable)
 			_st.fx.draw_hints()
