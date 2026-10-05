@@ -428,6 +428,15 @@ func _build_aim_helpers() -> void:
 func _place_menu_near(u: Unit) -> void:
 	if _ai_turn:
 		return                              # AI 回合不弹菜单
+	# ⚠ 第 111 轮修的漏网者（用户报「敌方 AI 操控角色时仍会弹一个二级菜单」）：
+	#   这里原来**只拦 `_ai_turn`**，然后直接调 `ui.show_action_menu(u)` ——
+	#   而 `battle_ui.show_action_menu` 是把 `action_menu.visible = true` **写死**的，
+	#   **绕过了 `action_menu.show_action_menu` 里那道 `_is_ai_unit(active)` 守卫**。
+	#   所以只要出现"某个 AI 操控的单位在 `_ai_turn == false` 的时刻走到这里"
+	#   （例如不走通用 AI 的 Reaper 回合、或 AI 收尾后残留的调用），菜单就会弹出来。
+	#   现在把同一道判断也加在这里，两个入口口径一致。
+	if u != null and _is_ai_unit(u):
+		return
 	if ui != null:
 		ui.show_action_menu(u)
 
