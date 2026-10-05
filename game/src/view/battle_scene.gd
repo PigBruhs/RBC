@@ -1122,6 +1122,46 @@ func _lb_forget_state(u: Unit) -> void:
 #   · 每帧检查连接距离（走远就断）
 # ══════════════════════════════════════════════════════════════════════════════
 var _radar_states: Dictionary = {}      # 单位名 -> Radar.State
+var _radar_huds: Dictionary = {}        # **被锁定目标名** -> RadarHud（第 111 轮难点 1）
+
+
+## 每帧刷新锁定 HUD（难点 1）：给每个"正被锁定"的敌人挂一个荧光绿矩形。
+## 目标死了 / 锁定被清掉 -> 移除 HUD。
+func _radar_tick_huds() -> void:
+	# 1) 收集"当前该有 HUD 的目标" -> 取最"紧"的那台雷达车的进度
+	var want: Dictionary = {}           # 目标名 -> [lock_left, locked]
+	for u in units:
+		if not _is_radar(u) or not u.is_alive():
+			continue
+		var st := _radar_state(u)
+		if st.lock_name == "":
+			continue
+		var prev: Array = want.get(st.lock_name, [])
+		# 多台雷达锁同一目标时取"进度最快"的那个显示（锁定完成优先）
+		if prev.is_empty() or st.locked() or st.lock_left < int(prev[0]):
+			want[st.lock_name] = [st.lock_left, st.locked()]
+	# 2) 不需要的 HUD 拆掉
+	for nm in _radar_huds.keys():
+		if not want.has(nm):
+			var h: RadarHud = _radar_huds[nm]
+			if h != null and is_instance_valid(h):
+				h.queue_free()
+			_radar_huds.erase(nm)
+	# 3) 需要的 HUD 建/更新
+	for nm in want.keys():
+		var t := _lb_unit_by_name(nm)
+		if t == null or not t.is_alive():
+			continue
+		var hud: RadarHud = _radar_huds.get(nm, null)
+		if hud == null or not is_instance_valid(hud):
+			hud = RadarHud.make(self, t)
+			_radar_huds[nm] = hud
+		hud.set_size(RadarHud.size_for(t))
+		var info: Array = want[nm]
+		hud.update_text(int(info[0]), bool(info[1]))
+		# 摆在目标身上：抬到身体中部（体高的一半 + 一点），跟着视觉位置走
+		var p := GridMath.unit_pos(t)
+		hud.global_position = Vector3(p.x, Targeting.aim_height(t), p.y)
 
 
 func _is_radar(u: Unit) -> bool:
@@ -2206,8 +2246,13 @@ func _process(delta: float) -> void:
 	# 齐射批次结算（第 105 轮）：一波的子弹打完了就**一次性**造伤（每个目标一次），
 	# 而不是每碰撞一次都走一遍完整造伤路径 —— 这是用户报的卡顿的修法。
 	_tick_volleys()
-	# 雷达午餐盒（第 111 轮）：连接距离**持续检查**（走远就断）
+	# 雷达午餐盒（第 111 轮）：连接距离**持续检查**（走远就断）+ 锁定 HUD
 	_radar_tick_links()
+	_radar_tick_huds()
+	# HUD 面向相机（"法线方向与摄像机方向相同"）—— 放在最后，用本帧最终的相机朝向
+	for h in _radar_huds.values():
+		if h != null and is_instance_valid(h):
+			h.face_camera(_camera)
 
 
 ## 队列条动画计时：到点就收尾；期间攒下的刷新请求在这里补做（最小间隔 0.5 秒）

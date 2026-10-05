@@ -127,4 +127,38 @@ func _run(s: Node) -> void:
 		s._radar_tick_links()
 		_ok(not st2.links.has("Gerald"), "**走远到 40 格 -> 连接断开**")
 
+	print("\n[6] 难点 1：锁定 HUD（荧光绿矩形 + 左上剩余回合 / 右上状态）")
+	var foe3: Unit = null
+	for u in s.units:
+		if u != null and u.is_alive() and u.side != radar.side:
+			foe3 = u
+			break
+	if foe3 != null:
+		s.t_radar_begin_lock(RADAR, foe3.name)
+		s._radar_tick_huds()
+		var hud = s._radar_huds.get(foe3.name, null)
+		_ok(hud != null, "**被锁定目标身上出现了 HUD**（%s）" % foe3.name)
+		if hud != null:
+			var sz: Vector2 = hud.t_size()
+			print("      HUD 尺寸 = %.2f x %.2f ｜ 左上 = '%s' ｜ 右上 = '%s'" % [
+				sz.x, sz.y, hud.t_left_text(), hud.t_right_text()])
+			var r: float = Targeting.unit_body_r(foe3)
+			_ok(absf(sz.x - maxf(1.0, r * 2.0)) < 0.001,
+				"尺寸 = **按碰撞体积的直径**（体半径 %.2f -> 宽 %.2f）" % [r, sz.x])
+			_ok(hud.t_left_text() != "" and hud.t_right_text() in ["锁定中", "已锁定"],
+				"**左上 = 数字、右上 = 锁定中/已锁定**（'%s' / '%s'）" % [
+					hud.t_left_text(), hud.t_right_text()])
+			_ok(hud.t_right_text() == "锁定中" or hud.t_left_text() == "0",
+				"未锁定完成时右上显示'锁定中'")
+			# HUD 会**面向相机**（法线与相机同向）
+			hud.face_camera(s._camera)
+			var cam_b: Basis = s._camera.global_transform.basis
+			var hud_b: Basis = hud.global_transform.basis
+			_ok(hud_b.z.dot(cam_b.z) > 0.999,
+				"**HUD 面向相机**（法线与相机同向 dot=%.4f）" % hud_b.z.dot(cam_b.z))
+		# 清掉锁定 -> HUD 移除
+		s._radar_clear_lock(radar, "探针")
+		s._radar_tick_huds()
+		_ok(s._radar_huds.get(foe3.name, null) == null, "**锁定清掉后 HUD 被移除**")
+
 	print("\n── 雷达场景接线探针：%d 项检查，失败 %d 项 ──" % [_n, _f])
