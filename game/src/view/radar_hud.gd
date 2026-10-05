@@ -57,9 +57,18 @@ func _build(size: Vector2) -> void:
 	# ⚠ 第 111 轮用户口径（第二版）：角标要放在**框外**、**紧贴矩形上边**。
 	#   （第一版在外侧被头顶血条挤住 -> 我改到内侧；用户看到后要求改回**框外并在上边之上**，
 	#    所以这里放到 `+ht/2` 之上一小段，两个角标都贴着上边。）
-	_lab_left.position = Vector3(-w * 0.5, ht * 0.5 + 0.16, 0)
-	_lab_right = _label(HORIZONTAL_ALIGNMENT_RIGHT)
-	_lab_right.position = Vector3(w * 0.5, ht * 0.5 + 0.16, 0)
+	# 第 111 轮追加：**字号随框大小等比放大**（用户口径「锁定框变大时（比如锁定 Reaper 时）
+	#   字也要对应变大」）。基准 = 1×1 的框用 `LABEL_PX`，框宽 6（Reaper）就 ×6。
+	var sc := _scale()
+	_lab_left = _label(HORIZONTAL_ALIGNMENT_LEFT, sc)
+	_lab_left.position = Vector3(-w * 0.5, ht * 0.5 + 0.16 * sc, 0)
+	_lab_right = _label(HORIZONTAL_ALIGNMENT_RIGHT, sc)
+	_lab_right.position = Vector3(w * 0.5, ht * 0.5 + 0.16 * sc, 0)
+
+
+## 字号倍率 = 框宽（≥1）。普通角色 1×1 -> 1；Reaper（体半径 3）-> 6
+func _scale() -> float:
+	return maxf(1.0, _size.x)
 
 
 func _bar(pos: Vector3, box: Vector3) -> void:
@@ -78,10 +87,10 @@ func _bar(pos: Vector3, box: Vector3) -> void:
 	mi.position = Vector3(pos.x, pos.y, pos.z)
 
 
-func _label(align: int) -> Label3D:
+func _label(align: int, scale: float = 1.0) -> Label3D:
 	var l := Label3D.new()
 	l.text = ""
-	l.font_size = LABEL_PX
+	l.font_size = int(round(LABEL_PX * scale))     # 第 111 轮：字号随框大小等比放大
 	l.pixel_size = 0.0035
 	l.modulate = COLOR_HUD
 	l.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
@@ -114,16 +123,17 @@ func set_size(size: Vector2) -> void:
 	_build(size)
 
 
-## 刷新文字：左上 = 仍需回合数，右上 = 锁定中 / 已锁定
-func update_text(turns_left: int, locked: bool) -> void:
+## 刷新文字：左上 = 仍需回合数 + **到雷达车的距离**，右上 = 锁定中 / 已锁定
+## 用户口径（第 111 轮）：「将锁定角色到雷达车的距离也写上，**写到剩余回合数右边**」
+func update_text(turns_left: int, locked: bool, dist_cells: float = -1.0) -> void:
 	if _lab_left == null:
 		return
-	if locked:
-		_lab_left.text = "0"
-		_lab_right.text = "已锁定"
-	else:
-		_lab_left.text = str(maxi(0, turns_left))
-		_lab_right.text = "锁定中"
+	# 左标签 = "剩余回合数 ｜ 距离格"（距离就在数字右边，同一行）
+	var left := "0" if locked else str(maxi(0, turns_left))
+	if dist_cells >= 0.0:
+		left += "  %.0f格" % dist_cells
+	_lab_left.text = left
+	_lab_right.text = "已锁定" if locked else "锁定中"
 	set_visible_labels(true)
 
 
@@ -137,5 +147,7 @@ func set_visible_labels(v: bool) -> void:
 func t_left_text() -> String: return "" if _lab_left == null else _lab_left.text
 
 func t_right_text() -> String: return "" if _lab_right == null else _lab_right.text
+
+func t_left_font_size() -> int: return 0 if _lab_left == null else _lab_left.font_size
 
 func t_size() -> Vector2: return _size

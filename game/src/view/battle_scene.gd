@@ -1252,8 +1252,9 @@ func _radar_tick_huds() -> void:
 			continue
 		var prev: Array = want.get(st.lock_name, [])
 		# 多台雷达锁同一目标时取"进度最快"的那个显示（锁定完成优先）
+		# 第 111 轮追加：把**那台雷达车**也存下来，供 HUD 显示"锁定角色到雷达车的距离"
 		if prev.is_empty() or st.locked() or st.lock_left < int(prev[0]):
-			want[st.lock_name] = [st.lock_left, st.locked()]
+			want[st.lock_name] = [st.lock_left, st.locked(), u]
 	# 2) 不需要的 HUD 拆掉
 	for nm in _radar_huds.keys():
 		if not want.has(nm):
@@ -1272,7 +1273,11 @@ func _radar_tick_huds() -> void:
 			_radar_huds[nm] = hud
 		hud.set_size(RadarHud.size_for(t))
 		var info: Array = want[nm]
-		hud.update_text(int(info[0]), bool(info[1]))
+		# 锁定目标 -> 雷达车 的**当前**距离（跟着走，因为它在动）
+		var d_now := -1.0
+		if info.size() >= 3 and info[2] != null:
+			d_now = GridMath.unit_pos(t).distance_to(GridMath.unit_pos(info[2]))
+		hud.update_text(int(info[0]), bool(info[1]), d_now)
 		# 摆在目标身上：抬到身体中部（体高的一半 + 一点），跟着视觉位置走
 		var p := GridMath.unit_pos(t)
 		hud.global_position = Vector3(p.x, Targeting.aim_height(t), p.y)

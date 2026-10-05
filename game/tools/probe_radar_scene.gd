@@ -148,8 +148,26 @@ func _run(s: Node) -> void:
 			_ok(hud.t_left_text() != "" and hud.t_right_text() in ["锁定中", "已锁定"],
 				"**左上 = 数字、右上 = 锁定中/已锁定**（'%s' / '%s'）" % [
 					hud.t_left_text(), hud.t_right_text()])
-			_ok(hud.t_right_text() == "锁定中" or hud.t_left_text() == "0",
-				"未锁定完成时右上显示'锁定中'")
+			# 第 111 轮追加：**左侧要带"到雷达车的距离"**（用户口径：写在剩余回合数右边）
+			_ok(hud.t_left_text().find("格") > 0,
+				"**左侧含距离**（'%s'）" % hud.t_left_text())
+			# 两种状态显式各测一次（原来那条依赖"当时恰好没锁定"，是弱断言 -> 改掉）
+			hud.update_text(3, false, 42.0)
+			print("      锁定期：左上='%s' ｜ 右上='%s'" % [hud.t_left_text(), hud.t_right_text()])
+			_ok(hud.t_right_text() == "锁定中" and hud.t_left_text().begins_with("3")
+				and hud.t_left_text().find("42格") > 0,
+				"**未锁定**：右上'锁定中'、左侧'3' + '42格'")
+			hud.update_text(0, true, 42.0)
+			print("      已锁定：左上='%s' ｜ 右上='%s'" % [hud.t_left_text(), hud.t_right_text()])
+			_ok(hud.t_right_text() == "已锁定" and hud.t_left_text().begins_with("0"),
+				"**已锁定**：右上'已锁定'、左侧'0' + 距离")
+			# 字号随框大小（Reaper 那种大框）等比放大
+			var small: int = hud.t_left_font_size()
+			hud.set_size(Vector2(6.0, 6.0))            # Reaper 体半径 3 -> 6×6
+			var big: int = hud.t_left_font_size()
+			print("      字号：1×1 框 = %d ｜ 6×6 框 = %d" % [small, big])
+			_ok(big == small * 6, "**字号随框大小等比放大**（%d -> %d = ×6）" % [small, big])
+			hud.set_size(RadarHud.size_for(foe3))      # 还原
 			# HUD 会**面向相机**（法线与相机同向）
 			hud.face_camera(s._camera)
 			var cam_b: Basis = s._camera.global_transform.basis
