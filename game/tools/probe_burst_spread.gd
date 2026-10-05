@@ -91,11 +91,19 @@ func _initialize() -> void:
 	for i in ys.size():
 		if absf(y1s[i] - ys[i]) > 0.001:
 			tilted += 1
-	_chk(tilted > 0, "%d/%d 发的弹道有俯仰（y1 ≠ y0）" % [tilted, ys.size()])
-	# y1 的离散度 > 0 说明竖直方向确实散布了
+	# ⚠ 第 107 轮用户口径**反转**了第 106 轮：
+	#   「萨尼的子弹会穿越地图下方……请你**解耦两种子弹的散布，即萨尼的子弹按圆盘车按球**」
+	#   → 萨尼（连发）**必须没有俯仰**（y1 == y0），否则她会把子弹打到地图下面去。
+	_chk(tilted == 0, "萨尼的连发**没有俯仰**（%d/%d 发 y1 ≠ y0，要求 0 = 圆盘散布）" % [tilted, ys.size()])
 	var y1_var := _variance(y1s)
-	print("      y1 的方差 = %.4f（旧实现恒为 0：高度固定）" % y1_var)
-	_chk(y1_var > 0.001, "y1 有方差 -> **垂直方向确实有散布**（旧实现是 0）")
+	print("      y1 的方差 = %.4f（萨尼是圆盘 → 应为 0）" % y1_var)
+	_chk(y1_var <= 0.001, "萨尼 y1 **无方差**（圆盘散布：垂直方向不散）")
+	# 反向保险：用户报的 bug 就是"穿越地图下方"，所以高度必须全部 ≥ 0
+	var below := 0
+	for v in ys:
+		if v < 0.0:
+			below += 1
+	_chk(below == 0, "萨尼的子弹**没有一发**高度 < 0（不再穿越地图下方，实际 %d 发）" % below)
 
 	print("\n[3] 散布形状是**球**不是圆盘/球壳（量 `Spread.ball_offset` 的 r² 分布）")
 	var rng := RngService.new(12345)

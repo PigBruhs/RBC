@@ -1231,9 +1231,9 @@ func _initialize() -> void:
 	print("\n── 巡飞弹（第 90 轮）──")
 	_expect(absf(Loiter.SPEED - 4.0) < 0.001 and absf(Loiter.HEIGHT - 1.5) < 0.001
 		and absf(Loiter.MAX_DIST - 64.0) < 0.001 and absf(Loiter.BODY_R - 0.5) < 0.001
-		and absf(Loiter.BLAST_R - 1.0) < 0.001 and absf(Loiter.FUSE_R - 0.75) < 0.001,
+		and absf(Loiter.BLAST_R - 3.0) < 0.001 and absf(Loiter.FUSE_R - 1.5) < 0.001,
 		"巡飞弹：速度 4 格/秒（第 92 轮）、定高 1.5、飞 64 格（第 104 轮：32 -> 64）、"
-		+ "直径 1 格球、造伤直径 2 格、近炸直径 1.5 格", fails)
+		+ "直径 1 格球、造伤**半径 3 格**、近炸**半径 1.5 格**（第 107 轮：1.0/0.75 -> 3.0/1.5）", fails)
 	_expect(absf(Loiter.POWER - 80.0) < 0.001 and absf(Loiter.BREAK - 80.0) < 0.001
 		and absf(Loiter.IGNORE_RES - 0.5) < 0.001,
 		"巡飞弹伤害 = 80 破甲 + 80 力量（第 98 轮翻倍；炮击：无视 50% 物抗）", fails)
@@ -1265,8 +1265,11 @@ func _initialize() -> void:
 		"正下方 1.5 格高度的球够得到地面角色（dy 0.5 < 半径 1）", fails)
 	var lu2 := Unit.from_data(by_name["Gerald"])
 	lu2.cell = Vector2i(7, 5)
+	# 第 107 轮：造伤半径 1.0 -> 3.0，所以"隔壁 2 格"现在**一定够得到**。
+	# 判据改成"半径之外"：水平距离要超过 BLAST_R + 体半径(0.3)。
+	lu2.cell = Vector2i(12, 5)                # 距爆心 (5.5, 5.5) 水平 6.5 格 > 3.0 + 0.3
 	_expect(not Loiter.ball_touches_unit(Vector3(5.5, 1.5, 5.5), lu2),
-		"隔壁 2 格够不到（直径两格的球）", fails)
+		"造伤半径 3 格之外够不到（水平 6.5 格 > 3.0 + 体半径 0.3）", fails)
 	_expect(not Loiter.fuse_touches_unit(Vector3(5.5, 1.5, 5.5), lu),
 		"近炸引信不认友军（我方角色贴脸飞过也不炸）", fails)
 	var lu3 := _enemy_of(by_name, "Gerald")
@@ -1277,9 +1280,11 @@ func _initialize() -> void:
 		"敌方角色在感应范围内 -> 近炸触发", fails)
 	var lu4 := _enemy_of(by_name, "Gerald")
 	lu4.cell = Vector2i(5, 5)
-	lu4.body_y = 3.0                          # 站得很高（比如爬到 3 格）
+	# 第 107 轮：引信半径 0.75 -> 1.5。所以"站得高"要站得**更高**才不触发：
+	# 身体 [body_y, body_y+1]，爆心 y=1.5 → 竖直间隙 = body_y - 1.5，要 > 1.5 → body_y > 3.0。
+	lu4.body_y = 4.0                          # 站得很高（爬到 4 格；离地间隙 2.5 > 引信 1.5）
 	_expect(not Loiter.fuse_touches_unit(Vector3(5.5, 1.5, 5.5), lu4),
-		"近炸半径 0.75：身体离得远就不触发（贴得更近才炸）", fails)
+		"近炸半径 1.5（第 107 轮：0.75 -> 1.5）：身体离得远就不触发（贴得更近才炸）", fails)
 	# ── 制导手感（Q/E）──
 	print("\n── 巡飞弹制导（Q/E）──")
 	_expect(absf(Loiter.want_rate(0.0) - Loiter.TURN_MIN) < 0.001,

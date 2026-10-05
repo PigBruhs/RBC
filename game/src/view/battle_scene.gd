@@ -1116,6 +1116,21 @@ func _lb_model(u: Unit) -> LunchboxModel:
 	return null
 
 
+## 用户口径（第 107 轮）：**车体朝向与炮管解耦** —— 移动时把**底盘**转向行进方向。
+## · 只在移动开始那一刻调一次（`turn_runner.do_move`）：**无插值、停下不回正**
+## · **完全不碰炮管**：`set_body_yaw` 只转车体容器（`_turret` **不在**容器下，结构上碰不到）
+## · 角度约定与 `set_aim(theta)` 一致（0° = 网格 +x、90° = 网格 +y），所以直接用
+##   `(目标 - 当前).angle()`，与瞄准那条链互不干扰
+## 非午餐盒单位直接跳过（普通角色是 billboard，没有底盘朝向的概念）。
+func _lb_turn_body(u: Unit, from_pos: Vector2, to_pos: Vector2) -> void:
+	var m := _lb_model(u)
+	if m == null:
+		return
+	if from_pos.is_equal_approx(to_pos):
+		return                                    # 原地没动就不转向（也不回正）
+	m.set_body_yaw(rad_to_deg((to_pos - from_pos).angle()))
+
+
 ## 每帧推进（`_process` 里调）：转塔 -> 哨兵锁定/开火 -> 热量与冷却 -> 棱柱颜色
 ##
 ## 第 106 轮用户口径（覆盖第 105 轮我改反的那条）：
@@ -1210,7 +1225,15 @@ func _lb_update_moving_marks() -> void:
 		if u == null or not u.is_alive():
 			continue
 		var m: Dictionary = _lb_move_mark.get(u.name, {})
-		if m.is_empty() or Vector2i(m["cell"]) != u.cell:
+		if m.is_empty():
+			# ⚠ 第 107 轮修的初值 bug（Lead 怀疑点 #1）：
+			#   以前"第一次看到这个单位"就当成"刚移动过"（until = now + 0.35），
+			#   于是**一个从来没动过的静止单位**（尤其静止的友军）在最开始的 0.35 秒里
+			#   会被判定成"在动" -> 被收进索敌队列 -> 哨兵对着静止友军开火。
+			#   现在初值 = **不在动**（until = now = 已经过期）：只有**真的换过格**才算在动。
+			m = {"cell": u.cell, "until": now}
+			_lb_move_mark[u.name] = m
+		elif Vector2i(m["cell"]) != u.cell:
 			m = {"cell": u.cell, "until": now + MOVE_HOLD_SEC}
 			_lb_move_mark[u.name] = m
 
@@ -1975,7 +1998,17 @@ func _click_cell(cell: Vector2i) -> void:
 		if t != null and t.side != active.side and attackable.has(cell) and attack.can_aim_unit(t):
 			if _same_pending("attack", cell):
 				_clear_pending()
-				action_menu.show_attack_menu(t)
+				# ⚠ 用户口径（第 107 轮）：「车无法正确发射普攻……为什么现在又出现了
+				#   选择攻击护甲还是力量的三级菜单，并且任何选项均无法开始普攻？」
+				#   午餐盒的普攻是**齐射**，没有"打力量 / 破甲"这个选择 ——
+				#   它的 `armor_break = 0`，所以菜单里"破甲"那条对它是**死的**
+				#   （实测：破甲线点下去毫无反应），而"打力量"虽然能出膛，
+				#   却让玩家多走一步毫无意义的三级菜单。
+				#   所以：**普攻不吃力量/破甲二选一的模板，第二次点就是开打**（与技能的点选一致）。
+				if attack.attack_skips_power_menu(active):
+					attack.attack_target_unit(t, false)
+				else:
+					action_menu.show_attack_menu(t)
 			else:
 				_set_pending("attack", cell, t)
 				_refresh_all()

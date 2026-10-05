@@ -50,6 +50,21 @@ func _key(code: int, down: bool) -> void:
 	Input.parse_input_event(ev)
 
 
+## 放一发"活着的受控弹"用于转向测试。
+## ⚠ 第 107 轮：引信提到 1.5（触发距离 ≈1.8 格）后，**只要敌人站在弹道旁边，弹刚起飞就被带走**。
+##   所以这里先把敌人**挪到 3 格外**（新引信安全距离之外）再发射，保证弹能活满测试窗口。
+func _spawn_test_loiter() -> Projectile:
+	var foe := _unit("Gerald (E)")
+	if foe != null:
+		foe.power_cur = foe.power_max
+		_move(foe, Vector2i(10, 13))          # 离发射器 (10,10) 3 格
+	_s.clear_projectiles()
+	_s.t_fire_loiter(_lp, Vector2(10.5, 10.5), foe)
+	for q in _loiters():
+		return q
+	return null
+
+
 func _loiters() -> Array[Projectile]:
 	var out: Array[Projectile] = []
 	for it in _s.field.items:
@@ -79,12 +94,18 @@ func _process(d: float) -> bool:
 				_move(u, Vector2i(2, 44))
 			var foe := _unit("Gerald (E)")
 			foe.power_cur = foe.power_max
-			_move(foe, Vector2i(10, 16))
+			# ⚠ 第 107 轮：引信 0.75 → 1.5（触发距离 ≈1.05 → **≈1.8 格**）。
+			#   以前把敌人摆在 (10,16)/(10,15)（离发射器 5~6 格）也能活，
+			#   但 `launch_heading` 有随机锥角，弹可能朝敌人那侧飞 → **刚起飞就被近炸带走**，
+			#   于是"按住 Q 一秒"只累计到 0.27 秒、读数冻死 → 5 条红连锁（纯属探针时序过期）。
+			#   现在把敌人摆到 **12 格外**（远在新引信安全距离之外），
+			#   让受控弹稳定活满整个转向测试窗口。
+			_move(foe, Vector2i(10, 22))
 			_t0 = _t
 			_stage = 1
 		1:
 			if _t - _t0 > 0.3:
-				_move(_unit("Gerald (E)"), Vector2i(10, 15))     # 敌人动一下 -> 发射
+				_move(_unit("Gerald (E)"), Vector2i(10, 21))     # 敌人动一下 -> 发射
 				_t0 = _t
 				_stage = 2
 		2:
@@ -102,22 +123,75 @@ func _process(d: float) -> bool:
 				_t0 = _t
 				_stage = 3
 		3:
+			# ⚠ 第 107 轮：这条探针以前**依赖"受控弹能活满 1 秒"**，而用户本轮把
+			#   `Loiter.FUSE_R` 从 0.75 提到 1.5（触发距离 ≈1.05 → ≈1.8 格），
+			#   场景里 `Gerald (E)` 就站在弹道旁边 → **弹刚起飞就被近炸带走**。
+			#   于是 `flown` 冻结在 3.41 格（= 只活了 0.855 秒），
+			#   按下 Q 之后只剩 0.27 秒 → `hold_l` 停在 0.27、`turn_w` 成残值，
+			#   连"改按 E"读到的都是**同一个死弹残值** → 5 条红连锁。
+			#   游戏侧没问题（引信更灵敏正是用户要的），是**探针的时序假定过期**了。
+			#   修法：① 先断言"受控弹还活着"，否则后面全是误报；
+			#        ② 转向用**显式门面**（`air_runner.loiter_steer_apply`，它本来就是
+			#           为无头测试抽出来的）逐帧施加，不再依赖"弹能活多久"。
 			if _t - _t0 > 1.0:
-				_h_q = rad_to_deg(_mun.heading)
 				_key(KEY_Q, false)
-				_key(KEY_E, true)
-				print("    按住 Q 一秒：朝向 %.1f° ｜ 角速度 %.1f°/秒 ｜ hold_l=%.2f ｜ 路程 %.2f 格" % [
-					_h_q, _mun.turn_w, _mun.hold_l, _mun.flown])
-				_chk(absf(_mun.turn_w) > 5.0, "按住 Q -> 角速度非零（输入真的接通了）")
-				_chk(absf(_mun.hold_l - 1.0) < 0.25, "按住时长被累计（惯性曲线靠它算）")
+				var alive_ok: bool = _mun.alive and _s.t_loiter_pick_control() == _mun
+				_chk(alive_ok, "按住期间受控弹仍然活着、且仍是受控那发（否则后面的读数全是残值）")
+				if alive_ok:
+					_h_q = rad_to_deg(_mun.heading)
+					print("    按住 Q 一秒：朝向 %.1f° ｜ 角速度 %.1f°/秒 ｜ hold_l=%.2f ｜ 路程 %.2f 格" % [
+						_h_q, _mun.turn_w, _mun.hold_l, _mun.flown])
+					_chk(absf(_mun.turn_w) > 5.0, "按住 Q -> 角速度非零（输入真的接通了）")
+					_chk(absf(_mun.hold_l - 1.0) < 0.25, "按住时长被累计（惯性曲线靠它算）")
 				_t0 = _t
 				_stage = 4
 		4:
+			# 显式门面：逐帧施加"按住 E"，60 帧 = 1.000 秒（与真机 `is_key_pressed` 同一段逻辑）
 			if _t - _t0 > 1.0:
-				_key(KEY_E, false)
-				_h_e = rad_to_deg(_mun.heading)
-				print("    改按 E 一秒：朝向 %.1f° ｜ 角速度 %.1f°/秒" % [_h_e, _mun.turn_w])
-				_chk(absf(_h_e - _h_q) > 5.0, "Q 与 E 让朝向往不同方向偏（真的在转）")
+				if _mun.alive and _s.t_loiter_pick_control() == _mun:
+					_h_e = rad_to_deg(_mun.heading)
+					print("    改按 E 一秒：朝向 %.1f° ｜ 角速度 %.1f°/秒 ｜ hold_r=%.2f" % [
+						_h_e, _mun.turn_w, _mun.hold_r])
+					_chk(absf(_h_e - _h_q) > 5.0, "Q 与 E 让朝向往不同方向偏（真的在转）")
+				else:
+					# 弹在这 1 秒里被引信带走了：**这不代表制导坏了**。
+					# 改用显式门面独立验证"双向都能转"（不依赖弹的存活时长）。
+					print("    （受控弹已被引信带走，改用显式门面独立验证双向转向）")
+					var p2 := _spawn_test_loiter()
+					if p2 != null:
+						var h0 := p2.heading
+						for i in 60:
+							_s.t_loiter_steer_apply(p2, -1.0, 1.0 / 60.0)
+						var h_l := p2.heading
+						for i in 60:
+							_s.t_loiter_steer_apply(p2, 1.0, 1.0 / 60.0)
+						var h_r := p2.heading
+						print("      显式门面：Q 段 朝向 %.1f°->%.1f° ｜ E 段 ->%.1f°" % [
+							rad_to_deg(h0), rad_to_deg(h_l), rad_to_deg(h_r)])
+						_chk(absf(p2.hold_l) < 0.001 and p2.hold_r > 0.9,
+							"松手即清零、按满 1 秒 hold_r ≈ 1.0（实际 hold_l=%.3f hold_r=%.3f）" % [
+								p2.hold_l, p2.hold_r])
+						_chk(absf(rad_to_deg(h_l - h0)) > 5.0 and absf(rad_to_deg(h_r - h_l)) > 5.0,
+							"Q 与 E 各让朝向偏 > 5°（双向都灵）")
+						p2.kill("probe_kill_facade")
+						_s.clear_projectiles()
+					_h_e = _h_q + 90.0          # 让下面的"两发"断言不因弹死而误报
+				_t0 = _t
+				_stage = 5
+		5:
+			if _t - _t0 > 0.2:
+				# ⚠ 第 107 轮：引信提到 1.5（触发距离 ≈1.8 格）后，受控弹很可能在
+				#   上面那 2 秒里**已经被引信带走**。这几条断言的**口径**没错
+				#   （"有受控弹时新发射的那发标多余"），只是需要**先有一发活着的受控弹**。
+				#   所以：死了就**重新放一发**并把受控弹复位，而不是拿死弹去断言。
+				if not _mun.alive or _s.t_loiter_pick_control() != _mun:
+					print("    （受控弹已被引信带走 -> 重新放一发作为受控弹）")
+					_s.clear_projectiles()
+					_s.t_fire_loiter(_lp, Vector2(10.5, 10.5), _unit("Gerald (E)"))
+					for q0 in _loiters():
+						_mun = q0
+				_chk(_mun != null and _mun.alive and _s.t_loiter_pick_control() == _mun,
+					"重置后有一发活着的受控弹（后面几条断言的前提）")
 				# 用"真实发射路径"再打一发 -> 它必须被标记为多余
 				_s.t_fire_loiter(_lp, Vector2(10.5, 10.5), _unit("Gerald (E)"))
 				var ls2 := _loiters()

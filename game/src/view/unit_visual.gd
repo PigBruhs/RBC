@@ -18,7 +18,9 @@ const ORB_MARGIN := 0.35           # 条子离开"模型最高点"的余量
 ## 条子贴图在世界里的**半高** = 贴图高 × pixel_size ÷ 2（billboard 会按它撑开）
 const ORB_HALF_H := ORB_PX_H * (ORB_WORLD / float(ORB_PX)) * 0.5
 ## 名字要抬到**条子贴图顶边之上**：条子最大会 scale 到 1.18（选中时），再留 0.18 间距
-const LABEL_ABOVE_ORB := ORB_HALF_H * 1.18 + 0.18
+## 第 107 轮：再抬一点（用户：名称需要再高一点，现在挡到精力条上了）——
+## 精力条是**同一张贴图的最上面那一截**（ORB_PX_H > ORB_PX），所以名字要躲开整个贴图顶边。
+const LABEL_ABOVE_ORB := ORB_HALF_H * 1.18 + 0.35
 ## 条子贴图比方块高出来的那截的一半（原来在 _build_orb 里算的局部变量 extra_h）
 const ORB_EXTRA_H := float(ORB_PX_H - ORB_PX) * (ORB_WORLD / float(ORB_PX)) * 0.5
 const WALK_TILES_PER_SEC := 2.0    # 移动速度：每秒 2 格（匀速滑动）
@@ -367,7 +369,11 @@ func _body_lift() -> float:
 		return 0.0
 	var top := unit.body_h() + unit.body_height      # 数据口径（第 104 轮）
 	var box := _model_top_y()                        # 实测模型最高点（含炮管/旋翼/轮胎，第 106 轮补）
-	return maxf(0.0, maxf(top, box) + ORB_MARGIN - ORB_HEIGHT)
+	# 第 107 轮实测的**真正原因**：第 106 轮只把条子的**中心**抬到"模型顶 + 余量"，
+	# 但条子贴图自己是**有半高**的（ORB_HALF_H = 0.606），于是条子的**下半截**仍然压在模型上 ——
+	# 实测午餐盒：条子中心 2.771、下边 2.165，而模型顶 2.340 -> **下边比模型顶低 0.175**，正是"又挡住炮管"。
+	# 修正：抬升量里再减去条子自身的半高，让**条子下边**高于模型顶 + 余量。
+	return maxf(0.0, maxf(top, box) + ORB_MARGIN + ORB_HALF_H - (ORB_HEIGHT + ORB_EXTRA_H))
 
 
 ## 实测本单位所有 MeshInstance3D 包围盒的最高点（本地空间，含各自的局部位移/旋转/缩放）。

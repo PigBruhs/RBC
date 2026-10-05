@@ -183,7 +183,10 @@ func _initialize() -> void:
 		if tgt.visual != null:
 			tgt.visual.position = Vector3(float(tgt.cell.x) + 0.5, tgt.visual.position.y, float(tgt.cell.y) + 0.5)
 		await process_frame
-		# 车的普攻是 AIM_TARGET -> 选攻击后点敌人应弹攻击菜单（两次确认，与弓箭手一致）
+		# ⚠ 第 107 轮用户口径：车的普攻**不再弹"打力量 / 破甲"三级菜单** ——
+		#   它的普攻是**齐射**，`armor_break = 0` 使菜单里"破甲"那条对它是死的
+		#   （实测点了毫无反应），所以第二次点敌人**直接开打**。
+		#   这条断言因此从"必须弹菜单"改成"**必须不弹菜单、且真的开打**"。
 		_s.t_menu_attack()
 		await process_frame
 		print("      普攻选目标阶段 phase = %s ｜ 可选格数 = %d" % [
@@ -192,13 +195,15 @@ func _initialize() -> void:
 		_s.t_click_cell(tgt.cell)
 		await process_frame
 		_chk(_s.t_pending_kind() == "attack", "第一次点敌人 -> 出黄勾待确认（pending = attack）")
+		_chk(not _s.t_attack_menu().visible, "第一次点**还没**弹攻击菜单（两次确认没被绕过）")
 		_s.t_click_cell(tgt.cell)
 		await process_frame
 		var am: PanelContainer = _s.t_attack_menu()
 		print("      点两下后：攻击菜单可见 = %s ｜ has_acted = %s" % [
 			am != null and am.visible, cart.has_acted])
-		_chk(am != null and am.visible,
-			"★ 点两下敌人后**弹出攻击菜单**（打力量/破甲），与弓箭手同一套交互")
+		_chk(am == null or not am.visible,
+			"★ 车普攻**不弹**力量/破甲三级菜单（用户第 107 轮：那个菜单对车是死的）")
+		_chk(cart.has_acted, "★ 点两下敌人后**真的开始普攻**（has_acted = true）")
 
 	print("\n[3b] 隔离：直接调底层 launch_loiter_skill，看断点在底层还是 UI 层")
 	cart.energy = cart.energy_max

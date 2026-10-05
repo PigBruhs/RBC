@@ -46,7 +46,13 @@ const WHEEL_Y := 0.20
 ##   · **六边形棱柱炮管长 0.7 格**
 ##   · 棱柱的**中轴线（顶面六边形中心 -> 底面六边形中心）= 瞄准方向**
 ##   · 支点在整个棱柱的 **2/3 处**：炮口那侧探出 2/3、后方留 1/3
-const TURRET_X := -0.6
+## 用户口径（第 107 轮）：**把支架改到车正中间**（覆盖第 105 轮"车顶左手边"那条）。
+## 实测（第 107 轮）：车顶面薄片的 x 范围只有 ±0.303（半径 ROOF_SHRINK=0.7 × HALF_W=0.5，再被
+## 六边形顶点决定），而旧值 x=-0.6 **落在车顶面之外**整整 0.297 格 —— 支架下端 y 虽然等于 ROOF_Y(1.0)，
+## 但那一点在**车顶之外**、下面是棱台侧面收进去的空气，所以看起来"没接上车体"。
+## 挪到 x=0（车正中间）后，支架正好落在车顶面中心、下端 y=ROOF_Y 与顶面完全贴合。
+## ⚠ 转塔支点（_turret.position）也用这个常量 -> 支架与炮管支点一起挪，不会错开。
+const TURRET_X := 0.0
 ## 用户口径（第 106 轮）：**炮管离【车】高度一格** —— 是离**车顶**（ROOF_Y）一格，不是离地。
 ## 所以 TURRET_Y = ROOF_Y + 1.0 = 2.0（第 105 轮这里是"离地 1.3"，即离车顶只有 0.3）。
 const TURRET_LIFT := 1.0                         # 炮管轴线离**车顶**的高度（格）
@@ -67,6 +73,7 @@ const MUZZLE_R := 0.11
 ## （同样 `radial_segments == 6`），所以探针/测试**不能靠"找六边形"来定位炮管**，
 ## 必须按名字找 —— 这里给它一个稳定名字。
 const BARREL_PRISM_NAME := "TurretPrism"
+const BODY_ROOT_NAME := "BodyRoot"          # 车体容器（测试按名字/门面定位）
 
 var _turret: Node3D = null                 # 方向机（绕 y 转）
 var _barrel: Node3D = null                 # 高低机（绕 x 转）
@@ -75,6 +82,14 @@ var _prism_mat: StandardMaterial3D = null  # 棱柱材质（发红用）
 var _body_mat: StandardMaterial3D = null
 var _dark_mat: StandardMaterial3D = null
 var _metal_mat: StandardMaterial3D = null
+## 车体容器（第 107 轮延续：**车体朝向与炮管解耦**）。
+## 用户口径：「载具的精髓就是移动与瞄准方向不一致（战列舰：车体向前、炮管垂直车体向左）」。
+## 只有【车体棱台/顶底板 + 8 轮 + 轮眉 + 车顶巡飞弹发射器】挂它下面；
+## **支架 / 方向机 `_turret` / 高低机 `_barrel` / 棱柱炮管都不在它下面** ——
+## 所以 `set_body_yaw()` 转不动炮管，`set_aim(theta, phi)` 的"世界方位角 theta"语义保持不变。
+var _body_root: Node3D = null
+var _body_yaw := 0.0
+
 var _heat := 0.0
 var _theta := 0.0
 var _phi := 0.0
@@ -108,10 +123,17 @@ func build() -> void:
 	_dark_mat = _mat(base.darkened(0.45), 0.35)
 	_metal_mat = _mat(Color(0.30, 0.32, 0.36), 0.55)
 	_prism_mat = _mat(Color(0.05, 0.05, 0.06), 0.25)
+	# 车体容器必须在 _build_hull 之前建好（车体/轮子/发射器都挂它下面）
+	_body_root = Node3D.new()
+	_body_root.name = BODY_ROOT_NAME
+	add_child(_body_root)
 	_build_hull()
 	_build_wheels()
 	_build_turret()
 	_build_loiter_launcher()
+	# 初始朝向 = **网格 +y**（= 方位角 90°，与 1×2 占格的长轴一致；容器的 identity 变换就是它）。
+	# 显式调一次，让 ody_yaw() 报出来的数**与实际几何一致**（否则默认报 0 但车头其实朝 +y）。
+	set_body_yaw(90.0)
 
 
 # ── 车体：上下两个六边形棱台（腰最宽）+ 顶面/底面水平六边形 ────────────────────
@@ -140,7 +162,7 @@ func _add_hex_band(r_top: float, r_bottom: float, h: float, y_bottom: float,
 	mi.material_override = mat
 	mi.position = Vector3(0.0, y_bottom + h * 0.5, 0.0)
 	mi.scale = Vector3(HALF_W, 1.0, HALF_L)
-	add_child(mi)
+	_body_root.add_child(mi)
 
 
 ## 一片水平的六边形薄片（顶面/底面）
@@ -155,7 +177,7 @@ func _add_hex_plate(r: float, y: float, mat: Material) -> void:
 	mi.material_override = mat
 	mi.position = Vector3(0.0, y, 0.0)
 	mi.scale = Vector3(HALF_W, 1.0, HALF_L)
-	add_child(mi)
+	_body_root.add_child(mi)
 
 
 # ── 8 个轮胎：装在**下面**那条棱台的左右斜面上（每侧 4 个）─────────────────────
@@ -174,7 +196,7 @@ func _build_wheels() -> void:
 			# 轮轴沿 x（车宽方向）-> 绕 z 转 90°；略微探出车体（"装在斜面上"）
 			mi.rotation_degrees = Vector3(0.0, 0.0, 90.0)
 			mi.position = Vector3(side * (HALF_W * 0.92), WHEEL_Y, z)
-			add_child(mi)
+			_body_root.add_child(mi)
 	# 轮眉：贴在斜面外侧的两条深色长条（一眼看出是轮式）
 	for side in [-1.0, 1.0]:
 		var box := BoxMesh.new()
@@ -183,7 +205,7 @@ func _build_wheels() -> void:
 		mi.mesh = box
 		mi.material_override = _dark_mat
 		mi.position = Vector3(side * (HALF_W * 0.98), WHEEL_Y + 0.04, 0.0)
-		add_child(mi)
+		_body_root.add_child(mi)
 
 
 # ── 炮塔：左手边 0.3 格支架 + 正六边形棱柱（方向机绕 y、高低机绕 x）──────────
@@ -253,7 +275,7 @@ func _build_turret() -> void:
 func _build_loiter_launcher() -> void:
 	var root := Node3D.new()
 	root.position = Vector3(0.30, ROOF_Y, 0.30)
-	add_child(root)
+	_body_root.add_child(root)          # 车顶设备：跟着**车体**转（不属于炮塔）
 	var box := BoxMesh.new()
 	box.size = Vector3(0.30, 0.10, 0.30)
 	var b := MeshInstance3D.new()
@@ -308,6 +330,33 @@ func aim() -> Vector2:
 	return Vector2(_theta, _phi)
 
 
+## ── 车体朝向（底盘 yaw）与炮管**解耦**（第 107 轮延续）────────────────────────
+## 用户口径：
+##   · 车体**只在移动时**转向、**没有延迟**（瞬间转）、停下保持最后朝向；
+##   · 炮管**随时可转**（10°/s、5°/s 的延迟照旧），**移动中哨兵照样生效**；
+##   · 「载具的精髓就是移动与瞄准方向不一致」（战列舰：车体向前、炮管垂直向左）。
+##
+## **角度约定与 `set_aim(theta)` 完全一致**：0° = 网格 +x（世界 +x）、90° = 网格 +y（世界 +z）、
+## 顺时针为正（`Vector2.angle()` 同一套）。所以调用方可以用**同一个方位角**分别喂两个接口：
+##   移动方向 -> `set_body_yaw(deg)`；瞄准方向 -> `set_aim(deg, phi)`，两者互不影响。
+##
+## ⚠ 实现（方案 a）：只转 `_body_root`（车体+轮子+轮眉+车顶发射器），
+##   **不碰 `_turret` / `_barrel`** —— 所以炮管的 theta/phi 语义零变化。
+##   公式与 `set_aim` 里的方向机一致（本地 +z 是车头，转 (90-deg) 让它指向方位角 deg）。
+##
+## 调用方（`battle_scene`，**由 Lead 接线**）应当在**移动指令下达/移动开始那一刻**调用一次：
+##   `model.set_body_yaw(rad_to_deg((目标格 - 当前格).angle()))` —— 不要插值、不要每帧调。
+## **停下不要回正**（用户口径）；炮管的瞄准由既有的 `set_aim` 那条链自己走。
+func set_body_yaw(deg: float) -> void:
+	_body_yaw = deg
+	if _body_root != null:
+		_body_root.rotation_degrees = Vector3(0.0, 90.0 - deg, 0.0)
+
+
+func body_yaw() -> float:
+	return _body_yaw
+
+
 ## 棱柱发红 + 变亮（用户第 105 轮口径）：
 ##   · **整根棱柱一起变红**（同一个 `_prism_mat` 覆盖整个六边形棱柱的每一面，所以天然一致）
 ##   · **变红的同时要变亮** —— 在"热量 -> 颜色"之外**再加一条"热量 -> 亮度"映射**
@@ -341,6 +390,10 @@ func heat_ratio() -> float:
 ## 所以测试**不能靠"找六边形"定位炮管** —— 这几个访问器就是为此存在的。
 func t_prism() -> MeshInstance3D:
 	return _prism_mesh
+
+
+func t_body_root() -> Node3D:
+	return _body_root
 
 
 func t_elevation() -> Node3D:

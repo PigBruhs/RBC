@@ -340,6 +340,13 @@ func do_move(u: Unit, cell: Vector2i) -> void:
 	# 走路动画：沿路径逐格"抬腿 + 小跳"，同时朝向转到行进方向（不是瞬移）
 	var path: Array[Vector2i] = path_to(u, cell)
 	_st.gm.on_move_begin(u)                     # 哨兵：这次移动的"已触发"闩清零
+	# ── 用户口径（第 107 轮）：**车体朝向与炮管朝向解耦** ──
+	#   「车体转向又没有延迟而且**只在移动时需要转向**；炮管随时都有可能转向……
+	#     载具的精髓就是移动与瞄准方向不一致（战列舰：车体向前、炮管垂直车体向左）」
+	#   所以：**移动开始那一刻转一次底盘**（无插值、停下不回正），
+	#   **炮管的 theta/phi 一行不碰**（`_lb_tick` 那条链照旧）。
+	_st._lb_turn_body(u, Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5),
+		Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5))
 	if u.visual != null and path.size() > 1:
 		u.visual.walk_path(path)
 	u.cell = cell

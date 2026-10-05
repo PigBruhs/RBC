@@ -167,21 +167,21 @@ func volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
 	for i in count:
 		var a := Spread.linear_scatter(ctr, dist, _st.rng)
 		var last := i == count - 1
-		# 立体散布：在水平落点之上再叠一个**竖直**偏移（量级与水平一致 = 球不是圆盘），
-		# 然后走 `make_bullet_at`（3D 瞄准点 -> 带俯仰的直线弹道，**仍然无重力**）。
+		# ⚠ 第 107 轮用户口径（解耦两种子弹的散布）：
+		#   「萨尼的子弹按**圆盘**、车按**球**」—— 上一轮我给她也加了竖直偏移（球），
+		#   结果她会打出向下的俯仰、**子弹穿越地图下方**。这里已经把 `vy` 删干净：
+		#   萨尼回到**水平圆盘**（`Spread.linear_scatter`）+ **水平弹道**（`make_bullet`，y0 == y1）。
+		#   立体球那条路只留给车（`Ordnance.make_cart_bullet_at`）。
 		var r := Spread.linear_radius(dist)
-		var vy := 0.0
-		if r > 0.0 and _st.rng != null:
-			vy = (_st.rng.next_float() * 2.0 - 1.0) * r
-		var p := Ordnance.make_bullet_at(u, from, Vector3(a.x, base_y + vy, a.y), last)
+		var p := Ordnance.make_bullet(u, from, a, last, base_y)
 		p.shot.target = t
 		p.shot.break_armor = break_armor
 		if pl != null and pl.is_alive():
 			p.shot.target_placeable = pl           # 锁定沙盒：子弹也一定打得中它
 		_st.field.register(p)
-		_st._log("  • %s 第 %d/%d 发子弹：目标 %s（%.1f 格，散布半径 %.2f）→ 瞄准 (%.2f, %.2f, %.2f）" % [
+		_st._log("  • %s 第 %d/%d 发子弹：目标 %s（%.1f 格，散布半径 %.2f）→ 瞄准 (%.2f, %.2f，高度 %.2f）" % [
 			u.name, i + 1, count, t.name if t != null else pl.name if pl != null else "落点",
-			dist, r, a.x, a.y, base_y + vy])
+			dist, r, a.x, a.y, base_y])
 		if not last:
 			await _st.get_tree().create_timer(gap).timeout
 	return true
@@ -198,6 +198,17 @@ func can_aim_unit(t: Unit) -> bool:
 		return false
 	return t.side != _st.active.side and _st.active.in_range_of(t.cell) \
 		and Targeting.melee_reaches(_st.active, t)
+
+
+## 这个单位的普攻是否**跳过"打力量 / 破甲"三级菜单**（第二次点直接开打）。
+## 用户口径（第 107 轮）：午餐盒的普攻是**齐射**，没有这个二选一 ——
+## 它的 `armor_break = 0`，菜单里"破甲"那条对它是死的（实测点下去毫无反应），
+## 而"打力量"虽然能出膛，却白让玩家多点一步。
+## ⚠ 只对**齐射类**生效：弓箭/近战/连发仍然保留三级菜单（那是它们真实的选择）。
+func attack_skips_power_menu(u: Unit) -> bool:
+	if u == null:
+		return false
+	return AttackProfile.basic_of(u) == AttackProfile.BASIC_SALVO
 
 
 ## 近战的高亮格：空中单位（够不着）那一格不点亮。
