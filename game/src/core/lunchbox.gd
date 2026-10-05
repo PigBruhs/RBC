@@ -201,17 +201,24 @@ class Sentry:
 		return false
 
 
-## 选目标：**第一个进入 24 格范围的目标**，锁住不放；只有它**停下**或**被摧毁**才换下一个。
-## `stopped` 由调用方给（battle_scene 判断"这一帧目标没有移动"）。
-static func pick_sentry_target(current: String, current_alive: bool, current_stopped: bool,
+## 选目标：**第一个进入 24 格范围的目标**，锁住不放。
+## ⚠ 第 105 轮用户口径修正（以本轮原话为准）：
+##   「**当目标停止移动或被摧毁时就把它移除出队列，不再会对静止目标无限攻击**」——
+##   这是在**描述当时的 bug**：只要目标一停就不再挨打。正确行为是：
+##   **锁定的目标只要还在范围里、还活着，就持续攻击它（包括它静止不动时）**；
+##   只有**目标死亡**或**离开范围**才转火下一个。
+##   所以这里**没有"停下判定"**（第 104 轮那条"连续 0.35 秒没换格就放掉"已删除）。
+static func pick_sentry_target(current: String, current_alive: bool, current_in_range: bool,
 		in_range_names: Array) -> String:
-	if current != "" and current_alive and not current_stopped:
-		return current                      # 还在动 -> 继续锁着它（哪怕后面又进来一个）
-	if current != "" and current_alive and current_stopped:
-		return ""                           # 它停下了 -> 放掉，下一帧重新挑第一个
-	if current != "" and not current_alive:
-		return ""                           # 它被摧毁了 -> 放掉
-	return "" if in_range_names.is_empty() else String(in_range_names[0])
+	if current != "" and current_alive and current_in_range:
+		return current                      # 活着 + 还在范围 -> 一直锁着（静止照打）
+	# 要转火：取队列里第一个**不是当前这个已失效目标**的（调用方给的名单不含死人，
+	# 这里再防一手"名单里还留着它"的情况，避免转火卡住）
+	for nm in in_range_names:
+		if String(nm) == current:
+			continue
+		return String(nm)
+	return ""
 
 
 # ── 扫射（普攻）：以"车→目标"连线为中轴左右摇动 ─────────────────────────────

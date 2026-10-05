@@ -116,6 +116,16 @@ func resolve_arrow_hit(sh: Ordnance.Shot, what: Dictionary) -> void:
 	var mult: float = sh.power_mult
 	if what.has("unit"):
 		var victim: Unit = what["unit"]
+		# ── 第 105 轮：齐射批次 —— 命中**只计数**，不在这里走造伤（见 `Ordnance.Volley`）──
+		# 用户口径："我说齐射是为什么？是为了让每一波的子弹命中一个角色时伤害衰减参数相等，
+		# 这样你只需要计命中数再传递给造伤模块即可，不需要每碰撞一次都走造伤公式。"
+		# 单发参数（力量/破甲）在**这一波发射时**就快照好了（`_lb_fire_wave`），这里只 +1；
+		# 真正的一次性结算在 `battle_scene._tick_volleys` → `Damage.strike_volley`。
+		# 唯一例外：杰拉尔德的"箭矢弹反"（要暂停打 QTE，需要这一发的完整上下文）——
+		# 遇到就退回下面的逐发路径，行为与批量前完全一致。
+		if sh.volley != null and not sh.volley.settled and not _st.gm.claim_arrow_deflect(victim):
+			sh.volley.add_hit(victim, float(Time.get_ticks_msec()) / 1000.0)
+			return
 		# 被动：箭矢弹反。先扣下伤害，暂停全局打 QTE，结果出来再结算（用户口径）。
 		if _st.gm.claim_arrow_deflect(victim):
 			if is_basic:

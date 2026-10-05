@@ -25,6 +25,8 @@ class Hit extends RefCounted:
 	var ignore_res: float = 0.0
 	var friendly: bool = false            # 是不是友军（日志要标出来）
 	var died: bool = false                # 这一下打死了
+	## 第 105 轮：批量结算时"这一波打中了几发"（逐发路径恒为 1）
+	var hits_landed: int = 1
 	var text: String = ""                 # 人话日志，调用方直接 _log(text)
 
 
@@ -216,6 +218,51 @@ static func strike(attacker: Unit, target: Unit, break_armor: bool, rng,
 		target.name, Combat.describe(h.result, h.pr_before, 0.0)]
 	if bonus_milli > 0:
 		h.text += "（含蓄势 +%s）" % _fmt(bonus_milli)
+	return h
+
+
+## 齐射**按波批量结算**（第 105 轮用户口径："计命中数再传递给造伤模块"）。
+##
+## 为什么可以批量：同一波的 6 发是同一瞬间朝同一方向打出去的，到同一个目标的距离
+## 基本相同 -> `bullet_mult(dist)` 的衰减参数相同 -> **单发伤害参数只需要算一次**
+## （调用方 `_lb_fire_wave` 每波算一次快照），命中只累计"打中了几发"。
+##
+## **逐点等价怎么保证**：这里对 `hits` 发**逐个调用同一个 `Combat.deal_to_unit`**
+## （破甲先、力量后、各发独立掷 RNG —— 与"每发各自走一遍 `strike`"的调用序列完全一致），
+## 只是不再为每一发生成 `Hit` / `describe` / 日志 / 收尾。实测 72 发里：
+## 公式 0.011 ms/发，而日志+收尾 0.017 ms/发 —— 批量把这部分从 72 次压到 12 次。
+static func strike_volley(attacker: Unit, target: Unit, hits: int,
+		per_power: int, per_break: int, rng) -> Hit:
+	if attacker == null or target == null or not target.is_alive() or hits <= 0:
+		return null
+	var armor0: int = target.armor_cur
+	var power0: int = target.power_cur
+	var landed := 0
+	var sum := Combat.Result.new()
+	for i in hits:
+		if not target.is_alive():
+			break                       # 中途打死了，后面的子弹不再结算（与逐发一致）
+		# ⚠ **每发都重建一份 opts**：与"逐发各自走一遍 strike"的调用序列逐字一致
+		#   （`Combat.opts` 里带 rng，复用同一个 dict 会改变掷骰/字段语义）。
+		var r := Combat.deal_to_unit(target, Combat.opts({
+			"power": per_power, "armor_break": per_break, "rng": rng,
+		}))
+		sum.break_dmg += r.break_dmg
+		sum.power_dmg += r.power_dmg
+		sum.hit = sum.hit or r.hit
+		landed += 1
+	var h := Hit.new()
+	h.unit = target
+	h.pr_before = target.pr
+	h.ignore_res = 0.0
+	h.hits_landed = landed
+	sum.note = "齐射 ×%d 发" % landed
+	h.result = sum
+	h.died = not target.is_alive()
+	h.text = "%s 齐射命中 %s ×%d 发：力 -%s / 甲 -%s%s" % [
+		attacker.name, target.name, landed,
+		_fmt(power0 - target.power_cur), _fmt(armor0 - target.armor_cur),
+		"（已阵亡）" if h.died else ""]
 	return h
 
 

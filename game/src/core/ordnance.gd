@@ -38,9 +38,10 @@ const BULLET_MAX_DIST := 32.0
 const BULLET_FLOOR_Y := 0.5
 const BULLET_LEN := 0.2
 const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
-## 午餐盒子弹的**固定破甲**（点，第 104 轮用户口径："车的子弹每发固定附加 4 点破甲"）。
+## 午餐盒子弹的**固定破甲**（点）。
 ## 不吃攻方 `armor_break`、不吃距离衰减 —— 结算在 `projectile_sink.resolve_arrow_hit`。
-const CART_BULLET_BREAK := 4
+## 第 104 轮：用户口径从 4 调到 **2**（同时车的力量 24 -> 12、护甲 90 -> 110）。
+const CART_BULLET_BREAK := 2
 
 ## ── 37mm 火箭（炮弹类）──────────────────────────────────────────────────────
 ## 用户口径（第 83 轮）：直径 0.185（原来是 0.37 的一半）、长 0.7（不变）；
@@ -165,6 +166,31 @@ const CARPET_BLAST_R := 1.0          # 地毯式轰炸爆炸半径 = 轨道炮�
 const DEFAULT_BLAST_R := 1.5         # 普攻炮击爆炸半径
 
 
+## ── 齐射批次（第 105 轮）─────────────────────────────────────────────────────
+## 同一波的 N 发子弹共享**一份伤害参数快照**（单发力量/破甲），命中只累计"打中了几发"，
+## 由 `battle_scene` 在合适时机**一次性结算**（`Damage.strike_volley`）。
+## 为什么要它：用户口径 —— 齐射的意义就是"同一波到同一目标的衰减参数相等"，
+## 所以不需要每碰撞一次都走一遍完整造伤路径（实测 72 发里 61% 的时间花在
+## 日志字符串 + `_after_damage_to_unit` 的收尾上，见临时脚本的性能对照表）。
+class Volley extends RefCounted:
+	var per_power: int = 0                   # 单发力量（已乘距离衰减，波发射时快照）
+	var per_break: int = 0                   # 单发破甲（车用子弹 = 固定值）
+	var caster: Unit = null
+	var hits: Dictionary = {}                # 目标 instance_id -> 命中数
+	var targets: Dictionary = {}             # 目标 instance_id -> Unit
+	var total_hits: int = 0
+	var settled: bool = false
+	var born_at: float = 0.0                 # 发射时刻（秒，用于兜底超时）
+	var last_hit_at: float = 0.0             # 最近一次命中的时刻（用于"这一波打完了"的判定）
+
+	func add_hit(u: Unit, now: float) -> void:
+		var id := u.get_instance_id()
+		hits[id] = int(hits.get(id, 0)) + 1
+		targets[id] = u
+		total_hits += 1
+		last_hit_at = now
+
+
 ## 一张发射单：弹道物飞完之后"打什么、打多大、要不要结束回合"全在这里
 class Shot extends RefCounted:
 	var kind: String = Projectile.KIND_SHELL
@@ -182,6 +208,8 @@ class Shot extends RefCounted:
 	var last_hit_dist: float = 0.0            # 命中瞬间离生成点走了多远（破片伤害用）
 	## 攻方力量倍率（加农炮 = 0.5：先乘 50% 再减护甲、再过抗性）
 	var power_mult: float = 1.0
+	## 第 105 轮：齐射批次。非空 = 这一发的命中**只计数**，由批次统一结算。
+	var volley: Volley = null
 
 
 # ── 构造器 ────────────────────────────────────────────────────────────────────

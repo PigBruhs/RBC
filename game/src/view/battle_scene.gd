@@ -522,7 +522,36 @@ func _dive_begin(u: Unit) -> bool:
 #   sandbox（放置/沙盒）             -> _st._pick_cell(...)  ← 预防性：拾格是放置的依赖
 # 实现在 view/aim_controller.gd。**别删**（删了调用方会在运行时炸，编译期查不出来）。
 func _begin_aim() -> void:
+	# 用户口径（第 105 轮）：巡飞弹这类技能是**点选一个敌方角色**，不是拖拽落点。
+	# skill_runner 的分派把"非 AIM_CELL"一律丢进拖拽（那个文件不在本任务写区），
+	# 所以在这里拦截：按技能自己的 aim 决定进"点选目标"还是"拖拽"。
+	if _aim_skill_id != "" and Skills.aim_of(_aim_skill_id) == Skills.AIM_UNIT:
+		_begin_unit_targeting(_aim_skill_id)
+		return
 	aim.begin_aim()
+
+
+## 进入"点选敌方角色"阶段：照远程普攻 `attackable` 的成例——把射程内的敌方角色所在格高亮，
+## 玩家点敌人即可（两次点击确认：第一次黄勾、第二次施放）。
+func _begin_unit_targeting(sid: String) -> void:
+	var d := Skills.get_def(sid)
+	var rmax: float = float(d.get("range_max", 32.0))
+	phase = Phase.CHOOSE_TARGET
+	reachable = {}
+	attackable = {}
+	_cell_targeting = false
+	_clear_pending()
+	var cc := _cc(active.cell)
+	for u in units:
+		if u == null or not u.is_alive() or u == active or u.side == active.side:
+			continue
+		if cc.distance_to(GridMath.unit_pos(u)) <= rmax:
+			attackable[u.cell] = true
+	fx.clear_hints()
+	fx.draw_hints()
+	_refresh_all()
+	_log("  🎯 选择【%s】的目标：%.0f 格内共 %d 个可选敌人（紫色高亮，点敌人即施放）" % [
+		String(d.get("name", sid)), rmax, attackable.size()])
 
 
 func _hover_cell() -> Variant:
@@ -1101,16 +1130,11 @@ func _lunchbox_tick(delta: float) -> void:
 		var lock: String = String(st["lock"])
 		var lock_u: Unit = _lb_unit_by_name(lock)
 		var alive := lock_u != null and lock_u.is_alive()
-		var stopped := false
-		if alive:
-			# "停下" = 连续 0.35 秒没换格（用户口径：直到目标停下才换下一个）
-			if lock_u.cell == st["last_cell"]:
-				st["still"] = float(st["still"]) + delta
-			else:
-				st["still"] = 0.0
-				st["last_cell"] = lock_u.cell
-			stopped = float(st["still"]) >= 0.35
-		var want := Lunchbox.pick_sentry_target(lock, alive, stopped, order)
+		# ⚠ 第 105 轮：**不再有"停下判定"**。用户口径（本轮原话，覆盖第 104 轮）：
+		#   目标只要还活着、还在 24 格内，就一直打（静止不动也照打）；
+		#   只有死亡或离开范围才转火下一个。
+		var in_range_now := in_range.has(lock)
+		var want := Lunchbox.pick_sentry_target(lock, alive, in_range_now, order)
 		if want == "":
 			want = String(order[0]) if not order.is_empty() else ""
 		st["lock"] = want
@@ -1191,6 +1215,13 @@ func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
 
 
 ## 打一波：6 发子弹。`wave_i` 只用于日志；方向取当前 `aim`（普攻时是摇动后的角度）。
+##
+## ⚠ 第 105 轮（性能）：**这一波的 6 发共享一份伤害参数快照**（`Ordnance.Volley`）——
+## 用户口径："我说齐射是为什么？是为了让每一波的子弹命中一个角色时伤害衰减参数相等，
+## 这样你只需要计命中数再传递给造伤模块即可"。所以：
+##   · 单发力量 = `floor(力量 × bullet_mult(这一波的名义距离))` —— **每波只算一次**
+##   · 单发破甲 = 车用子弹的固定值
+##   · 命中只累加计数（`resolve_arrow_hit` 里 +1），由 `_tick_volleys` 一次性结算
 func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 		dist: float = 12.0) -> void:
 	var aim: Lunchbox.Aim = st["aim"]
@@ -1199,6 +1230,13 @@ func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 	var dir := Vector2(cos(th), sin(th))
 	var fly_y: float = tgt_y
 	var perp := Vector2(-dir.y, dir.x)
+	var volley := Ordnance.Volley.new()
+	volley.caster = u
+	volley.per_power = int(floor(float(u.power_cur) * Damage.bullet_mult(dist)))
+	volley.per_break = Rules.points_to_milli(Ordnance.CART_BULLET_BREAK)
+	volley.born_at = float(Time.get_ticks_msec()) / 1000.0
+	volley.last_hit_at = volley.born_at
+	_volleys.append(volley)
 	for k in Lunchbox.SALVO_PER_WAVE:
 		var off := Lunchbox.spread_offset(rng)                    # 散布 1 格
 		var aim_pt := base + dir * dist + off
@@ -1206,15 +1244,59 @@ func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 		aim_pt.y = clampf(aim_pt.y, float(PY) + 0.5, float(PY + PH) - 0.5)
 		var lat := (float(k) - 2.5) * 0.06                        # 6 发沿炮口横向铺开一点
 		var from := _lb_muzzle(u, st) + Vector3(perp.x * lat, 0.0, perp.y * lat)
-		# 第 104 轮：车用**新弹种**（破甲固定 +4、力量 = 车力量 × 衰减；见 docs §12.2b）
+		# 第 104 轮：车用**新弹种**（破甲固定、力量 = 车力量 × 衰减；见 docs §12.2b）
 		var p := Ordnance.make_cart_bullet(u, from, aim_pt, false, fly_y)
 		p.shot.target = null
+		p.shot.volley = volley                                    # 第 105 轮：挂上批次
 		field.register(p)
 	var m := _lb_model(u)
 	if m != null:
 		m.set_heat_ratio(Lunchbox.heat_ratio(st["heat"]))
-	_log("  🚙 %s 齐射第 %d 波：%d 发出膛（theta %.1f° / phi %.1f°）" % [
-		u.name, wave_i + 1, Lunchbox.SALVO_PER_WAVE, aim.theta, aim.phi])
+	_log("  🚙 %s 齐射第 %d 波：%d 发出膛（theta %.1f° / phi %.1f°，单发 %d 力 / %d 甲，衰减 %.0f%%）" % [
+		u.name, wave_i + 1, Lunchbox.SALVO_PER_WAVE, aim.theta, aim.phi,
+		volley.per_power / 1000, volley.per_break / 1000, Damage.bullet_mult(dist) * 100.0])
+
+
+# ── 齐射批次结算（第 105 轮）──────────────────────────────────────────────────
+## 一波的子弹"打完了"就**一次性结算**：每个目标只走一次造伤收尾（日志 + `_after_damage_to_unit`），
+## 中间那 6 次命中只做 `+1` 计数 → 这就是卡顿的修法（实测 72 次收尾 → ≤12 次）。
+## 判定"打完了"：
+##   · 距最近一次命中 ≥ `VOLLEY_GRACE_SEC`（同一波 6 发几乎同时命中，散布仅 1 格 → 0.2 秒足够）
+##   · 或这一波已经飞满 `VOLLEY_MAX_SEC`（兜底：一发都没中的波不能永远挂着）
+## ⚠ 若某发子弹在结算**之后**才命中（远距离目标），`resolve_arrow_hit` 看到 `settled`
+##   就退回逐发路径 —— 不会漏伤害。
+const VOLLEY_GRACE_SEC := 0.2
+const VOLLEY_MAX_SEC := 3.0
+## 在途的齐射批次
+var _volleys: Array = []
+
+
+func _tick_volleys() -> void:
+	if _volleys.is_empty():
+		return
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	for v in _volleys.duplicate():
+		var volley: Ordnance.Volley = v
+		var age := now - volley.born_at
+		var idle := now - volley.last_hit_at
+		if volley.total_hits == 0:
+			if age < VOLLEY_MAX_SEC:
+				continue                     # 还没打中任何东西，等（最多 3 秒）
+		elif idle < VOLLEY_GRACE_SEC:
+			continue                         # 这一波还在命中，再等等
+		volley.settled = true
+		for id in volley.targets.keys():
+			var t: Unit = volley.targets[id]
+			var n: int = int(volley.hits[id])
+			if t == null or not t.is_alive() or n <= 0:
+				continue
+			var h: Damage.Hit = Damage.strike_volley(volley.caster, t, n,
+				volley.per_power, volley.per_break, rng)
+			if h == null:
+				continue
+			_log(h.text)
+			_after_damage_to_unit(t)
+		_volleys.erase(volley)
 
 
 ## ── 枪榴弹：地上的模型 + 4 回合后爆炸出 8 枚破片 ─────────────────────────
@@ -1712,6 +1794,9 @@ func _process(delta: float) -> void:
 	# 轮式齐射午餐盒（第 104 轮）：方向机/高低机跟随 + 哨兵索敌开火 + 热量冷却 + 棱柱变红。
 	# 放在最后：它读的是本帧最终位置，转塔与开火都以稳定状态为准。
 	_lunchbox_tick(delta)
+	# 齐射批次结算（第 105 轮）：一波的子弹打完了就**一次性**造伤（每个目标一次），
+	# 而不是每碰撞一次都走一遍完整造伤路径 —— 这是用户报的卡顿的修法。
+	_tick_volleys()
 
 
 ## 队列条动画计时：到点就收尾；期间攒下的刷新请求在这里补做（最小间隔 0.5 秒）
@@ -1780,90 +1865,113 @@ func _unhandled_input(event: InputEvent) -> void:
 			if phase != Phase.PLACE:
 				_on_blank_click()
 			return
-		var t := _unit_at(cell)
+		# 第 105 轮：把"点某一格"的逻辑抽成独立函数 —— 以前它**内联在 `_unhandled_input` 里**，
+		# 于是**测试无法驱动"点敌人"这条真实路径**（上一轮巡飞弹就因此漏测：底层函数是好的，
+		# 但点选路径没接上，真机上点了没反应）。抽出来后 `t_click_cell()` 走的
+		# 就是真机鼠标点击的同一条代码，测试才真的能覆盖用户交互。
+		_click_cell(cell)
+		return
 
-		# ── 放置阶段：点地面放下选中的道具 ──
-		if phase == Phase.PLACE:
-			if _place_kind == "":
-				pass
-				return
-			if _same_pending("place", cell):
-				_place_at(cell)
-				_clear_pending()
-			else:
-				_set_pending("place", cell)
-			_refresh_all()
+
+## 点某一格的完整分派（放置 / 选目标 / 移动确认 / 选单位）。
+## ⚠ 从 `_unhandled_input` 抽出来的，**逻辑必须与抽取前逐字一致** —— 它同时是测试的唯一驱动入口。
+func _click_cell(cell: Vector2i) -> void:
+	var t := _unit_at(cell)
+
+	if phase == Phase.PLACE:
+		if _place_kind == "":
 			return
+		if _same_pending("place", cell):
+			_place_at(cell)
+			_clear_pending()
+		else:
+			_set_pending("place", cell)
+		_refresh_all()
+		return
 
-		if phase == Phase.CHOOSE_TARGET:
-			# 点格子类目标：技能（俯冲轰炸）或"点格子"类普攻
-			# 用户口径（第 84 轮）：粉色可选格 + **两次点击确认**（第一次出黄勾）
-			if _cell_targeting:
-				skills_mod.click_cell_target(cell)
-				return
-			# 用户口径：远程和近战【选单位都要确认】—— 第一次点只出黄勾，第二次才弹攻击菜单
-			# 沙盒元素（木刺/土堆）也可以被锁定，流程一样：第一次出勾，第二次打
-			var pl_t: Placeable = _placeable_at(cell) if t == null else null
-			if pl_t != null and attackable.has(cell):
-				if _same_pending("place", cell):
+	if phase == Phase.CHOOSE_TARGET:
+		# 点格子类目标：技能（俯冲轰炸）或"点格子"类普攻
+		# 用户口径（第 84 轮）：粉色可选格 + **两次点击确认**（第一次出黄勾）
+		if _cell_targeting:
+			skills_mod.click_cell_target(cell)
+			return
+		# 用户口径（第 105 轮）：**点选单位**的技能（巡飞弹）—— 点敌人 = 施放。
+		# 与远程普攻同一套交互（两次点击确认），但直接走技能施放而不是弹攻击菜单。
+		if _aim_skill_id != "" and Skills.aim_of(_aim_skill_id) == Skills.AIM_UNIT:
+			if t != null and t.side != active.side and attackable.has(cell):
+				if _same_pending("skill_unit", cell):
+					var sid_cast := _aim_skill_id
+					_aim_skill_id = ""
 					_clear_pending()
-					attack.attack_target_placeable(pl_t)
+					skills_mod.perform_skill(active, sid_cast, GridMath.unit_pos(t), t.cell)
 				else:
-					_set_pending("place", cell, null)
-					_refresh_all()
-				return
-			if t != null and t.side != active.side and attackable.has(cell) and attack.can_aim_unit(t):
-				if _same_pending("attack", cell):
-					_clear_pending()
-					action_menu.show_attack_menu(t)
-				else:
-					_set_pending("attack", cell, t)
+					_set_pending("skill_unit", cell, t)
 					_refresh_all()
 			else:
-				# 点到空白 / 自己人 / 打不到的格子：收起攻击菜单与紫色范围，回到未选择
 				_on_blank_click()
 			return
-
-		# ── 移动待确认：同一格再点一次才真的走 ──
-		if phase == Phase.MOVE_CONFIRM:
-			if _same_pending("move", cell) and reachable.has(cell):
+		# 用户口径：远程和近战【选单位都要确认】—— 第一次点只出黄勾，第二次才弹攻击菜单
+		# 沙盒元素（木刺/土堆）也可以被锁定，流程一样：第一次出勾，第二次打
+		var pl_t: Placeable = _placeable_at(cell) if t == null else null
+		if pl_t != null and attackable.has(cell):
+			if _same_pending("place", cell):
 				_clear_pending()
-				_do_move(active, cell)
-			elif reachable.has(cell):
-				_set_pending("move", cell, active)
+				attack.attack_target_placeable(pl_t)
 			else:
+				_set_pending("place", cell, null)
+				_refresh_all()
+			return
+		if t != null and t.side != active.side and attackable.has(cell) and attack.can_aim_unit(t):
+			if _same_pending("attack", cell):
 				_clear_pending()
-				_cancel_to_menu()
-			_refresh_all()
-			return
-
-		# IDLE：点自己人（若轮到它）弹出菜单
-		if t != null and t.is_manual():
-			if t == active and t.is_alive():
-				_select_for_detail(t)
-				action_menu.show_action_menu()
+				action_menu.show_attack_menu(t)
 			else:
-				_select_for_detail(t)
-			return
-		# 点空格：MENU 阶段（还没三选一）且已选"移动" -> 进入移动确认
-		if active != null and active.is_manual() and phase == Phase.MENU \
-				and not active.has_acted and reachable.has(cell):
+				_set_pending("attack", cell, t)
+				_refresh_all()
+		else:
+			# 点到空白 / 自己人 / 打不到的格子：收起攻击菜单与紫色范围，回到未选择
+			_on_blank_click()
+		return
+
+	# ── 移动待确认：同一格再点一次才真的走 ──
+	if phase == Phase.MOVE_CONFIRM:
+		if _same_pending("move", cell) and reachable.has(cell):
+			_clear_pending()
+			_do_move(active, cell)
+		elif reachable.has(cell):
 			_set_pending("move", cell, active)
-			phase = Phase.MOVE_CONFIRM
-			_refresh_all()
-			return
-		var pl := _placeable_at(cell)
-		if pl != null:
-			# 点沙盒道具 -> 显示它的描述与数据
-			_clear_selection()
-			action_menu.show_placeable_info(pl)
-			return
-		if t == null:
-			# 点空白 -> 不选任何人：收起详情栏与二级菜单，只留队列
-			_clear_selection()
-			return
-		if t != null:
+		else:
+			_clear_pending()
+			_cancel_to_menu()
+		_refresh_all()
+		return
+
+	# IDLE：点自己人（若轮到它）弹出菜单
+	if t != null and t.is_manual():
+		if t == active and t.is_alive():
 			_select_for_detail(t)
+			action_menu.show_action_menu()
+		else:
+			_select_for_detail(t)
+		return
+	# 点空格：MENU 阶段（还没三选一）且已选"移动" -> 进入移动确认
+	if active != null and active.is_manual() and phase == Phase.MENU \
+			and not active.has_acted and reachable.has(cell):
+		_set_pending("move", cell, active)
+		phase = Phase.MOVE_CONFIRM
+		_refresh_all()
+		return
+	var pl := _placeable_at(cell)
+	if pl != null:
+		# 点沙盒道具 -> 显示它的描述与数据
+		_clear_selection()
+		action_menu.show_placeable_info(pl)
+		return
+	if t == null:
+		# 点空白 -> 不选任何人：收起详情栏与二级菜单，只留队列
+		_clear_selection()
+		return
+	_select_for_detail(t)
 
 
 ## 右键：退出当前选项（选目标 / 瞄准 / 攻击菜单），把二级菜单重新显示出来
@@ -2481,6 +2589,17 @@ func t_clamp_cell(c: Vector2i) -> Vector2i:
 
 func t_click_cell_target(cell: Vector2i) -> bool:
 	return skills_mod.click_cell_target(cell)
+
+
+## 第 105 轮：**真实点击路径**的唯一测试入口 —— 走的就是鼠标左键点击同一段代码
+## （`_unhandled_input` -> `_click_cell`）。上一轮巡飞弹漏测就是因为没有这个门面：
+## 只能直接调底层 `perform_skill`，测不到"点敌人"这条交互，结果真机上点了没反应。
+func t_click_cell(cell: Vector2i) -> void:
+	_click_cell(cell)
+
+
+func t_attackable_cells() -> Dictionary:
+	return attackable
 
 func t_do_move(u: Unit, cell: Vector2i) -> void:
 	turn.do_move(u, cell)

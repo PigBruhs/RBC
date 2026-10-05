@@ -2229,6 +2229,31 @@ func _initialize() -> void:
 			_s.t_confirm_cell_target(tcell)
 			eff_ui = _skill_effect(sid_s, caster)
 			_chk(targeting, "%s：点格子类技能会进入选格阶段（不拖拽、不投标记球）" % sid_s)
+		elif aim_kind == Skills.AIM_UNIT:
+			# ⚠ 第 105 轮：`AIM_UNIT` = **点选一个敌方角色**（用户口径："一定要做选择目标而不是瞄准！"）。
+			#   这条就是**用户真正会走的那条路**：选技能 -> 高亮敌人 -> 点敌人（两次确认）-> 施放。
+			#   （上一轮这里还是拖拽写法，所以巡飞弹在真机上"点了没反应"—— 底层函数是好的，是 UI 路径对不上。）
+			#   ⚠ 必须用 `t_click_cell`（= 鼠标点击那条真实代码），**不能**用 `ui_click_unit`
+			#   （那是"选中看属性"的入口，不走选目标/施放的分派）。
+			_s.t_choose_skill(sid_s)
+			var unit_targeting: bool = _s.phase == _s.Phase.CHOOSE_TARGET
+			# 挑一个在射程内、且不是施法者自己的敌方单位当目标
+			var picked: Unit = null
+			var reach := float(Skills.get_def(sid_s).get("range_max", 32.0))
+			for cand in _s.units:
+				if cand == null or not cand.is_alive() or cand.side == caster.side:
+					continue
+				if GridMath.unit_pos(caster).distance_to(GridMath.unit_pos(cand)) <= reach:
+					picked = cand
+					break
+			if picked == null:
+				_chk(false, "%s：射程内找不到可点选的敌方目标" % sid_s)
+			else:
+				# 第一次点 = 黄勾确认，第二次点 = 真的施放（与弓箭手同一套两次确认）
+				_s.t_click_cell(picked.cell)
+				_s.t_click_cell(picked.cell)
+				eff_ui = _skill_effect(sid_s, caster)
+			_chk(unit_targeting, "%s：点选目标类技能会进入选目标阶段（不拖拽）" % sid_s)
 		else:
 			_s.t_choose_skill(sid_s)
 			eff_ui = _skill_effect(sid_s, caster)

@@ -114,6 +114,12 @@ static func basic_of(u: Unit) -> String:
 
 
 static func aim_of(u: Unit) -> String:
+	# ⚠ 第 105 轮用户口径：「**车普攻和巡飞弹都要点选目标瞄准！**」
+	# 午餐盒与直升机**共用** `BASIC_SALVO` 模板（同一套"多波齐射"实现），
+	# 但两者的瞄准交互不同：直升机仍是拖拽（火箭投掷手感），**车改成点选敌人**。
+	# 所以这里按**名字**覆盖模板的 aim —— 只影响车，直升机的 `AIM_DRAG` 一字不变。
+	if u != null and Unit.base_name(u.name) == LUNCHBOX_NAME:
+		return AIM_TARGET
 	return String(for_unit(u)["aim"])
 
 

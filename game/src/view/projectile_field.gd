@@ -197,7 +197,12 @@ func step(delta: float) -> void:
 
 		# ③ 撞到角色 / 挡道道具：
 		#    箭矢类是"直接命中"，炮弹类是"当成在命中处落地"（用户口径第 87 轮）
-		var impact := Ballistics.body_impact(p.kind)
+		# ⚠ 第 105 轮：**安全引信必须先解除**（`arm_dist`，飞够那么远才武装）。
+		#   缺这一道的后果：午餐盒的巡飞弹**生成点就在车自己身上**，
+		#   于是当帧就判定"撞到车"→ `body_impact` 自杀 —— 用户报的"无法召唤巡飞弹"就是这个。
+		#   `arm_dist = 0` 是缺省（沙盒发射器等既有弹种）→ 永远已武装 → **既有行为逐字不变**。
+		var armed: bool = p.flown >= p.arm_dist
+		var impact := Ballistics.body_impact(p.kind) if armed else ""
 		if impact != "" and hit_test.is_valid():
 			var what: Dictionary = hit_test.call(p, prev, cur)
 			if not what.is_empty():

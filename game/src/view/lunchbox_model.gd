@@ -38,18 +38,31 @@ const WHEEL_W := 0.16
 const WHEEL_Z := [-0.75, -0.25, 0.25, 0.75]     # 每侧 4 个
 const WHEEL_Y := 0.20
 
-## 炮塔：车顶**左手边**（车头朝 +z 时，左手边 = -x），支架 0.3 格高，枪口离地 1.3 格
+## 炮塔：车顶**左手边**（车头朝 +z 时，左手边 = -x），**一根棍子**支起炮管，
+## 支点在棱柱的**前 2/3 处**（后 1/3）；枪口离地 1.3 格
 ## —— 这两个数与 `Lunchbox.PHI_MIN_DEG = -15°` 的推导是同一套（见 lunchbox.gd）。
-const BRACKET_H := 0.3
+## ⚠ 用户第 105 轮口径：
+##   · 支架是**一根棍子**（不是方块底座）
+##   · **六边形棱柱炮管长 0.7 格**
+##   · 棱柱的**中轴线（顶面六边形中心 -> 底面六边形中心）= 瞄准方向**
+##   · 支点在整个棱柱的 **2/3 处**：炮口那侧探出 2/3、后方留 1/3
 const TURRET_X := -0.6
 const TURRET_Y := 1.3
-const PRISM_R := 0.24
-const PRISM_H := 0.30
-const BARREL_LEN := 0.62
-const BARREL_R := 0.055
+const STICK_R := 0.045                      # 支撑棍的半径
+const BARREL_LEN := 0.70                    # 六边形棱柱炮管长度（用户指定 0.7 格）
+const BARREL_BACK_FRAC := 1.0 / 3.0         # 支点之后的占比（= 前 2/3 探出）
+const PRISM_R := 0.34                       # 棱柱半径（用户要求『比现在大』：0.24 -> 0.34）
+const MUZZLE_LEN := 0.16                    # 棱柱前端再探出的细管（纯装饰）
+const MUZZLE_R := 0.075
+
+## 棱柱炮管那个网格节点的名字。⚠ 车顶**右侧的巡飞弹发射器也有一圈六边形光环**
+## （同样 `radial_segments == 6`），所以探针/测试**不能靠"找六边形"来定位炮管**，
+## 必须按名字找 —— 这里给它一个稳定名字。
+const BARREL_PRISM_NAME := "TurretPrism"
 
 var _turret: Node3D = null                 # 方向机（绕 y 转）
 var _barrel: Node3D = null                 # 高低机（绕 x 转）
+var _prism_mesh: MeshInstance3D = null     # 六边形棱柱炮管（测试按名字/这个引用定位）
 var _prism_mat: StandardMaterial3D = null  # 棱柱材质（发红用）
 var _body_mat: StandardMaterial3D = null
 var _dark_mat: StandardMaterial3D = null
@@ -167,43 +180,57 @@ func _build_wheels() -> void:
 
 # ── 炮塔：左手边 0.3 格支架 + 正六边形棱柱（方向机绕 y、高低机绕 x）──────────
 func _build_turret() -> void:
-	# 支架（0.3 格高）
-	var bracket := BoxMesh.new()
-	bracket.size = Vector3(0.30, BRACKET_H, 0.30)
-	var b := MeshInstance3D.new()
-	b.mesh = bracket
-	b.material_override = _dark_mat
-	b.position = Vector3(TURRET_X, ROOF_Y + BRACKET_H * 0.5, 0.0)
-	add_child(b)
+	# 支架 = **一根棍子**（用户第 105 轮口径："一根棍子支撑着一个水平放置的六边形棱柱炮管的 2/3 处"）。
+	# 棍子从车顶竖直上来，支点在整个棱柱的 **前 2/3 / 后 1/3** 处
+	# —— 即支点偏后、**炮口那侧探出 2/3**（`BARREL_BACK_FRAC` 是支点之后的那 1/3）。
+	var stick_h: float = TURRET_Y - ROOF_Y
+	var stick := CylinderMesh.new()
+	stick.radial_segments = 8
+	stick.top_radius = STICK_R
+	stick.bottom_radius = STICK_R
+	stick.height = stick_h
+	var s := MeshInstance3D.new()
+	s.mesh = stick
+	s.material_override = _dark_mat
+	s.position = Vector3(TURRET_X, ROOF_Y + stick_h * 0.5, 0.0)
+	add_child(s)
 	# 方向机（yaw）：整体绕 y
 	_turret = Node3D.new()
 	_turret.position = Vector3(TURRET_X, TURRET_Y, 0.0)
 	add_child(_turret)
-	# 高低机（pitch）：炮管 + 棱柱一起绕 x
+	# 高低机（pitch）：棱柱炮管绕 x
 	_barrel = Node3D.new()
 	_turret.add_child(_barrel)
-	# 正六边形棱柱（发红的就是它）
+	# 炮管 = **水平放置的正六边形棱柱**，长 0.7 格。
+	# ⚠ 关键（用户口径）：**棱柱的中轴线 = 瞄准方向** ——
+	#   `CylinderMesh` 的轴默认是**局部 +y**，所以这里把它转成**局部 +z**（= 瞄准轴），
+	#   于是"顶面六边形中心 -> 底面六边形中心"这条线就指向炮口方向。
+	#   同时把它**沿 -z 偏移**，让棍子的支点落在"前 2/3 / 后 1/3"处。
 	var prism := CylinderMesh.new()
 	prism.radial_segments = 6
 	prism.top_radius = PRISM_R
 	prism.bottom_radius = PRISM_R
-	prism.height = PRISM_H
+	prism.height = BARREL_LEN
 	var p := MeshInstance3D.new()
 	p.mesh = prism
 	p.material_override = _prism_mat
-	p.position = Vector3(0.0, 0.0, 0.0)
+	p.name = BARREL_PRISM_NAME
+	p.rotation_degrees = Vector3(90.0, 0.0, 0.0)      # 轴：局部 +y -> 局部 +z
+	# 棱柱中心相对支点：朝炮口方向偏 (0.5 - 后段占比) × 全长
+	p.position = Vector3(0.0, 0.0, BARREL_LEN * (0.5 - BARREL_BACK_FRAC))
 	_barrel.add_child(p)
-	# 炮管：从棱柱中心朝 +z 伸出去（枪口离地 TURRET_Y = 1.3 格）
+	_prism_mesh = p
+	# 炮口：棱柱最前端再探出一小截细管（纯装饰，让"枪口"看得出来）
 	var tube := CylinderMesh.new()
 	tube.radial_segments = 10
-	tube.top_radius = BARREL_R
-	tube.bottom_radius = BARREL_R
-	tube.height = BARREL_LEN
+	tube.top_radius = MUZZLE_R
+	tube.bottom_radius = MUZZLE_R
+	tube.height = MUZZLE_LEN
 	var t := MeshInstance3D.new()
 	t.mesh = tube
 	t.material_override = _metal_mat
-	t.rotation_degrees = Vector3(90.0, 0.0, 0.0)          # 圆柱默认沿 y -> 转成沿 z
-	t.position = Vector3(0.0, 0.0, BARREL_LEN * 0.5)
+	t.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	t.position = Vector3(0.0, 0.0, BARREL_LEN * (1.0 - BARREL_BACK_FRAC) + MUZZLE_LEN * 0.5)
 	_barrel.add_child(t)
 
 
@@ -266,20 +293,47 @@ func aim() -> Vector2:
 	return Vector2(_theta, _phi)
 
 
-## 棱柱发红：0 = 黑（冷却后），1 = 最红（第 12 波）。
+## 棱柱发红 + 变亮（用户第 105 轮口径）：
+##   · **整根棱柱一起变红**（同一个 `_prism_mat` 覆盖整个六边形棱柱的每一面，所以天然一致）
+##   · **变红的同时要变亮** —— 在"热量 -> 颜色"之外**再加一条"热量 -> 亮度"映射**
+##   · **冷却时逐渐变黑**（`r` 是连续值，所以插值是**平滑**的，不是阶梯）
+##   · 0 = 黑（冷却后），1 = 最红最亮（第 12 波）
+const HEAT_COLD := Color(0.05, 0.05, 0.06)      # 冷却后的深色
+const HEAT_HOT := Color(1.0, 0.12, 0.06)        # 最红
+const HEAT_EMIT_MIN := 0.35                     # 亮度下限（热量 0 也留一点自发光，避免"跳黑"）
+const HEAT_EMIT_MAX := 6.0                      # 亮度上限（热量 1 时明显更亮）
+
 func set_heat_ratio(r: float) -> void:
 	_heat = clampf(r, 0.0, 1.0)
 	if _prism_mat == null:
 		return
-	var c := Color(0.05, 0.05, 0.06).lerp(Color(1.0, 0.12, 0.06), _heat)
+	# ① 热量 -> 颜色（平滑 lerp）
+	var c := HEAT_COLD.lerp(HEAT_HOT, _heat)
 	_prism_mat.albedo_color = c
-	_prism_mat.emission_enabled = _heat > 0.02
+	# ② 热量 -> 亮度（独立的一条映射；**始终开启自发光**，靠倍率连续变化，
+	#    这样热量从 1 掉到 0 的过程是逐渐变暗 -> 变黑，不会在中途跳一下）
+	_prism_mat.emission_enabled = true
 	_prism_mat.emission = c
-	_prism_mat.emission_energy_multiplier = 3.0 * _heat
+	_prism_mat.emission_energy_multiplier = lerpf(HEAT_EMIT_MIN, HEAT_EMIT_MAX, _heat)
 
 
 func heat_ratio() -> float:
 	return _heat
+
+
+## ── 测试门面（第 105 轮）────────────────────────────────────────────────
+## ⚠ 车顶右侧的巡飞弹发射器也有一圈六边形光环（同样 `radial_segments == 6`），
+## 所以测试**不能靠"找六边形"定位炮管** —— 这几个访问器就是为此存在的。
+func t_prism() -> MeshInstance3D:
+	return _prism_mesh
+
+
+func t_elevation() -> Node3D:
+	return _barrel
+
+
+func t_traverse() -> Node3D:
+	return _turret
 
 
 ## 枪口在**本地坐标**里的位置（探针核对"枪口离地 1.3 格 / 横向偏 0.6 格 / 朝向 theta,phi"用）
