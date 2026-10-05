@@ -117,3 +117,4 @@ static func reflect_offset(dist: float, speed: float, rng: RngService) -> Vector
 
 static func reflect_scatter(dest: Vector2, dist: float, speed: float, rng: RngService) -> Vector2:
 	return dest + reflect_offset(dist, speed, rng)
+

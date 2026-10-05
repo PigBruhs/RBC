@@ -147,6 +147,9 @@ func basic_salvo(u: Unit, aim: Vector2) -> bool:
 
 ## 连发实现。间隔依次出膛，**每发各自判定命中**，
 ## 落点吃"玩家侧线性散布"（r = 距离/12，12 格 ≈ 1 格）——所以选中目标也不一定打中。
+## ⚠ 第 106 轮用户口径：「**我需要立体球状散布**」——
+##   连发也是**子弹**，所以散布与午餐盒齐射同为**立体球**（不是水平圆盘）：
+##   瞄准点带 y 偏移 → 弹道带俯仰 → 远处会从头顶飞过、或者打进地里。
 func volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
 		break_armor: bool, prof: Dictionary) -> bool:
 	var count := int(prof.get("shots", 3))
@@ -160,18 +163,25 @@ func volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
 	var dist := GridMath.cell_center(u.cell).distance_to(ctr)
 	# 高度轴（第 83 轮）：打悬空单位要把弹道抬到它的身体中心
 	var fly_y: float = Targeting.aim_height(t) if t != null and t.is_alive() else -1.0
+	var base_y: float = fly_y if fly_y >= 0.0 else from.y
 	for i in count:
 		var a := Spread.linear_scatter(ctr, dist, _st.rng)
 		var last := i == count - 1
-		var p := Ordnance.make_bullet(u, from, a, last, fly_y)
+		# 立体散布：在水平落点之上再叠一个**竖直**偏移（量级与水平一致 = 球不是圆盘），
+		# 然后走 `make_bullet_at`（3D 瞄准点 -> 带俯仰的直线弹道，**仍然无重力**）。
+		var r := Spread.linear_radius(dist)
+		var vy := 0.0
+		if r > 0.0 and _st.rng != null:
+			vy = (_st.rng.next_float() * 2.0 - 1.0) * r
+		var p := Ordnance.make_bullet_at(u, from, Vector3(a.x, base_y + vy, a.y), last)
 		p.shot.target = t
 		p.shot.break_armor = break_armor
 		if pl != null and pl.is_alive():
 			p.shot.target_placeable = pl           # 锁定沙盒：子弹也一定打得中它
 		_st.field.register(p)
-		_st._log("  • %s 第 %d/%d 发子弹：目标 %s（%.1f 格，散布半径 %.2f）→ 瞄准 (%.2f, %.2f）" % [
+		_st._log("  • %s 第 %d/%d 发子弹：目标 %s（%.1f 格，散布半径 %.2f）→ 瞄准 (%.2f, %.2f, %.2f）" % [
 			u.name, i + 1, count, t.name if t != null else pl.name if pl != null else "落点",
-			dist, Spread.linear_radius(dist), a.x, a.y])
+			dist, r, a.x, a.y, base_y + vy])
 		if not last:
 			await _st.get_tree().create_timer(gap).timeout
 	return true

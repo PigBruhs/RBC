@@ -201,24 +201,27 @@ class Sentry:
 		return false
 
 
-## 选目标：**第一个进入 24 格范围的目标**，锁住不放。
-## ⚠ 第 105 轮用户口径修正（以本轮原话为准）：
-##   「**当目标停止移动或被摧毁时就把它移除出队列，不再会对静止目标无限攻击**」——
-##   这是在**描述当时的 bug**：只要目标一停就不再挨打。正确行为是：
-##   **锁定的目标只要还在范围里、还活着，就持续攻击它（包括它静止不动时）**；
-##   只有**目标死亡**或**离开范围**才转火下一个。
-##   所以这里**没有"停下判定"**（第 104 轮那条"连续 0.35 秒没换格就放掉"已删除）。
+## 选目标：**第一个进入 24 格范围、并且正在移动的敌人**，锁住不放。
+## ⚠ 第 106 轮用户口径（**覆盖第 104/105 轮**，以本轮原话为准）：
+##   「车的哨兵模式仍然会对静止目标开火！修复！**不应该对静止目标开火**！
+##     **也不应该对友方角色开火**（无论是否移动）**只能误伤**」
+## 所以合法目标必须**同时**满足：敌方 ∧ 活着 ∧ 在范围内 ∧ **正在移动**。
+##   · 静止的敌人 -> 不是合法目标，**不开火**（也就自然会转火到下一个在动的）
+##   · 友方 -> 永远不进候选（由调用方过滤；这里只认 `in_range_names`）
+##   · 误伤 -> 与本函数无关：开火时不做阵营过滤，友方站在弹道上照样吃伤害
+## "停下后怎么办"的选择：**立刻转下一个在动的**（而不是停火等它再动）——
+##   依据用户第 104 轮原话"直到目标**停下**或被摧毁，然后才会转火到第二个"：
+##   停下本来就是"换目标"的触发条件之一，只是当时的实现漏了"静止不开火"这一半。
 static func pick_sentry_target(current: String, current_alive: bool, current_in_range: bool,
-		in_range_names: Array) -> String:
-	if current != "" and current_alive and current_in_range:
-		return current                      # 活着 + 还在范围 -> 一直锁着（静止照打）
-	# 要转火：取队列里第一个**不是当前这个已失效目标**的（调用方给的名单不含死人，
-	# 这里再防一手"名单里还留着它"的情况，避免转火卡住）
-	for nm in in_range_names:
+		current_moving: bool, moving_names: Array) -> String:
+	if current != "" and current_alive and current_in_range and current_moving:
+		return current                      # 活着 + 在范围内 + 在动 -> 继续锁着它
+	# 转火：取队列里第一个**不是当前这个已失效目标**的（名单里只有"在动的敌人"）
+	for nm in moving_names:
 		if String(nm) == current:
 			continue
 		return String(nm)
-	return ""
+	return ""                                   # 没有合法目标 -> 不开火
 
 
 # ── 扫射（普攻）：以"车→目标"连线为中轴左右摇动 ─────────────────────────────
@@ -248,8 +251,16 @@ static func wave_phi(base_theta: float, i: int, dist: float, muzzle_y: float,
 	return rad_to_deg(atan2(target_y - muzzle_y, horiz))
 
 
-## 散布 1 格：在落点周围半径 1 格内取一个随机偏移（用项目 RngService，可复现）。
+## 散布 1 格（**水平圆盘**口径，保留给平面用途）。
 static func spread_offset(rng: RngService) -> Vector2:
 	var a := rng.next_float() * TAU
 	var r := sqrt(rng.next_float()) * SALVO_SPREAD_R      # 面积均匀的圆盘
 	return Vector2(cos(a), sin(a)) * r
+
+
+## 散布 1 格（**立体球内均匀**，第 106 轮用户口径："我需要立体球状散步"）。
+## ⚠ 旧实现只用上面那个 `Vector2`（水平圆盘）→ 垂直方向散布恒为 0、子弹平行飞；
+## 现在齐射改用它：返回 Vector3，y 分量变成弹道的俯仰偏移（直线，不引入重力）。
+## 复用 `Spread.ball_offset`（球面均匀方向 + `∛u` 半径 = 球内均匀）。
+static func spread_offset_3d(rng: RngService) -> Vector3:
+	return Spread.ball_offset(SALVO_SPREAD_R, rng)

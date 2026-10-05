@@ -124,7 +124,22 @@ static func aim_of(u: Unit) -> String:
 
 
 ## 普攻的精力消耗。数值只有一处来源：写了 level 的看关卡配置，其余看表。
+## ⚠ 第 106 轮用户口径：「**车普攻不应该消耗精力**」。
+## 车与直升机**共用** `BASIC_SALVO` 模板，而模板的 cost = 4 是**直升机**的
+## （"直升机普攻需要精力"是既有口径，不能动）。所以这里按**名字**覆盖：
+## 午餐盒 → 0，直升机 → 仍 4。套路与 `aim_of` 完全一致。
+## （顺带：`action_menu.menu_attack` 的守卫是 `energy < cost`，cost = 0 时 `0 < 0` 为假
+##  -> **车在精力 0 时照样能普攻**，不需要动 mod-fx 的文件。）
+const COST_BY_NAME := {
+	LUNCHBOX_NAME: 0,
+}
+
+
 static func cost_of(u: Unit) -> int:
+	if u != null:
+		var ov = COST_BY_NAME.get(Unit.base_name(u.name), null)
+		if ov != null:
+			return int(ov)
 	return int(for_unit(u)["cost"])
 
 

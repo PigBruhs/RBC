@@ -40,7 +40,8 @@ func _initialize() -> void:
 		return
 	var cm := prism.mesh as CylinderMesh
 	_chk(cm.radial_segments == 6, "炮管截面是正六边形（radial_segments = 6）")
-	_chk(absf(cm.height - 0.70) < 0.0001, "棱柱长 = %.3f 格（要求 0.70）" % cm.height)
+	# 第 106 轮：用户口径「炮管长度延申至 1.2 格」-> 0.70 改 1.20
+	_chk(absf(cm.height - 1.20) < 0.0001, "棱柱长 = %.3f 格（第 106 轮：0.70 -> 1.20）" % cm.height)
 	_chk(cm.top_radius > 0.30 and cm.bottom_radius > 0.30,
 		"棱柱半径 %.3f 比旧值 0.24 大（用户要求『要比现在大』）" % cm.top_radius)
 	# 水平放置：轴要沿**水平**方向（局部 +z），不能是竖直的 +y
@@ -59,8 +60,8 @@ func _initialize() -> void:
 	var ratio: float = front / back
 	print("      前 : 后 = %.3f : 1（期望 2.000 : 1）" % ratio)
 	_chk(absf(ratio - 2.0) < 0.02, "支点在前 2/3 处（前:后 = %.3f:1，要求 2:1）" % ratio)
-	_chk(absf((front + back) - 0.70) < 0.0001,
-		"两端间距 = 棱柱长 %.4f" % (front + back))
+	_chk(absf((front + back) - 1.20) < 0.0001,
+		"两端间距 = 棱柱长 %.4f（第 106 轮：1.20）" % (front + back))
 
 	print("\n[3] 支架是一根**棍子**（不是方块底座）")
 	var stick: MeshInstance3D = null

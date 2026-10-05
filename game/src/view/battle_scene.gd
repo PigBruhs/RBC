@@ -1107,43 +1107,54 @@ func _lb_model(u: Unit) -> LunchboxModel:
 
 
 ## 每帧推进（`_process` 里调）：转塔 -> 哨兵锁定/开火 -> 热量与冷却 -> 棱柱颜色
+##
+## 第 106 轮用户口径（覆盖第 105 轮我改反的那条）：
+##   · **不对静止目标开火**（它一动起来才打）
+##   · **不索友方**（同阵营永远不进索敌队列）
+##   · **误伤保留**（开火时不做阵营过滤：友方站在弹道上照样吃伤害 —— 见 `_lb_fire_wave`）
+## 所以这里的候选集合 = 「**敌方** ∧ 活着 ∧ 24 格内 ∧ **正在移动**」，三者缺一不可。
 func _lunchbox_tick(delta: float) -> void:
+	_lb_update_moving_marks()                     # 先统一更新"谁在动"（每帧一次）
 	for u in units:
 		if not _is_lunchbox(u) or not u.is_alive():
 			continue
 		var st := _lb_state(u)
 		var aim: Lunchbox.Aim = st["aim"]
 		var heat: Lunchbox.Heat = st["heat"]
-		# ── 索敌：24 格内的敌方角色，按"进入范围的先后"排队（索敌队列只有一个位置）──
-		var in_range: Array = []
+		# ── 索敌：只收"敌方 + 24 格内 + 正在移动"的，按"进入范围的先后"排队 ──
+		var eligible: Array = []
 		var order: Array = st["order"]
 		for e in units:
 			if e == null or not e.is_alive() or e.side == u.side:
+				continue                          # 友方永远不进队列（只能被误伤）
+			if _lb_center(u).distance_to(GridMath.unit_pos(e)) > Lunchbox.SENTRY_RANGE:
 				continue
-			if _lb_center(u).distance_to(GridMath.unit_pos(e)) <= Lunchbox.SENTRY_RANGE:
-				in_range.append(e.name)
-				if not order.has(e.name):
-					order.append(e.name)                 # 记录"谁先进入范围"
+			if not _lb_is_moving(e):
+				continue                          # 静止 -> 不是合法目标
+			eligible.append(e.name)
+			if not order.has(e.name):
+				order.append(e.name)              # 记录"谁先进入范围"
+		# 清理：离开范围 / 死掉 / 停下来的，都要出队（与上面的收集口径严格对齐）
 		for nm in order.duplicate():
-			if not in_range.has(nm):
-				order.erase(nm)                          # 离开范围 -> 出队
+			if not eligible.has(nm):
+				order.erase(nm)
 		var lock: String = String(st["lock"])
 		var lock_u: Unit = _lb_unit_by_name(lock)
 		var alive := lock_u != null and lock_u.is_alive()
-		# ⚠ 第 105 轮：**不再有"停下判定"**。用户口径（本轮原话，覆盖第 104 轮）：
-		#   目标只要还活着、还在 24 格内，就一直打（静止不动也照打）；
-		#   只有死亡或离开范围才转火下一个。
-		var in_range_now := in_range.has(lock)
-		var want := Lunchbox.pick_sentry_target(lock, alive, in_range_now, order)
-		if want == "":
-			want = String(order[0]) if not order.is_empty() else ""
+		var in_range_now := lock_u != null \
+			and _lb_center(u).distance_to(GridMath.unit_pos(lock_u)) <= Lunchbox.SENTRY_RANGE
+		var moving_now := lock_u != null and _lb_is_moving(lock_u)
+		var want := Lunchbox.pick_sentry_target(lock, alive, in_range_now, moving_now, order)
+		# ⚠ 第 106 轮（Lead 定位的根因）：**这里绝对不能再用 order[0] 兜底** ——
+		#   `pick_sentry_target` 返回 "" 就是"没有合法目标"（静止/友方/没目标），
+		#   以前那句兜底会把它从 order 里捞回来照样开火。
 		st["lock"] = want
 		# ── 转塔：锁到目标就一边跟随一边转（两轴同时）──
 		var firing_salvo := (_lb_salvo_u == u)
 		var sentry: Lunchbox.Sentry = st["sentry"] if st.has("sentry") else Lunchbox.Sentry.new()
 		st["sentry"] = sentry
 		var tgt: Unit = _lb_unit_by_name(want)
-		if tgt != null and not firing_salvo:
+		if tgt != null and moving_now and not firing_salvo:
 			var tp := GridMath.unit_pos(tgt)
 			var want_aim := Lunchbox.aim_to(_lb_center(u), LunchboxModel.TURRET_Y, tp,
 				Targeting.aim_height(tgt))
@@ -1173,6 +1184,34 @@ func _lb_unit_by_name(nm: String) -> Unit:
 		if u.name == nm and u.is_alive():
 			return u
 	return null
+
+
+# ── "谁在动"（第 106 轮哨兵口径）─────────────────────────────────────────────
+## 每帧记录一次每个单位的格子；**换过格 = 在动**，并把这个状态保持 `MOVE_HOLD_SEC` 秒
+## （走一格是瞬时的，但"移动中"要覆盖整段移动时间，否则哨兵会在走路的两格之间误判成静止）。
+## 静止超过 `MOVE_HOLD_SEC` 就视为静止 -> 哨兵不开火 ✓。
+const MOVE_HOLD_SEC := 0.35
+var _lb_move_mark: Dictionary = {}      # 单位名 -> {"cell": Vector2i, "until": float}
+
+
+func _lb_update_moving_marks() -> void:
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	for u in units:
+		if u == null or not u.is_alive():
+			continue
+		var m: Dictionary = _lb_move_mark.get(u.name, {})
+		if m.is_empty() or Vector2i(m["cell"]) != u.cell:
+			m = {"cell": u.cell, "until": now + MOVE_HOLD_SEC}
+			_lb_move_mark[u.name] = m
+
+
+func _lb_is_moving(u: Unit) -> bool:
+	if u == null:
+		return false
+	var m: Dictionary = _lb_move_mark.get(u.name, {})
+	if m.is_empty():
+		return false
+	return float(Time.get_ticks_msec()) / 1000.0 < float(m["until"])
 
 
 ## 普攻（`basic_attack.basic_salvo` 分派到这里）：**12 波 × 6 发**，间隔 133ms。
@@ -1238,14 +1277,16 @@ func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 	volley.last_hit_at = volley.born_at
 	_volleys.append(volley)
 	for k in Lunchbox.SALVO_PER_WAVE:
-		var off := Lunchbox.spread_offset(rng)                    # 散布 1 格
-		var aim_pt := base + dir * dist + off
-		aim_pt.x = clampf(aim_pt.x, float(PX) + 0.5, float(PX + PW) - 0.5)
-		aim_pt.y = clampf(aim_pt.y, float(PY) + 0.5, float(PY + PH) - 0.5)
+		# 第 106 轮：**立体球内均匀**散布（旧实现是水平圆盘 -> 垂直散布恒为 0、子弹平行飞）
+		var off3 := Lunchbox.spread_offset_3d(rng)
+		var aim3 := Vector3(base.x + dir.x * dist, tgt_y, base.y + dir.y * dist) + off3
+		aim3.x = clampf(aim3.x, float(PX) + 0.5, float(PX + PW) - 0.5)
+		aim3.z = clampf(aim3.z, float(PY) + 0.5, float(PY + PH) - 0.5)
 		var lat := (float(k) - 2.5) * 0.06                        # 6 发沿炮口横向铺开一点
 		var from := _lb_muzzle(u, st) + Vector3(perp.x * lat, 0.0, perp.y * lat)
 		# 第 104 轮：车用**新弹种**（破甲固定、力量 = 车力量 × 衰减；见 docs §12.2b）
-		var p := Ordnance.make_cart_bullet(u, from, aim_pt, false, fly_y)
+		# 第 106 轮：瞄准点带高度 -> 弹道**带俯仰但仍是直线**（`make_cart_bullet_at`）
+		var p := Ordnance.make_cart_bullet_at(u, from, aim3, false)
 		p.shot.target = null
 		p.shot.volley = volley                                    # 第 105 轮：挂上批次
 		field.register(p)

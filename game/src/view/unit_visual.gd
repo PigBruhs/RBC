@@ -14,6 +14,13 @@ const ORB_PX := 336                # 贴图宽（力量/护甲方块的宽度）
 const ORB_PX_H := 388              # 贴图高（多出来的部分留给上方的精力条）
 const ORB_WORLD := 1.05            # 指示器在世界里的边长（对齐方块宽度）
 const ORB_HEIGHT := 1.62           # 悬浮高度（要高于最高职业的头顶）
+const ORB_MARGIN := 0.35           # 条子离开"模型最高点"的余量
+## 条子贴图在世界里的**半高** = 贴图高 × pixel_size ÷ 2（billboard 会按它撑开）
+const ORB_HALF_H := ORB_PX_H * (ORB_WORLD / float(ORB_PX)) * 0.5
+## 名字要抬到**条子贴图顶边之上**：条子最大会 scale 到 1.18（选中时），再留 0.18 间距
+const LABEL_ABOVE_ORB := ORB_HALF_H * 1.18 + 0.18
+## 条子贴图比方块高出来的那截的一半（原来在 _build_orb 里算的局部变量 extra_h）
+const ORB_EXTRA_H := float(ORB_PX_H - ORB_PX) * (ORB_WORLD / float(ORB_PX)) * 0.5
 const WALK_TILES_PER_SEC := 2.0    # 移动速度：每秒 2 格（匀速滑动）
 const HELI_TILES_PER_SEC := 2.5    # 悬浮单位（直升机）2.5 格/秒（用户口径第 86 轮）
 const GLYPH_ADV := 6               # 字距（像素/点）：3x5 点阵 + 3 点间隔
@@ -358,8 +365,40 @@ func _build_thrower(body_mat: Material, dark_mat: Material, metal_mat: Material)
 func _body_lift() -> float:
 	if unit == null:
 		return 0.0
-	var top := unit.body_h() + unit.body_height
-	return maxf(0.0, top + 0.35 - ORB_HEIGHT)
+	var top := unit.body_h() + unit.body_height      # 数据口径（第 104 轮）
+	var box := _model_top_y()                        # 实测模型最高点（含炮管/旋翼/轮胎，第 106 轮补）
+	return maxf(0.0, maxf(top, box) + ORB_MARGIN - ORB_HEIGHT)
+
+
+## 实测本单位所有 MeshInstance3D 包围盒的最高点（本地空间，含各自的局部位移/旋转/缩放）。
+## **为什么需要它**（第 106 轮实测出来的真原因）：`body_h() + body_height` 是**数据行**口径，
+## 跟真实模型对不上 —— 例如直升机 body_h()+body_height = 3.00，而它的**实测模型最高点是 4.03**，
+## 于是条子（3.43）整个陷在模型里；午餐盒加了 1.2 格炮管之后同理。
+## 默认角色不受影响：Gerald 数据口径 1.30 > 实测 1.11，取 1.30 -> 仍然是 0（第 104 轮保证不破）。
+func _model_top_y() -> float:
+	var top := 0.0
+	for mi in _all_meshes(self):
+		# 沿父链把变换累加到 self（UnitVisual 根）——模型网格可能是**嵌套**的
+		# （实测教训：午餐盒的网格挂在一个子 Node3D 下，只看直接子节点会量成 0.025）
+		var t := Transform3D.IDENTITY
+		var n: Node = mi
+		while n != null and n != self:
+			t = (n as Node3D).transform * t
+			n = n.get_parent()
+		var aabb: AABB = (mi as MeshInstance3D).get_aabb()
+		for i in 8:
+			var y: float = (t * aabb.get_endpoint(i)).y
+			if y > top:
+				top = y
+	return top
+
+
+func _all_meshes(n: Node, out: Array = []) -> Array:
+	for c in n.get_children():
+		if c is MeshInstance3D:
+			out.append(c)
+		_all_meshes(c, out)
+	return out
 
 
 func _build_orb() -> void:
@@ -371,6 +410,10 @@ func _build_orb() -> void:
 	_orb_sprite.pixel_size = ORB_WORLD / float(ORB_PX)
 	_orb_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_orb_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# 第 106 轮排查③：条子原来是**参与深度测试**的 -> 会被高模型挡住（实测直升机条子陷在模型里）。
+	# 名字早就开了 no_depth_test，条子也跟上，两者行为一致。
+	_orb_sprite.no_depth_test = true
+	_orb_sprite.render_priority = 1
 	# 贴图比方块高（上面多了精力条），所以整体上移半条的高度，
 	# 让方块的视觉位置与原来一致、精力条出现在它正上方。
 	var extra_h := float(ORB_PX_H - ORB_PX) * _orb_sprite.pixel_size * 0.5
@@ -389,8 +432,13 @@ func _build_label() -> void:
 	_label.modulate = Color(1, 1, 1, 0.85)
 	_label.outline_size = 14
 	_label.outline_modulate = Color(0, 0, 0, 0.9)
-	_label.position = Vector3(0, ORB_HEIGHT + 0.42 + (0.50 if _is_crowned() else 0.0) + _body_lift(), 0)
+	# 第 106 轮实测：原来写死的 +0.42 让名字落在**条子贴图内部**（名字 y=2.04，条子顶边 2.31）
+	# -> 19 个单位**全部**被条子盖住，这就是用户说的"绝大部分都看不见"。
+	# 现在按条子的真实半高来抬：名字 y = 条子中心 + 条子半高(按最大 1.18 倍) + 0.18。
+	_label.position = Vector3(0, ORB_HEIGHT + ORB_EXTRA_H
+		+ (0.50 if _is_crowned() else 0.0) + _body_lift() + LABEL_ABOVE_ORB, 0)
 	_label.no_depth_test = true
+	_label.render_priority = 2          # 名字永远画在条子之上（排查①的兜底）
 	add_child(_label)
 
 

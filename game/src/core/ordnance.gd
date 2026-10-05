@@ -304,6 +304,50 @@ static func make_cart_bullet(caster: Unit, from: Vector3, to: Vector2,
 	return _make_bullet(Projectile.KIND_CART_BULLET, caster, from, to, ends_turn, aim_y)
 
 
+## 立体散布用（第 106 轮）：瞄准点是 **3D** 的 —— 弹道因此带上**俯仰角**，
+## 但**仍然是直线、不受重力**（`arc_scale = 0`，斜率只来自 y0 ≠ y1）。
+##
+## 换算细节：`Projectile.height()` 按**整段飞行进度** `k = 已飞/总长` 线性插值 y0→y1，
+## 而子弹固定飞 `BULLET_MAX_DIST`（32 格）。要让它在**目标距离 `dist`** 处正好是瞄准高度
+## `to3.y`，就得把 y1 **外推**到 32 格处：
+##   `y1 = y0 + (to3.y - y0) / (dist / BULLET_MAX_DIST)`
+## 这样 32 格之内是一条斜率恒定的直线，没有引入任何重力项。
+static func make_cart_bullet_at(caster: Unit, from: Vector3, to3: Vector3,
+		ends_turn: bool = false) -> Projectile:
+	return _bullet_at(Projectile.KIND_CART_BULLET, caster, from, to3, ends_turn)
+
+
+## 萨尼铁塔的连发用同一个立体散布入口（第 106 轮：用户口径「我需要立体球状散布」，
+## 连发也是**子弹**，所以散布形状与午餐盒齐射一致）。
+## 与 `make_cart_bullet_at` 的唯一区别是**弹种** —— 破甲走攻方 `armor_break`（见 §12.2b）。
+static func make_bullet_at(caster: Unit, from: Vector3, to3: Vector3,
+		ends_turn: bool = true) -> Projectile:
+	return _bullet_at(Projectile.KIND_BULLET, caster, from, to3, ends_turn)
+
+
+static func _bullet_at(kind: String, caster: Unit, from: Vector3, to3: Vector3,
+		ends_turn: bool) -> Projectile:
+	var start := Vector2(from.x, from.z)
+	var flat := Vector2(to3.x - start.x, to3.z - start.y)
+	var dist := maxf(flat.length(), 0.001)
+	var dir := flat / dist
+	var p := Projectile.make(kind, start, start + dir * BULLET_MAX_DIST, 1.0)
+	p.set_speed(BULLET_TILES_PER_SEC)
+	_config_owner(p, caster)
+	var k := clampf(dist / BULLET_MAX_DIST, 0.0001, 1.0)
+	p.y0 = from.y
+	p.y1 = from.y + (to3.y - from.y) / k            # 外推：在 dist 处正好等于瞄准高度
+	p.arc_scale = 0.0                               # 不受重力
+	p.arc_min = 0.0
+	p.arc_max = 0.0
+	p.recalc_apex()
+	p.hit_r = BULLET_R
+	p.hit_tags = []                                 # 箭矢类：不会被击落
+	p.sentry_trigger = false
+	p.shot = _shot(kind, caster, ends_turn, 0.0, {}, "")
+	return p
+
+
 ## 子弹缺省飞行高度（`aim_y < 0` 时的兜底）：**射手自己的身体中心**。
 ## 为什么这么定：用户要求"删掉恒定 0.5 格"——高度由**发射那一刻的瞄准**决定；
 ## 调用方没给瞄准高度时，最自然的物理含义就是"从射手身上射出来"（地面角色 = 0.5 格、
