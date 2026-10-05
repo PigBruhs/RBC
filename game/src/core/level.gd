@@ -392,7 +392,7 @@ const HELI_DEFAULTS := {
 	"bomb_fall_sec": 1.33,
 	"drop_blast_r": 6.0,     # 投弹半径 6 格（三维球；第 103 轮：3 -> 6）
 	"drop_power": 120,       # 力量伤害（第 103 轮：20 -> 120；走 Rules.resolve：先减护甲再过物抗）
-	"drop_break": 20,        # 破甲伤害（第 103 轮：40 -> 20）
+	"drop_break": 40,        # 破甲伤害（第 103 轮 40，第 110 轮用户口径回到 **40**）
 }
 
 

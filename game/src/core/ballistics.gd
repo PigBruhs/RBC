@@ -110,7 +110,12 @@ static func shell_like_defaults(kind: String) -> Dictionary:
 		#   `can_shoot_down` 判的是 `target.hit_tags.has(我的 kind)`，而炮弹类原本**只认箭矢**，
 		#   所以**子弹在结构上根本拦不了炮弹**（哨兵瞄得再准也没用）。
 		#   现在把两种子弹也列进去：车的子弹 + 萨尼的连发弹。
-		"hit_tags": ["arrow", Projectile.KIND_CART_BULLET, Projectile.KIND_BULLET],
+		#
+		# ⚠ 但**巡飞弹例外**：用户口径「**特意让车不拦任何巡飞弹；箭矢哨兵仍然会拦**」——
+		#   巡飞弹有自己的制导与近炸，被子弹随手打掉会让玩家的技能白给；
+		#   而箭矢哨兵本来就该能拦它。所以只有 `KIND_LOITER` 保持"只认箭"。
+		"hit_tags": ["arrow"] if kind == Projectile.KIND_LOITER \
+			else ["arrow", Projectile.KIND_CART_BULLET, Projectile.KIND_BULLET],
 		"sentry_trigger": true,                   # 惊动哨兵（不分敌我）
 		"intercept": intercept_result(kind),
 	}

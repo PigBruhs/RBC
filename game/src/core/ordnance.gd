@@ -60,7 +60,8 @@ const ROCKET_VMAX := 12.0
 const ROCKET_RAMP_DIST := 12.0
 const ROCKET_ACCEL_K := (ROCKET_VMAX - ROCKET_V0) / ROCKET_RAMP_DIST   # v = v0 + k·s（爬坡段）
 const ROCKET_BLAST_R := 1.0          # 落地范围直径 2 格
-const ROCKET_FRAGMENTS := 2
+## 每发火箭生成的破片数。第 110 轮用户口径：2 -> **4**。
+const ROCKET_FRAGMENTS := 4
 
 
 ## 爬坡段结束的时刻（速度达到上限那一刻）

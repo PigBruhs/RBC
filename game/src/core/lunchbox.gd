@@ -40,12 +40,17 @@ const TURRET_SIDE_OFFSET := 0.6
 
 # ── 齐射（普攻）─────────────────────────────────────────────────────────────
 const SALVO_WAVES := 12              # 一次普攻 12 波（用户口径）
-const SALVO_PER_WAVE := 6            # 每波 6 发
-const SALVO_TOTAL := 72              # 12 × 6 = 72 发
+const SALVO_PER_WAVE := 12           # 每波 12 发（第 110 轮用户口径：6 -> 12）
+const SALVO_TOTAL := 144             # 12 × 12 = 144 发
 const SALVO_GAP := 0.133             # 波间隔 133ms（用户口径）
 const SALVO_COOLDOWN := 3.0          # 每 12 轮冷却 3 秒
 ## 散布半径（格）。第 106 轮 1.0 -> **第 110 轮用户口径 0.5**（"散布缩小至 0.5 格试试"）。
-const SALVO_SPREAD_R := 0.5
+## **哨兵**齐射散布半径（格）。第 110 轮用户口径：0.5 -> **1.5**（"反正横竖都要卡一下，
+## 不如增大拦截几率"）。⚠ 普攻另有更小的 `BASIC_SPREAD_R`，见下。
+const SALVO_SPREAD_R := 1.5
+
+## **普攻**齐射散布半径（格）。第 110 轮用户口径：**0.5**（"反正它会甩炮塔"）。
+const BASIC_SPREAD_R := 0.5
 const SALVO_SWING_DEG := 10.0        # 瞄准时方向机左右摇动 ±10°（以"车→目标"连线为中轴）
 const SALVO_RANGE := 24.0            # 普攻范围 24 格
 
@@ -81,8 +86,14 @@ class Aim:
 ## "高低机和方向机可以一起调"，不要串行）。
 ## 返回是否已经到位（到位后调用方才允许开火）。
 ## `traverse_deg` / `elev_deg` 每帧的可用角度 = 转速 × dt（也可以传非均匀值做测试）。
+## `tol_deg`：判定"已对准"的角度容差（度）。
+## ⚠ 第 110 轮用户报「哨兵**经常不锁定移动的敌人，等对方停下来反而来一梭子**」——
+##   根因就是这里原来写死 **0.01°**：炮塔在追一个**在动**的目标时误差永远到不了 0.01°，
+##   于是 `Sentry.tick` 一直认为"没对准" -> 一枪不发；目标一停，炮塔终于收敛 -> 才开火。
+##   现在给一个容差：**哨兵用它开火**（散布本身就是 1.5 格球，几度误差完全无所谓），
+##   默认 0.01 保持其它调用方行为逐字不变。
 static func step_aim(aim: Aim, want_theta: float, want_phi: float, dt: float,
-		traverse_deg: float = -1.0, elev_deg: float = -1.0) -> bool:
+		traverse_deg: float = -1.0, elev_deg: float = -1.0, tol_deg: float = 0.01) -> bool:
 	var t_step := traverse_deg if traverse_deg >= 0.0 else TRAVERSE_DEG_PER_SEC * dt
 	var e_step := elev_deg if elev_deg >= 0.0 else ELEV_DEG_PER_SEC * dt
 	# 方向机：**走最短弧**（+179° 与 -179° 只差 2°），不然会绕一大圈
@@ -91,8 +102,8 @@ static func step_aim(aim: Aim, want_theta: float, want_phi: float, dt: float,
 	var want_phi_c := clampf(want_phi, PHI_MIN_DEG, PHI_MAX_DEG)
 	aim.phi = clampf(aim.phi + clampf(want_phi_c - aim.phi, -e_step, e_step),
 		PHI_MIN_DEG, PHI_MAX_DEG)
-	return absf(wrapf(want_theta - aim.theta, -180.0, 180.0)) < 0.01 \
-		and absf(want_phi_c - aim.phi) < 0.01
+	return absf(wrapf(want_theta - aim.theta, -180.0, 180.0)) <= tol_deg \
+		and absf(want_phi_c - aim.phi) <= tol_deg
 
 
 ## 从车指向目标所需的 (theta, phi)：枪口在 1.3 格，目标取身体中心高度。
@@ -262,9 +273,11 @@ static func spread_offset(rng: RngService) -> Vector2:
 	return Vector2(cos(a), sin(a)) * r
 
 
-## 散布 1 格（**立体球内均匀**，第 106 轮用户口径："我需要立体球状散步"）。
+## 散布（**立体球内均匀**，第 106 轮用户口径："我需要立体球状散步"）。
 ## ⚠ 旧实现只用上面那个 `Vector2`（水平圆盘）→ 垂直方向散布恒为 0、子弹平行飞；
 ## 现在齐射改用它：返回 Vector3，y 分量变成弹道的俯仰偏移（直线，不引入重力）。
 ## 复用 `Spread.ball_offset`（球面均匀方向 + `∛u` 半径 = 球内均匀）。
-static func spread_offset_3d(rng: RngService) -> Vector3:
-	return Spread.ball_offset(SALVO_SPREAD_R, rng)
+## `radius` 由调用方给：**哨兵用 `SALVO_SPREAD_R`**（1.5）、**普攻用 `BASIC_SPREAD_R`**（0.5）——
+## 用户第 110 轮明确把两者分开（哨兵要拦截几率、普攻要精度）。
+static func spread_offset_3d(rng: RngService, radius: float = SALVO_SPREAD_R) -> Vector3:
+	return Spread.ball_offset(radius, rng)

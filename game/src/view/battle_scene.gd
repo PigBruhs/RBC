@@ -1110,6 +1110,7 @@ func _lb_forget_state(u: Unit) -> void:
 		return
 	_lb_states.erase(u.name)
 	_lb_move_mark.erase(u.name)
+	_lb_move_until.erase(u.name)
 
 
 ## 车体中心（世界坐标，格）。
@@ -1215,6 +1216,11 @@ func _lunchbox_tick(delta: float) -> void:
 			var pr: Projectile = it["p"]
 			if not pr.alive or not Ballistics.is_shell_class(pr.kind):
 				continue
+			# ⚠ 第 110 轮用户口径：「**特意让车不拦任何巡飞弹；箭矢哨兵仍然会拦**」——
+			#   巡飞弹不进车的候选（子弹本来也打不掉它，见 `Ballistics.shell_like_defaults`），
+			#   所以直接跳过、连瞄都不瞄（免得它把炮口占住、误了真正能拦的炮弹）。
+			if pr.kind == Projectile.KIND_LOITER:
+				continue
 			if pr.side == u.side:
 				continue
 			if _lb_center(u).distance_to(pr.pos()) > Lunchbox.SENTRY_RANGE:
@@ -1264,7 +1270,11 @@ func _lunchbox_tick(delta: float) -> void:
 					t_est = _lb_center(u).distance_to(tgt_pos) / Ordnance.BULLET_TILES_PER_SEC
 		if want != "" and live_want["alive"] and live_want["moving"] and not firing_salvo:
 			var want_aim := Lunchbox.aim_to(_lb_center(u), LunchboxModel.TURRET_Y, tgt_pos, tgt_y)
-			var at := Lunchbox.step_aim(aim, float(want_aim[0]), float(want_aim[1]), delta)
+			# 第 110 轮：给"已对准"一个**角度容差**（`SENTRY_TOL_DEG`）——
+			# 原来 0.01° 让炮塔在追移动目标时永远判"没对准"，一枪不发；
+			# 目标一停才收敛开火（用户报的原话）。散布本身就是 1.5 格球，几度误差无所谓。
+			var at := Lunchbox.step_aim(aim, float(want_aim[0]), float(want_aim[1]), delta,
+				-1.0, -1.0, SENTRY_TOL_DEG)
 			# ── 哨兵开火（第 110 轮修正）─────────────────────────────────────
 			# 用户报「一波齐射 **72 发** + 卡顿」。原来这里**每个开火判定就发一整波 6 发**，
 			# 而判定帧率是 ~60fps -> 12 次 = 72 发在 0.2 秒内全打出去。
@@ -1310,6 +1320,15 @@ func _lb_unit_by_name(nm: String) -> Unit:
 ##   而 `cell` 是**移动发起那一刻就瞬移**的，于是"车自己一移动，相对视角下谁都像在动"，
 ##   静止友军也会被索敌。用户原话：「**要检测的是绝对速度**」→ 改用走路动画做唯一信号。
 var _lb_move_mark: Dictionary = {}      # 单位名 -> bool（是否在动）
+## "在动"标记的**粘滞时长**（秒）。
+## ⚠ 第 110 轮：`is_walking()` 读的是 Tween 的 `is_running()`，在**逐格衔接的缝隙**里会
+##   短暂为 false -> 目标被踢出 `eligible` -> `order` 里那条被清掉 -> **掉锁**。
+##   这正是用户报的"经常不会锁定"。给它一个短粘滞：**只延长"曾经在动"**，
+##   不改变"从来没动过 = 不在动"（第 108 轮修的绝对速度口径不受影响）。
+const MOVE_STICKY_SEC := 0.2
+var _lb_move_until: Dictionary = {}     # 单位名 -> 上次 is_walking 为真的时刻 + 粘滞
+## 哨兵判"已对准"的角度容差（度）。见 `Lunchbox.step_aim` 的 `tol_deg` 注释。
+const SENTRY_TOL_DEG := 6.0
 
 
 ## 每帧标记"谁在动"，供哨兵索敌用。
@@ -1329,11 +1348,18 @@ var _lb_move_mark: Dictionary = {}      # 单位名 -> bool（是否在动）
 ##   · **弹射物不在这里**（索敌队列的收集源只有 `units`，见 `_lb_tick`）→
 ##     用户要的"弹射物静止即出队"由"弹射物结构上就进不了队列"保证。
 func _lb_update_moving_marks() -> void:
+	var now := float(Time.get_ticks_msec()) / 1000.0
 	for u in units:
 		if u == null or not u.is_alive() or u.visual == null:
 			_lb_move_mark.erase(u.name if u != null else "")
+			_lb_move_until.erase(u.name if u != null else "")
 			continue
-		_lb_move_mark[u.name] = u.visual.is_walking()
+		# ⚠ 第 110 轮：`is_walking()` 在**逐格衔接的缝隙**里会短暂 false ->
+		#   会掉锁（用户报"经常不会锁定"）。所以**只延长已经为真的标记**：
+		#   真过 -> 记下"到 now + 粘滞"；从没真过 -> `_lb_move_until` 里没有它 -> 仍是假。
+		if u.visual.is_walking():
+			_lb_move_until[u.name] = now + MOVE_STICKY_SEC
+		_lb_move_mark[u.name] = now < float(_lb_move_until.get(u.name, 0.0))
 
 
 func _lb_is_moving(u: Unit) -> bool:
@@ -1414,14 +1440,19 @@ func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
 	var tgt_y := Targeting.aim_height(tgt) if tgt != null else 0.5
 	_log("  🚙 %s 齐射：%d 波 × %d 发（中轴 %.1f°，±%.0f° 摇动，散布 %.1f 格，射程 %.0f）" % [
 		u.name, Lunchbox.SALVO_WAVES, Lunchbox.SALVO_PER_WAVE, base_theta,
-		Lunchbox.SALVO_SWING_DEG, Lunchbox.SALVO_SPREAD_R, dist])
+		Lunchbox.SALVO_SWING_DEG, Lunchbox.BASIC_SPREAD_R, dist])
 	for i in Lunchbox.SALVO_WAVES:
-		aim.theta = Lunchbox.wave_theta(base_theta, i)
-		aim.phi = Lunchbox.wave_phi(base_theta, i, dist, LunchboxModel.TURRET_Y, tgt_y)
+		# ⚠ 第 110 轮用户口径：「车使用普攻时**仍然存在方向机延迟**（现在是直接顺移旋转）」
+		#   所以不能直接 `aim.theta = 目标角` 再 `set_aim`（那是瞬移）。
+		#   改成：**朝这一波的目标角以 `TRAVERSE_DEG_PER_SEC` 步进**，
+		#   并且**按步进后的实际角度开火** —— 炮塔追不上时就打得偏，这正是延迟该有的表现。
+		var want_th := Lunchbox.wave_theta(base_theta, i)
+		var want_ph := Lunchbox.wave_phi(base_theta, i, dist, LunchboxModel.TURRET_Y, tgt_y)
+		Lunchbox.step_aim(aim, want_th, want_ph, Lunchbox.SALVO_GAP)
 		var m := _lb_model(u)
 		if m != null:
 			m.set_aim(aim.theta, aim.phi)
-		_lb_fire_wave(u, st, i, tgt_y, dist)
+		_lb_fire_wave(u, st, i, tgt_y, dist, Lunchbox.BASIC_SPREAD_R)
 		Lunchbox.heat_fire(heat)
 		if heat.rounds >= Lunchbox.SALVO_WAVES:
 			Lunchbox.heat_start_cooldown(heat)
@@ -1434,16 +1465,17 @@ func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
 		u.name, Lunchbox.SALVO_WAVES, Lunchbox.SALVO_TOTAL, Lunchbox.SALVO_COOLDOWN])
 
 
-## 打一波：6 发子弹。`wave_i` 只用于日志；方向取当前 `aim`（普攻时是摇动后的角度）。
+## 打一波：`Lunchbox.SALVO_PER_WAVE`(12) 发子弹。`wave_i` 只用于日志；方向取当前 `aim`。
+## `spread_r` 由调用方给：**哨兵 `SALVO_SPREAD_R`(1.5) / 普攻 `BASIC_SPREAD_R`(0.5)**。
 ##
-## ⚠ 第 105 轮（性能）：**这一波的 6 发共享一份伤害参数快照**（`Ordnance.Volley`）——
+## ⚠ 第 105 轮（性能）：**这一波共享一份伤害参数快照**（`Ordnance.Volley`）——
 ## 用户口径："我说齐射是为什么？是为了让每一波的子弹命中一个角色时伤害衰减参数相等，
 ## 这样你只需要计命中数再传递给造伤模块即可"。所以：
 ##   · 单发力量 = `floor(力量 × bullet_mult(这一波的名义距离))` —— **每波只算一次**
 ##   · 单发破甲 = 车用子弹的固定值
 ##   · 命中只累加计数（`resolve_arrow_hit` 里 +1），由 `_tick_volleys` 一次性结算
 func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
-		dist: float = 12.0) -> void:
+		dist: float = 12.0, spread_r: float = Lunchbox.SALVO_SPREAD_R) -> void:
 	var aim: Lunchbox.Aim = st["aim"]
 	var base := _lb_center(u)
 	var th := deg_to_rad(aim.theta)
@@ -1459,11 +1491,14 @@ func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 	_volleys.append(volley)
 	for k in Lunchbox.SALVO_PER_WAVE:
 		# 第 106 轮：**立体球内均匀**散布（旧实现是水平圆盘 -> 垂直散布恒为 0、子弹平行飞）
-		var off3 := Lunchbox.spread_offset_3d(rng)
+		# 第 110 轮：半径由调用方给（哨兵 1.5 / 普攻 0.5）
+		var off3 := Lunchbox.spread_offset_3d(rng, spread_r)
 		var aim3 := Vector3(base.x + dir.x * dist, tgt_y, base.y + dir.y * dist) + off3
 		aim3.x = clampf(aim3.x, float(PX) + 0.5, float(PX + PW) - 0.5)
 		aim3.z = clampf(aim3.z, float(PY) + 0.5, float(PY + PH) - 0.5)
-		var lat := (float(k) - 2.5) * 0.06                        # 6 发沿炮口横向铺开一点
+		# 沿炮口横向铺开一点：**以每波实际发数为准居中**
+		# （第 110 轮：6 -> 12 发，写死的 2.5 会让整串偏向一侧）
+		var lat := (float(k) - (float(Lunchbox.SALVO_PER_WAVE) - 1.0) * 0.5) * 0.06
 		var from := _lb_muzzle(u, st) + Vector3(perp.x * lat, 0.0, perp.y * lat)
 		# 第 104 轮：车用**新弹种**（破甲固定、力量 = 车力量 × 衰减；见 docs §12.2b）
 		# 第 106 轮：瞄准点带高度 -> 弹道**带俯仰但仍是直线**（`make_cart_bullet_at`）

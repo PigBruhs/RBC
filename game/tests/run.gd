@@ -590,8 +590,9 @@ func _initialize() -> void:
 	_expect(int(heli_d.get("energy_max", 0)) == 6 and int(heli_d.get("move", 0)) == 20,
 		"精力 6 / 移动 20", fails)
 	_expect(int(heli_d.get("role", -1)) == UnitData.Role.THROWER, "套皮投掷手", fails)
-	_expect(int(heli_d.get("rng_min", 0)) == 6 and int(heli_d.get("rng_max", 0)) == 40,
-		"普攻射程 6-40（投掷手的两倍）", fails)
+	# 第 110 轮用户口径：直升机普攻最大射程 40 -> **60**
+	_expect(int(heli_d.get("rng_min", 0)) == 6 and int(heli_d.get("rng_max", 0)) == 60,
+		"普攻射程 6-60（第 110 轮：40 -> 60）", fails)
 	_expect(Unit.base_name(heli_name) == heli_name, "全角括号不会被当后缀剥掉", fails)
 	_expect(Unit.base_name(heli_name + " (E)") == heli_name, "敌方镜像用 (E) 后缀", fails)
 	# 重生回合（第 100 轮用户口径）：**所有场景**统一为「直升机 20 回合、其余角色 15 回合」
@@ -647,7 +648,8 @@ func _initialize() -> void:
 		"火箭可以被箭击落、会惊动哨兵（炮弹类统一模板）", fails)
 	_expect(absf(rk.dur - Ordnance.rocket_t_of_s(20.0)) < 0.001, "总时长 = 解析解 t(20 格)", fails)
 	_expect(absf(float(Ordnance.ROCKET_BLAST_R) - 1.0) < 0.001, "落地范围直径 2 格（半径 1）", fails)
-	_expect(int(Ordnance.ROCKET_FRAGMENTS) == 2, "落地生成 2 枚破片", fails)
+	# 第 110 轮用户口径：每发火箭破片 2 -> **4**
+	_expect(int(Ordnance.ROCKET_FRAGMENTS) == 4, "落地生成 4 枚破片（第 110 轮：2 -> 4）", fails)
 	# 位置映射：t=0 在起点、t=1 在终点，且 t=50% 时飞过的距离 < 一半（前半段更慢）
 	var rk2 := Ordnance.make_rocket(heli_u, Vector3(5.5, 2.0, 5.5), Vector2(25.5, 5.5), true)
 	rk2.t = 0.0
