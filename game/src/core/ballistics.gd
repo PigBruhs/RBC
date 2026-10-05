@@ -30,6 +30,7 @@ static func placeable_block_mode(pl: Placeable, kind: String) -> int:
 		return Block.NEVER
 	if kind == Projectile.KIND_ARROW or kind == Projectile.KIND_CANNON \
 			or kind == Projectile.KIND_FRAGMENT or kind == Projectile.KIND_BULLET \
+			or kind == Projectile.KIND_CART_BULLET \
 			or kind == Projectile.KIND_LASER:
 		# 木刺 block_ranged=false -> 不拦；土堆 block_ranged=true -> 一定拦
 		# （用户强调：不看箭矢是否"碰撞"到它，只看是否从它上空飞过）
@@ -40,10 +41,11 @@ static func placeable_block_mode(pl: Placeable, kind: String) -> int:
 	return Block.NEVER
 
 
-## 这一发是不是"直接命中型"（撞到角色就算命中：箭矢 / 加农炮弹）
+## 这一发是不是"直接命中型"（撞到角色就算命中：箭矢 / 加农炮弹 / 两种子弹）
 static func is_direct_hit(kind: String) -> bool:
 	return kind == Projectile.KIND_ARROW or kind == Projectile.KIND_CANNON \
-		or kind == Projectile.KIND_FRAGMENT or kind == Projectile.KIND_BULLET
+		or kind == Projectile.KIND_FRAGMENT or kind == Projectile.KIND_BULLET \
+		or kind == Projectile.KIND_CART_BULLET
 
 
 # ══════════════════════════════════════════════════════════════════════════════

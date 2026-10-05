@@ -1206,7 +1206,8 @@ func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 		aim_pt.y = clampf(aim_pt.y, float(PY) + 0.5, float(PY + PH) - 0.5)
 		var lat := (float(k) - 2.5) * 0.06                        # 6 发沿炮口横向铺开一点
 		var from := _lb_muzzle(u, st) + Vector3(perp.x * lat, 0.0, perp.y * lat)
-		var p := Ordnance.make_bullet(u, from, aim_pt, false, fly_y)
+		# 第 104 轮：车用**新弹种**（破甲固定 +4、力量 = 车力量 × 衰减；见 docs §12.2b）
+		var p := Ordnance.make_cart_bullet(u, from, aim_pt, false, fly_y)
 		p.shot.target = null
 		field.register(p)
 	var m := _lb_model(u)

@@ -86,6 +86,9 @@ func register(p: Projectile) -> void:
 			node = make_fragment_node(parent)
 		Projectile.KIND_BULLET:
 			node = make_bullet_node(parent)
+		# 第 104 轮：午餐盒的齐射子弹 —— 外观与萨尼铁塔的子弹同款（0.2×0.05 发亮黄圆柱）
+		Projectile.KIND_CART_BULLET:
+			node = make_bullet_node(parent)
 		Projectile.KIND_ROCKET:
 			node = make_rocket_node(parent)
 		Projectile.KIND_GRENADE:
@@ -266,6 +269,7 @@ static func kind_cn(kind: String) -> String:
 		Projectile.KIND_CANNON: return "加农炮弹"
 		Projectile.KIND_FRAGMENT: return "破片"
 		Projectile.KIND_BULLET: return "子弹"
+		Projectile.KIND_CART_BULLET: return "车用子弹"
 		Projectile.KIND_ROCKET: return "火箭"
 		Projectile.KIND_LOITER: return "巡飞弹"
 	return "标记球"

@@ -122,15 +122,23 @@ func resolve_arrow_hit(sh: Ordnance.Shot, what: Dictionary) -> void:
 				Passives.clear_focus(attacker)      # 这一发算命中了：蓄势清零
 			_st._start_arrow_qte(victim, sh, bonus)
 			return
-		# 子弹：阶梯衰减（0-12 格 100% / 12-16 格 60% / 16-24 格 20% / >24 格 0）
-		if sh.kind == Projectile.KIND_BULLET:
+		# 子弹：**阶梯衰减只作用于力量伤害**（第 104 轮用户口径，§12.2）：
+		#   0-12 格 100% / 12-16 格 60% / 16-24 格 20% / >24 格无伤害（仍可命中）。
+		# 破甲**不再衰减**，按弹种取：
+		#   · KIND_BULLET（萨尼铁塔）= 攻方 armor_break 原值
+		#   · KIND_CART_BULLET（午餐盒，第 104 轮新弹种）= **每发固定 +4 点**
+		if sh.kind == Projectile.KIND_BULLET or sh.kind == Projectile.KIND_CART_BULLET:
 			var bd: float = sh.last_hit_dist
 			var bmult: float = Damage.bullet_mult(bd)
 			var bpw: int = int(floor(float(attacker.power_cur) * bmult))
-			var bbr: int = int(floor(float(attacker.armor_break) * bmult))
+			var bbr: int = Rules.points_to_milli(Ordnance.CART_BULLET_BREAK) \
+					if sh.kind == Projectile.KIND_CART_BULLET else int(attacker.armor_break)
 			_st._apply_attack(attacker, victim, true, silent, 0, 1.0, bpw, bbr)
-			_st._log("  ✦ 子弹命中 %s：飞行 %.1f 格 ×%.0f%% → 力 %d / 甲 %d" % [
-				victim.name, bd, bmult * 100.0, bpw / 1000, bbr / 1000])
+			_st._log("  ✦ %s命中 %s：飞行 %.1f 格 ×%.0f%%（只乘力量）→ 力 %d / 甲 %d%s" % [
+				"车用子弹" if sh.kind == Projectile.KIND_CART_BULLET else "子弹",
+				victim.name, bd, bmult * 100.0, bpw / 1000, bbr / 1000,
+				"（固定 +%d）" % Ordnance.CART_BULLET_BREAK
+					if sh.kind == Projectile.KIND_CART_BULLET else "（原值，不衰减）"])
 			return
 		# 破片：伤害按"离生成点走了多远"衰减（0 格 16/8 ｜ 3 格 8/4 ｜ 16 格 0）
 		# ⚠ 口径（第 98 轮）：**破片的力量伤害和轨道空爆一样是固定值 —— 只受物理抗性影响、无视护甲**。

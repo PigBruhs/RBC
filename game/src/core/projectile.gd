@@ -26,6 +26,11 @@ const KIND_MARKER := "marker"    # 轨道标记召唤球
 const KIND_CANNON := "cannon"
 const KIND_FRAGMENT := "fragment"  # 破片（箭矢类：无重力、平飞、按距离衰减伤害）
 const KIND_BULLET := "bullet"      # 子弹（萨尼铁塔：箭矢类、无重力、阶梯衰减）
+## 第 104 轮：**午餐盒的齐射子弹**（与 `KIND_BULLET` 区分）。
+## 相同的：箭矢类、无重力平飞、12 格/秒、32 格消失、同一张**只作用于力量**的阶梯衰减表。
+## 不同的：破甲 = **每发固定 +4 点**（不吃攻方 `armor_break`、不吃衰减）。
+## 见 `docs/规格.md` §12.2b 与 `Ordnance.make_cart_bullet`。
+const KIND_CART_BULLET := "cart_bullet"
 const KIND_GRENADE := "grenade"    # 枪榴弹（空中=炮弹规则，落地变模型，GM 计时爆炸）
 const KIND_ROCKET := "rocket"      # 37mm 火箭（炮弹类：落地直径 2 格 + 2 枚破片）
 const KIND_LOITER := "loiter"      # 巡飞弹（炮弹类 + 可制导：定高 1.5、恒速 3、近炸引信）

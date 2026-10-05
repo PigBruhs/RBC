@@ -27,13 +27,20 @@ const FRAGMENT_HEIGHT := 0.5
 const FRAGMENT_R := 0.09             # 碰撞体积和箭矢差不多（箭矢 0.075）
 
 ## ── 子弹（萨尼铁塔，箭矢类）────────────────────────────────────────────────
-## 用户口径：12 格/秒、无重力、全程离地 0.5 格、32 格模型消失；
-## 伤害阶梯衰减 0-12 格 100% / 12-16 格 60% / 16-24 格 20% / >24 格无伤害（仍可命中）。
+## 用户口径（第 104 轮修正后）：12 格/秒、**不受重力**、32 格模型消失；
+## 伤害**阶梯衰减只作用于力量伤害**（破甲不再衰减）：
+## 0-12 格 100% / 12-16 格 60% / 16-24 格 20% / >24 格无伤害（仍可命中）。
+## ⚠ 旧的"全程离地 0.5 格"**已删除**（第 104 轮用户口径）：高度只由发射时的瞄准高度决定。
 const BULLET_TILES_PER_SEC := 12.0
 const BULLET_MAX_DIST := 32.0
-const BULLET_HEIGHT := 0.5
+## 子弹兜底高度（只在调用方既没给 `aim_y`、也没有射手时用）：
+## **地面角色的身体中心**（= 0.5 格）。正常路径见 `_bullet_fly_y`（取射手身体中心）。
+const BULLET_FLOOR_Y := 0.5
 const BULLET_LEN := 0.2
 const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
+## 午餐盒子弹的**固定破甲**（点，第 104 轮用户口径："车的子弹每发固定附加 4 点破甲"）。
+## 不吃攻方 `armor_break`、不吃距离衰减 —— 结算在 `projectile_sink.resolve_arrow_hit`。
+const CART_BULLET_BREAK := 4
 
 ## ── 37mm 火箭（炮弹类）──────────────────────────────────────────────────────
 ## 用户口径（第 83 轮）：直径 0.185（原来是 0.37 的一半）、长 0.7（不变）；
@@ -250,18 +257,48 @@ static func make_grenade(caster: Unit, to: Vector2, ends_turn: bool) -> Projecti
 	return p
 
 
-## 子弹：从 from 沿 dir 平飞（无重力），32 格后消失。
-## aim_y >= 0 时平飞高度改成 aim_y（瞄悬空的直升机要抬高，否则从它下面飞过去）
+## 子弹：从 from 沿 dir 平飞（**不受重力**），32 格后消失。
+## ⚠ 第 104 轮用户口径：**删掉"全程维持 0.5 格高度"这个设定** ——
+##   高度**只由发射那一刻的瞄准高度决定**（`aim_y`），之后保持水平。
+##   `aim_y < 0`（调用方没给）时的兜底见 `_bullet_fly_y`：取**射手自己的身体中心**。
+## 弹种差异（§12.2b）：`make_bullet` = 萨尼铁塔（破甲走攻方 armor_break）；
+## `make_cart_bullet` = 午餐盒（破甲固定 +4）。两者共用速度/消失距离/衰减表。
 static func make_bullet(caster: Unit, from: Vector3, to: Vector2,
 		ends_turn: bool = true, aim_y: float = -1.0) -> Projectile:
+	return _make_bullet(Projectile.KIND_BULLET, caster, from, to, ends_turn, aim_y)
+
+
+## 午餐盒的齐射子弹（第 104 轮新弹种）：与 `make_bullet` 完全相同的弹道，
+## 只有**破甲**不同 —— 每发固定 `CART_BULLET_BREAK` 点（结算在 `projectile_sink`，
+## 那里按弹种取破甲值）。力量照旧 = 射手力量 × 距离衰减。
+static func make_cart_bullet(caster: Unit, from: Vector3, to: Vector2,
+		ends_turn: bool = false, aim_y: float = -1.0) -> Projectile:
+	return _make_bullet(Projectile.KIND_CART_BULLET, caster, from, to, ends_turn, aim_y)
+
+
+## 子弹缺省飞行高度（`aim_y < 0` 时的兜底）：**射手自己的身体中心**。
+## 为什么这么定：用户要求"删掉恒定 0.5 格"——高度由**发射那一刻的瞄准**决定；
+## 调用方没给瞄准高度时，最自然的物理含义就是"从射手身上射出来"（地面角色 = 0.5 格、
+## 悬停的直升机 = 2.5 格、爬升中的直升机 = 它当下的真实高度）。
+## 射手也为空时退到地面角色身体中心 `BULLET_FLOOR_Y`。
+static func _bullet_fly_y(caster: Unit, aim_y: float) -> float:
+	if aim_y >= 0.0:
+		return aim_y
+	if caster != null:
+		return Targeting.aim_height(caster)
+	return BULLET_FLOOR_Y
+
+
+static func _make_bullet(kind: String, caster: Unit, from: Vector3, to: Vector2,
+		ends_turn: bool, aim_y: float) -> Projectile:
 	var start := Vector2(from.x, from.z)
 	# 瞄准点只决定【方向】：弹道一直飞到 32 格才消失（用户口径）
 	var dir := (to - start)
 	dir = dir.normalized() if dir.length() > 0.001 else Vector2.RIGHT
-	var p := Projectile.make(Projectile.KIND_BULLET, start, start + dir * BULLET_MAX_DIST, 1.0)
+	var p := Projectile.make(kind, start, start + dir * BULLET_MAX_DIST, 1.0)
 	p.set_speed(BULLET_TILES_PER_SEC)
 	_config_owner(p, caster)
-	var fly_y: float = aim_y if aim_y >= 0.0 else BULLET_HEIGHT
+	var fly_y := _bullet_fly_y(caster, aim_y)
 	p.y0 = fly_y
 	p.y1 = fly_y
 	p.arc_scale = 0.0                 # 不受重力
@@ -271,7 +308,7 @@ static func make_bullet(caster: Unit, from: Vector3, to: Vector2,
 	p.hit_r = BULLET_R
 	p.hit_tags = []                   # 箭矢类：不会被击落
 	p.sentry_trigger = false
-	p.shot = _shot(Projectile.KIND_BULLET, caster, ends_turn, 0.0, {}, "")
+	p.shot = _shot(kind, caster, ends_turn, 0.0, {}, "")
 	return p
 
 
