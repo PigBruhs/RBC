@@ -30,7 +30,7 @@ var host = null                      # 动态类型：宿主提供 ui_xxx 接口
 var layer: CanvasLayer = null
 var bottom: PanelContainer = null
 var topbar: PanelContainer = null
-var zoom_slider: HSlider = null
+var zoom_slider: HSlider = null      # 第 110 轮：缩放滑条已从顶部栏移除，字段保留（相机代码仍写入）
 var queue_label: Label = null
 var hint_label: Label = null
 var status: Label = null
@@ -103,8 +103,10 @@ func _panel_node() -> PanelContainer:
 ## 顶部信息条：回合数 / 当前行动者 / 精力投入 / 缩放
 func _build_topbar() -> void:
 	topbar = _panel_node()
-	topbar.position = Vector2(12, 10)
-	topbar.custom_minimum_size = Vector2(760, 0)
+	# 第 110 轮：顶部信息栏改到 Boss 血条**下方**（用户口径：Boss 血条贴到顶部）；
+	# 并缩短它（原来 760 宽是为了塞下缩放条，缩放条已移除）
+	topbar.position = Vector2(12, 74)
+	topbar.custom_minimum_size = Vector2(380, 0)
 	layer.add_child(topbar)
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
@@ -117,15 +119,7 @@ func _build_topbar() -> void:
 
 	# 用户口径：精力不再只是技能费（直升机普攻也耗精力），所以那行说明整行删掉
 
-	var zl := Label.new(); zl.text = "缩放:"; hb.add_child(zl)
-	zoom_slider = HSlider.new()
-	zoom_slider.min_value = 6.0            # 与鼠标滚轮的夹取范围保持一致
-	zoom_slider.max_value = 30.0
-	zoom_slider.step = 0.5
-	zoom_slider.value = 15.0
-	zoom_slider.custom_minimum_size = Vector2(180, 0)
-	zoom_slider.value_changed.connect(func(v: float) -> void: host.ui_set_zoom(v))
-	hb.add_child(zoom_slider)
+	# 用户口径（第 110 轮）：**移除缩放那部分**（滚轮仍可缩放，只是不再占顶部栏）
 	_build_bossbar()
 
 
@@ -148,8 +142,8 @@ func _build_bossbar() -> void:
 	boss_box.anchor_right = 0.5
 	boss_box.offset_left = -280
 	boss_box.offset_right = 280
-	boss_box.offset_top = 96
-	boss_box.offset_bottom = 152
+	boss_box.offset_top = 8             # 用户口径（第 110 轮）：**贴到顶部**
+	boss_box.offset_bottom = 64
 	boss_box.visible = false                      # 默认藏起来，由刷新决定
 	layer.add_child(boss_box)
 

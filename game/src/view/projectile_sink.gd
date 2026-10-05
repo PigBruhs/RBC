@@ -227,17 +227,24 @@ func on_projectile_event(event: String, p: Projectile, extra = null) -> void:
 			after_projectile_gone(sh)
 
 
-## 一发弹道物彻底消失之后的收尾：编组计数，或者按发射单结束回合
+## 一发弹道物彻底消失之后的收尾：只做编组计数。
+##
+## ⚠ 用户口径（第 110 轮）：「**寻找并移除所有"动画结束后自动进入下一回合"的代码，
+##   改为"动画开始执行时就结束回合"**（例如投掷手之前是动画结束才自动结束回合，
+##   现在技能释放出去就自动结束回合）」
+## 所以这里**不再** `_finish_turn()` —— 回合在**施放那一刻**就结束（`skill_runner.commit_skill`
+## 及其调用方），弹道物飞多久都只是视觉表现，不再影响回合推进。
+## 原来两条 `_finish_turn` 路径：
+##   · 编组（`group`，如轨道打击的多发）计数归零 -> 现在由施放处立即结束
+##   · `sh.ends_turn`（如投掷手普攻/火箭齐射）落地 -> 现在由施放处立即结束
+## ⚠ 保留 `after_projectile_gone` 这个函数：`EV_REMOVED` 还在调它，编组计数也还要维护
+##   （`_proj_groups` 是"在途几发"的账本，别处会读）。
 func after_projectile_gone(sh: Ordnance.Shot) -> void:
 	var gid: String = sh.group if sh != null else ""
 	if gid != "" and _st._proj_groups.has(gid):
 		_st._proj_groups[gid] = int(_st._proj_groups[gid]) - 1
 		if int(_st._proj_groups[gid]) <= 0:
 			_st._proj_groups.erase(gid)
-			_st._finish_turn()
-		return
-	if sh != null and sh.ends_turn:
-		_st._finish_turn()
 
 
 ## 炮弹类【被箭击落】的统一收尾（用户口径第 83/84/96 轮）：

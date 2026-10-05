@@ -106,7 +106,11 @@ static func shell_like_defaults(kind: String) -> Dictionary:
 	if not is_shell_class(kind):
 		return {"hit_tags": [], "sentry_trigger": false, "intercept": ""}
 	return {
-		"hit_tags": ["arrow"],                    # 可以被箭击落
+		# ⚠ 第 110 轮：用户报「车的哨兵**能瞄准炮弹却一发不中**」——根因就在这里：
+		#   `can_shoot_down` 判的是 `target.hit_tags.has(我的 kind)`，而炮弹类原本**只认箭矢**，
+		#   所以**子弹在结构上根本拦不了炮弹**（哨兵瞄得再准也没用）。
+		#   现在把两种子弹也列进去：车的子弹 + 萨尼的连发弹。
+		"hit_tags": ["arrow", Projectile.KIND_CART_BULLET, Projectile.KIND_BULLET],
 		"sentry_trigger": true,                   # 惊动哨兵（不分敌我）
 		"intercept": intercept_result(kind),
 	}

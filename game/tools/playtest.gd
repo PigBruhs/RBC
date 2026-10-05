@@ -1706,9 +1706,26 @@ func _initialize() -> void:
 	_chk(String(pl.get("action", "")) == "attack" and pl.get("move_to", null) == null,
 		"能直接打到就该原地打，不要白走一步")
 	# ③ 投掷手：有目标就优先技能；**只有"自己在敌方哨兵射界里"才不用**
+	# ⚠ 第 110 轮：投掷手可能在到达这里之前就阵亡（回合推进改成"施放即结束"后战斗更快，
+	#   实测它已不在场）-> 这里**先复活**，否则整段断言拿 null 去比，报的是"不在场"而非真实结论。
 	var mortar_ai: Unit = null
 	for u in _s.units:
 		if u.name == "Airburst mortar": mortar_ai = u
+	# ⚠ 第 110 轮：这两条断言要求投掷手**有足够精力**放地毯式轰炸（cost=6）。
+	#   前面的战斗会把它精力花掉 -> 必须**无条件回满**（不是只在阵亡时复活）。
+	if mortar_ai != null:
+		mortar_ai.power_cur = mortar_ai.power_max
+		mortar_ai.armor_cur = mortar_ai.armor_max
+		mortar_ai.energy = mortar_ai.energy_max
+	# ⚠ 第 110 轮：投掷手在战斗中会**漂到紧贴敌人的格子**（实测漂到 (1,40)、敌人 (0,40)），
+	#   于是两条测试前提同时被破坏：① 它落进下面构造的 `sentry_cells` ->
+	#   "自己不在敌方哨兵射界里"这条闸拦住；② 距离 1 格 < 地毯 `range_min` -> 够不着。
+	#   所以这里**显式把它摆到敌人数格外**，让断言测的是"AI 决策"而不是"漂到哪了"。
+	if mortar_ai != null and not ctx.foes.is_empty():
+		var anchor: Vector2i = ctx.foes[0].cell
+		mortar_ai.cell = Vector2i(clampi(anchor.x, 2, _s.PW - 3), clampi(anchor.y + 8, 2, _s.PH - 3))
+	_chk(mortar_ai != null and mortar_ai.is_alive() and mortar_ai.energy_points() >= 6,
+		"投掷手在场、活着且精力够放技能（下面三条断言的前提）")
 	var mctx := Ai.Ctx.new()
 	mctx.rng = RngService.new(3)
 	mctx.me = mortar_ai

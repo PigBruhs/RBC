@@ -1247,18 +1247,45 @@ func _lunchbox_tick(delta: float) -> void:
 		var tgt: Unit = _lb_unit_by_name(want)
 		var tgt_pos: Vector2 = live_want["pos"]
 		var tgt_y: float = live_want["y"]
+		# ⚠ 第 110 轮：打**飞行中的炮弹**必须加**提前量** —— 否则子弹朝它的当前位置飞，
+		#   等子弹到了炮弹早飞走了（这是"瞄得准却一发不中"的第二个原因，第一个是
+		#   `hit_tags` 不让子弹拦炮弹，见 `Ballistics.shell_like_defaults`）。
+		#   解算：炮弹是**直线匀速**（`arc_scale` 只改高度曲线，水平方向恒定），
+		#   所以用"交汇时间"迭代两次即可：t = 距离 / 子弹速度。
+		if live_want["alive"] and want.begins_with(LB_PROJ_PREFIX):
+			var sp := _lb_projectile_by_id(int(want.substr(LB_PROJ_PREFIX.length())))
+			if sp != null and sp.alive:
+				var v := _lb_projectile_vel(sp, delta)
+				var vy := (sp.y1 - sp.y0) / maxf(0.001, sp.dur)
+				var t_est := _lb_center(u).distance_to(tgt_pos) / Ordnance.BULLET_TILES_PER_SEC
+				for i in 2:
+					tgt_pos = sp.pos() + v * t_est
+					tgt_y = sp.height() + vy * t_est
+					t_est = _lb_center(u).distance_to(tgt_pos) / Ordnance.BULLET_TILES_PER_SEC
 		if want != "" and live_want["alive"] and live_want["moving"] and not firing_salvo:
 			var want_aim := Lunchbox.aim_to(_lb_center(u), LunchboxModel.TURRET_Y, tgt_pos, tgt_y)
 			var at := Lunchbox.step_aim(aim, float(want_aim[0]), float(want_aim[1]), delta)
-			if sentry.tick(delta, true, at) and Lunchbox.can_fire(heat):
-				_lb_fire_wave(u, st, 0)                  # 哨兵：一波 6 发
-				Lunchbox.heat_fire(heat)
-				if heat.rounds >= Lunchbox.SALVO_WAVES:
-					Lunchbox.heat_start_cooldown(heat)
-					_log("  🚙 %s 哨兵连发满 12 轮 -> 冷却 %.0f 秒" % [u.name, Lunchbox.SALVO_COOLDOWN])
-			elif not Lunchbox.can_fire(heat):
-				sentry.react = 0.0
+			# ── 哨兵开火（第 110 轮修正）─────────────────────────────────────
+			# 用户报「一波齐射 **72 发** + 卡顿」。原来这里**每个开火判定就发一整波 6 发**，
+			# 而判定帧率是 ~60fps -> 12 次 = 72 发在 0.2 秒内全打出去。
+			# 正确口径与普攻一致：**一波 6 发、波间隔 `SALVO_GAP`(133ms)、12 波过热**。
+			# 所以这里改成"**每个 133ms 只发一波**"，与 `_lunchbox_salvo` 的节奏相同。
+			if Lunchbox.can_fire(heat) and sentry.tick(delta, true, at):
+				st["wave_t"] = float(st.get("wave_t", 0.0)) + delta
+				if float(st["wave_t"]) >= Lunchbox.SALVO_GAP:
+					st["wave_t"] = 0.0
+					_lb_fire_wave(u, st, 0)
+					Lunchbox.heat_fire(heat)
+					if heat.rounds >= Lunchbox.SALVO_WAVES:
+						Lunchbox.heat_start_cooldown(heat)
+						_log("  🚙 %s 哨兵连发满 %d 波 -> 冷却 %.0f 秒" % [
+							u.name, Lunchbox.SALVO_WAVES, Lunchbox.SALVO_COOLDOWN])
+			else:
+				st["wave_t"] = 0.0
+				if not Lunchbox.can_fire(heat):
+					sentry.react = 0.0
 		elif want == "":
+			st["wave_t"] = 0.0
 			sentry.tick(delta, false, false)
 		# ── 热量/冷却 + 棱柱颜色 ──
 		Lunchbox.heat_tick(heat, delta)
@@ -2743,6 +2770,27 @@ func t_tick_loiter_launchers(delta: float) -> void:
 
 func t_update_camera() -> void:
 	aim.update_camera()
+
+
+## 按 id 找在飞弹道物（第 110 轮，哨兵打炮弹用）。
+func _lb_projectile_by_id(pid: int) -> Projectile:
+	for it in field.items:
+		var p: Projectile = it["p"]
+		if p.id == pid:
+			return p
+	return null
+
+
+## 弹道物的**水平速度**（格/秒）= 本帧位移 / delta。
+## 炮弹是直线匀速（`arc_scale` 只改高度曲线），所以这一份速度可以外推任意时刻的位置。
+func _lb_projectile_vel(p: Projectile, delta: float) -> Vector2:
+	if p == null or delta <= 0.0001:
+		return Vector2.ZERO
+	for it in field.items:
+		if it["p"] == p:
+			var prev: Vector2 = it.get("prev", p.pos())
+			return (p.pos() - prev) / delta
+	return Vector2.ZERO
 
 
 ## 条子（力量/护甲可视化）的**下边**世界 y（第 109 轮）。

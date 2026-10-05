@@ -150,14 +150,17 @@ func perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 
 
 
-## 拖拽/投掷类技能共用的"扣精力 + 标记已行动"
-## （回合结束交给弹道物：落地/消失时才 _finish_turn，所以飞行途中还能被击落）
+## 拖拽/投掷类技能共用的"扣精力 + 标记已行动 + **立刻结束回合**"
+## ⚠ 用户口径（第 110 轮）：「**移除所有"动画结束后自动进入下一回合"的代码，
+##   改为"动画开始执行时就结束回合"**」—— 所以这里施放完就 `_finish_turn()`，
+##   不再等弹道物落地/消失（那条路径已从 `projectile_sink.after_projectile_gone` 移除）。
 func commit_skill(u: Unit, sid: String) -> void:
 	var d := Skills.get_def(sid)
 	u.spend_energy(int(d["cost"]))
 	u.has_acted = true
 	u.has_moved = true
 	_st._push_unit_stats(u)
+	_st._finish_turn()
 
 
 
@@ -367,6 +370,9 @@ func start_carpet_bomb(caster: Unit, center: Vector2) -> void:
 	for i in pts.size():
 		# 地毯式轰炸的爆炸范围用【轨道炮击同款】（比普攻小的那个版本）
 		_st._spawn_shell(caster, pts[i], false, float(i) * gap, gid, _st.CARPET_BLAST_R)
+	# ⚠ 第 110 轮用户口径：**动画开始执行时就结束回合**。炮弹已经出膛（上面刚 spawn），
+	#   `_proj_groups` 只作为"在途几发"的账本保留，不再由它触发 `_finish_turn`。
+	_st._finish_turn()
 
 
 

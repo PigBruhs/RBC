@@ -21,10 +21,10 @@ class_name Lunchbox
 extends RefCounted
 
 # ── 双机（方向机 / 高低机）───────────────────────────────────────────────────
-## 方向机转速（度/秒）。用户口径：第 104 轮先给 10；**第 109 轮「方向机转速翻倍」→ 20**。
-const TRAVERSE_DEG_PER_SEC := 20.0
-## 高低机转速（度/秒，用户口径：先给 5；**第 109 轮只说了方向机翻倍，高低机不动**）
-const ELEV_DEG_PER_SEC := 5.0
+## 方向机转速（度/秒）。第 104 轮 10 -> 第 109 轮 20 -> **第 110 轮用户口径 40**。
+const TRAVERSE_DEG_PER_SEC := 40.0
+## 高低机转速（度/秒）。第 104 轮 5 -> **第 110 轮用户口径 20**。
+const ELEV_DEG_PER_SEC := 20.0
 
 ## 最低俯角（度，负 = 压炮口向下）。**Lead 已按用户"你来决定"定好 -15°**：
 ##   第 106 轮炮管抬到"离车顶 1 格"（`TURRET_Y = ROOF_Y + 1 = 2.0`）、炮口距支点 0.92 格
@@ -44,7 +44,8 @@ const SALVO_PER_WAVE := 6            # 每波 6 发
 const SALVO_TOTAL := 72              # 12 × 6 = 72 发
 const SALVO_GAP := 0.133             # 波间隔 133ms（用户口径）
 const SALVO_COOLDOWN := 3.0          # 每 12 轮冷却 3 秒
-const SALVO_SPREAD_R := 1.0          # 散布 1 格
+## 散布半径（格）。第 106 轮 1.0 -> **第 110 轮用户口径 0.5**（"散布缩小至 0.5 格试试"）。
+const SALVO_SPREAD_R := 0.5
 const SALVO_SWING_DEG := 10.0        # 瞄准时方向机左右摇动 ±10°（以"车→目标"连线为中轴）
 const SALVO_RANGE := 24.0            # 普攻范围 24 格
 

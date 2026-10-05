@@ -25,6 +25,8 @@ const LABEL_ABOVE_ORB := ORB_HALF_H * 1.18 + 0.35
 const ORB_EXTRA_H := float(ORB_PX_H - ORB_PX) * (ORB_WORLD / float(ORB_PX)) * 0.5
 const WALK_TILES_PER_SEC := 2.0    # 移动速度：每秒 2 格（匀速滑动）
 const HELI_TILES_PER_SEC := 2.5    # 悬浮单位（直升机）2.5 格/秒（用户口径第 86 轮）
+## 轮式齐射午餐盒：**8 格/秒**（用户口径第 110 轮「车的移动速度变为现在的四倍」= 2 × 4）
+const CART_TILES_PER_SEC := 8.0
 const GLYPH_ADV := 6               # 字距（像素/点）：3x5 点阵 + 3 点间隔
 
 # 色系（用户指定"诡异"风）：力量/血量=洋红、护甲=青黄
@@ -74,7 +76,10 @@ func setup(u: Unit) -> void:
 	position = Vector3(float(u.cell.x) + 0.5, h, float(u.cell.y) + 0.5)
 	_base_y = h
 	# 用户口径（第 86 轮）：直升机移动 2.5 格/秒（其余 2 格/秒）
+	# 用户口径（第 110 轮）：**车的移动速度变成现在的四倍**（2 -> 8 格/秒）
 	walk_speed = HELI_TILES_PER_SEC if h > 0.0 else WALK_TILES_PER_SEC
+	if u.name == LunchboxModel.LUNCHBOX_NAME:
+		walk_speed = CART_TILES_PER_SEC
 	_build_model()
 	_build_orb()
 	_build_label()
