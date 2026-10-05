@@ -210,6 +210,12 @@ func _build_model() -> void:
 	if bname == LunchboxModel.LUNCHBOX_NAME:
 		LunchboxModel.attach(self, _faction_color())
 		return
+	# 雷达午餐盒（第 111 轮）：**同一个午餐盒车身**（复用 LunchboxModel 的车体 + 8 轮），
+	# 但**没有炮塔 / 炮管 / 巡飞弹发射器**；车顶正中一根立柱，顶上是一个**持续自转**的雷达。
+	# 同样占 1×2 格（foot_y = 2 / body_r = 0.5）—— 见 radar_model.gd
+	if bname == RadarModel.RADAR_NAME:
+		RadarModel.attach(self, _faction_color())
+		return
 	# 萨尼铁塔：远程造型 + 背上背一根医疗拐杖（用户口径）
 	if bname == "萨尼铁塔":
 		_build_ranged(body_mat, dark_mat, metal_mat)

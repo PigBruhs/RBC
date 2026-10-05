@@ -146,6 +146,8 @@ func menu_rest() -> void:
 	var before_a: int = _st.active.armor_cur
 	var before_e: int = _st.active.energy
 	_st.active.rest()
+	# 雷达午餐盒（第 111 轮）：休息 -> **锁定进度重置**（用户口径之一）
+	_st._radar_clear_lock(_st.active, "休息")
 	# 关键：立刻把三池的变化推到表现层与详情栏，不要等下一回合
 	push_unit_stats(_st.active)
 	_st._log("%s 休息：力量 %s→%s  护甲 %s→%s  精力 %s→%s（回合结束）" % [

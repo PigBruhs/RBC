@@ -1113,6 +1113,137 @@ func _lb_forget_state(u: Unit) -> void:
 	_lb_move_until.erase(u.name)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 雷达午餐盒（第 111 轮）—— 状态机接进场景。
+# 纯规则在 `core/radar.gd`（已由 `probe_radar.gd` 35 项锁死）；这里只做"接线"：
+#   · 轮到它自己的回合 -> 锁定进度 -1
+#   · 普攻选定敌人 -> 开始锁定；技能选友军 -> 建立连接
+#   · 休息 / 被摧毁 / 目标死亡 -> 重置锁定
+#   · 每帧检查连接距离（走远就断）
+# ══════════════════════════════════════════════════════════════════════════════
+var _radar_states: Dictionary = {}      # 单位名 -> Radar.State
+
+
+func _is_radar(u: Unit) -> bool:
+	return u != null and u.name.begins_with(Radar.NAME)
+
+
+func _radar_state(u: Unit) -> Radar.State:
+	var st: Radar.State = _radar_states.get(u.name, null)
+	if st == null:
+		st = Radar.State.new()
+		_radar_states[u.name] = st
+	return st
+
+
+## 场上所有雷达车的状态（给 `Radar.spread_modifier` / `may_target` 用）
+func _radar_all_states() -> Array:
+	var out: Array = []
+	for u in units:
+		if _is_radar(u) and u.is_alive():
+			out.append(_radar_state(u))
+	return out
+
+
+## 轮到某个单位：若是雷达车，锁定进度 -1。
+## ⚠ `begin_lock` 也发生在他自己的回合里，所以调用方在"选定"之后**紧接着**调这里一次，
+##   这样"81 格 -> 5 回合"才成立（选定那一回合本身算第 1 回合）——见 `probe_radar.gd`。
+func _radar_on_turn_begin(u: Unit) -> void:
+	if not _is_radar(u):
+		return
+	var st := _radar_state(u)
+	if st.lock_name == "":
+		return
+	# 目标已死 -> 重置（用户口径之一）
+	if _lb_unit_by_name(st.lock_name) == null:
+		_radar_log(u, "锁定目标已不在 -> 重置")
+		Radar.clear_lock(st)
+		return
+	var done := Radar.tick_turn(st)
+	_radar_log(u, "锁定 %s：仍需 %d 回合%s" % [
+		st.lock_name, st.lock_left, "（**已锁定**）" if done else ""])
+
+
+## 重置锁定（休息 / 被摧毁走这里）。**不动 links**（用户口径：连接与锁定解耦）。
+func _radar_clear_lock(u: Unit, why: String) -> void:
+	if not _is_radar(u):
+		return
+	var st := _radar_state(u)
+	if st.lock_name == "" and st.lock_left == 0:
+		return
+	Radar.clear_lock(st)
+	_radar_log(u, "锁定已重置（%s）" % why)
+
+
+## 每帧：连接距离持续检查（走远就断）
+func _radar_tick_links() -> void:
+	for u in units:
+		if not _is_radar(u) or not u.is_alive():
+			continue
+		var st := _radar_state(u)
+		if st.links.is_empty():
+			continue
+		var before := st.links.size()
+		Radar.prune_links(st, GridMath.unit_pos(u), func(nm: String) -> Vector2:
+			var t := _lb_unit_by_name(nm)
+			return GridMath.unit_pos(t) if t != null and t.is_alive() else Vector2.INF)
+		if st.links.size() != before:
+			_radar_log(u, "连接断开了（超出 %d 格）" % int(Radar.LINK_RANGE))
+
+
+func _radar_log(u: Unit, msg: String) -> void:
+	_log("  📡 %s：%s" % [u.name, msg])
+
+
+# ── 测试门面 ───────────────────────────────────────────────────────────────
+func t_radar_state(name: String) -> Radar.State:
+	for u in units:
+		if u != null and u.name == name:
+			return _radar_state(u)
+	return null
+
+func t_radar_begin_lock(radar_name: String, target_name: String) -> void:
+	_radar_begin_lock(_lb_unit_by_name(radar_name), target_name)
+
+func t_radar_add_link(radar_name: String, friend_name: String) -> bool:
+	var r := _lb_unit_by_name(radar_name)
+	if r == null:
+		return false
+	return Radar.add_link(_radar_state(r), friend_name)
+
+func t_radar_lock_left(radar_name: String) -> int:
+	for u in units:
+		if u != null and u.name == radar_name:
+			return _radar_state(u).lock_left
+	return -1
+
+
+## 开始锁定：按**当前**距离算回合数，然后**同回合立刻 tick 一次**
+## （用户例子 81 格 -> 5 回合；见 `probe_radar.gd` 的口径说明）。
+func _radar_begin_lock(radar: Unit, target_name: String) -> void:
+	if not _is_radar(radar) or target_name == "":
+		return
+	var tgt := _lb_unit_by_name(target_name)
+	if tgt == null or not tgt.is_alive():
+		return
+	var dist := GridMath.unit_pos(radar).distance_to(GridMath.unit_pos(tgt))
+	var st := _radar_state(radar)
+	Radar.begin_lock(st, target_name, dist)
+	_radar_log(radar, "开始锁定 %s（距离 %.1f 格 -> 需 %d 回合）" % [
+		target_name, dist, st.lock_total])
+	_radar_tick_for(radar)
+
+
+## 只对"当前这一台"做一次回合 tick（不复用 `_radar_on_turn_begin`，因为那个会查目标存活）
+func _radar_tick_for(radar: Unit) -> void:
+	var st := _radar_state(radar)
+	if st.lock_name == "":
+		return
+	var done := Radar.tick_turn(st)
+	_radar_log(radar, "锁定 %s：仍需 %d 回合%s" % [
+		st.lock_name, st.lock_left, "（**已锁定**）" if done else ""])
+
+
 ## 车体中心（世界坐标，格）。
 ## ⚠ 第 109 轮修正（用户口径）：「**尝试让车在行进中触发哨兵时开火位置与当前炮管口的位置绑定，
 ##   不要现在车还在开呢子弹就已经在移动目的地往外冒了**」
@@ -1906,6 +2037,27 @@ func _on_unit_died(u: Unit) -> void:
 ##   · 挂起未结算的技能（轨道空爆标记）
 func _clear_unit_states(u: Unit) -> void:
 	turn.clear_unit_states(u)
+	# 雷达午餐盒（第 111 轮）：被摧毁 -> 锁定进度重置 + 连接全断（用户口径）
+	if _is_radar(u):
+		Radar.clear_lock(_radar_state(u))
+		_radar_state(u).links.clear()
+		_radar_states.erase(u.name)
+		_radar_log(u, "被摧毁 -> 锁定与连接全部清空")
+	# 别的雷达车锁着它 -> 也重置（"锁定目标死亡"）
+	# ⚠ 用 `_radar_states.get` 而不是 `_radar_state` —— 后者**会按需新建**，
+	#   会把上面刚 erase 掉的那台雷达的状态又建回来（实测踩到）。
+	for r in units:
+		if not _is_radar(r) or r == u:
+			continue
+		var st: Radar.State = _radar_states.get(r.name, null)
+		if st == null:
+			continue
+		if st.lock_name == u.name:
+			Radar.clear_lock(st)
+			_radar_log(r, "锁定目标 %s 已阵亡 -> 重置" % u.name)
+		# 被摧毁/阵亡的友军从连接列表里剔除
+		if st.links.has(u.name):
+			st.links.erase(u.name)
 
 
 ## 英雄重生：满血满护甲 + 回到关卡给的固定格
@@ -2054,6 +2206,8 @@ func _process(delta: float) -> void:
 	# 齐射批次结算（第 105 轮）：一波的子弹打完了就**一次性**造伤（每个目标一次），
 	# 而不是每碰撞一次都走一遍完整造伤路径 —— 这是用户报的卡顿的修法。
 	_tick_volleys()
+	# 雷达午餐盒（第 111 轮）：连接距离**持续检查**（走远就断）
+	_radar_tick_links()
 
 
 ## 队列条动画计时：到点就收尾；期间攒下的刷新请求在这里补做（最小间隔 0.5 秒）

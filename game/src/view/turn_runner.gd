@@ -85,6 +85,8 @@ func next_turn() -> void:
 	u.begin_turn()
 	_st._turn_just_finished = null            # 新回合开始，解除幂等保护
 	_st.gm.on_turn_begin(u)                   # 被动机会：只有他自己的回合开始才重置（杰拉尔德弹反）
+	# 雷达午餐盒（第 111 轮）：轮到它自己的回合 -> 锁定进度 -1
+	_st._radar_on_turn_begin(u)
 	# 哨兵状态持续到"自己的下一个回合"——所以自己的回合一开始就撤掉警戒
 	if _st.gm.has_sentry(u):
 		_st.gm.clear_sentry_for(u)

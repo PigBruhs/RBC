@@ -128,6 +128,7 @@ func perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 		Skills.CAST_GRENADE:
 			commit_skill(u, sid)
 			spawn_grenade_shot(u, aim, sid)
+			_st._finish_turn()              # 放出去了才结束回合（第 111 轮口径）
 			return true
 		Skills.CAST_MARKER:
 			commit_skill(u, sid)
@@ -135,6 +136,7 @@ func perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 			_st._log("%s 投出【%s】召唤球，落点 (%d, %d)，距离 %.1f 格，飞行 %.2f 秒" % [
 				u.name, d["name"], cell.x, cell.y, md, md / Ordnance.SHELL_TILES_PER_SEC])
 			_st.sink.spawn_marker(u, aim)                # 落地后由 _fire_skill_at 登记 GM 计时
+			_st._finish_turn()              # 召唤球放出去了才结束回合（第 111 轮口径）
 			return true
 		Skills.CAST_LOITER:
 			# 第 104 轮：轮式齐射午餐盒的巡飞弹（耗 12 精力）。
@@ -150,17 +152,18 @@ func perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 
 
 
-## 拖拽/投掷类技能共用的"扣精力 + 标记已行动 + **立刻结束回合**"
-## ⚠ 用户口径（第 110 轮）：「**移除所有"动画结束后自动进入下一回合"的代码，
-##   改为"动画开始执行时就结束回合"**」—— 所以这里施放完就 `_finish_turn()`，
-##   不再等弹道物落地/消失（那条路径已从 `projectile_sink.after_projectile_gone` 移除）。
+## 拖拽/投掷类技能共用的"扣精力 + 标记已行动"。
+## ⚠ 第 111 轮修正：**回合结束不放在这里** —— 实测把它放进来会让"发射物注册"发生在
+##   `_finish_turn()` **之后**，回合已经推进、下一个单位开始行动，于是刚放出去的弹道物
+##   在 `_skill_effect` 里读到 0（playtest 的 `loiter_launch：玩家入口与统一入口效果一致` 变红）。
+##   正确顺序是"**先把东西放出去，再结束回合**"（用户口径：技能释放出去就结束回合），
+##   所以由 `perform_skill` 的各分支在 spawn 之后自己调 `_finish_turn()`。
 func commit_skill(u: Unit, sid: String) -> void:
 	var d := Skills.get_def(sid)
 	u.spend_energy(int(d["cost"]))
 	u.has_acted = true
 	u.has_moved = true
 	_st._push_unit_stats(u)
-	_st._finish_turn()
 
 
 

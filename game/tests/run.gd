@@ -915,8 +915,9 @@ func _initialize() -> void:
 	_expect(rp_pads.size() == 2, "玩家两个公主（pad）位置", fails)
 	# 出场名单：玩家 = 老国王 + 两个公主 + 五个英雄 + 轮式齐射午餐盒；敌方 = 只有 Reaper
 	var rroster: Array = Level.roster("reaper")
-	_expect(rroster.size() == 10,
-		"出场名单 10 条（老国王 + 两个公主 + 五个英雄 + 午餐盒 + Reaper，实际 %d）" % rroster.size(), fails)
+	# 第 111 轮：新增雷达午餐盒 -> 10 -> **11**
+	_expect(rroster.size() == 11,
+		"出场名单 11 条（老国王 + 两个公主 + 五个英雄 + 午餐盒 + 雷达午餐盒 + Reaper，实际 %d）" % rroster.size(), fails)
 	# 玩家侧必须有**可行动单位**（no_turn 的国王/公主不算）—— 否则 Reaper 会先手连动
 	var p_actors := 0
 	for e in rroster:
@@ -926,8 +927,9 @@ func _initialize() -> void:
 		if nm98 == "老国王" or nm98.begins_with("公主"):
 			continue
 		p_actors += 1
-	_expect(p_actors == 6,
-		"玩家侧 6 个可行动单位（五个英雄 + 午餐盒，不是只有 no_turn 的国王/公主，实际 %d）" % p_actors, fails)
+	# 第 111 轮：新增雷达午餐盒 -> 6 -> **7**
+	_expect(p_actors == 7,
+		"玩家侧 7 个可行动单位（五个英雄 + 午餐盒 + 雷达午餐盒，不是只有 no_turn 的国王/公主，实际 %d）" % p_actors, fails)
 	# 胜负条件：非对称（老国王死 = 败；Reaper 死 = 胜）
 	var rv: Dictionary = Level.victory("reaper")
 	_expect(String(rv.get("type", "")) == "boss" and String(rv.get("boss_name", "")) == "Reaper",
