@@ -144,11 +144,14 @@ static func cost_of(u: Unit) -> int:
 
 
 ## 给日志/详情栏用的一行中文：例 "火箭齐射（4 精力，拖拽瞄准）"
+## ⚠ 第 109 轮：这里必须用 `cost_of(u)`（**按名覆盖之后**的值），不能用模板原始 `cost` ——
+##   否则午餐盒（覆盖成 0）在详情栏会显示成"4 精力"，与它实际的免费普攻自相矛盾。
 static func describe(u: Unit) -> String:
 	var p := for_unit(u)
 	var s := String(p.get("cn", "近战"))
-	if int(p["cost"]) > 0:
-		s += "（%d 精力" % int(p["cost"])
+	var real_cost := cost_of(u)
+	if real_cost > 0:
+		s += "（%d 精力" % real_cost
 	else:
 		s += "（免费"
 	match String(p["aim"]):

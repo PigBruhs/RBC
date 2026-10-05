@@ -157,8 +157,11 @@ static func plan_forward(reaper: Unit, units: Array[Unit]) -> Dictionary:
 ##   丙（10%）：三名【萨尼铁塔】（带枪榴弹 + 圣萨尼）。
 ## 三个模板的 `names.size()` 都是 3（用户口径"一次三个"）。
 const SUMMON_KITS := [
-	{"id": "A", "desc": "2 近战(无技能) + 1 远程(带哨兵)", "weight": 70,
-	 "names": ["Gerald", "Gerald", "公主·左"]},
+	# ⚠ 第 109 轮用户澄清：「你错误地理解了我说的**第一个两个近战一个远程的刷兵模板**，
+	#   **远程指的不是公主而是阿莱特**」—— 所以这里的第 3 人从 `公主·左` 改成 **`Alette`**。
+	#   （`公主·左` 是 `no_turn` 的固定炮台，而且用户看到它在"Reaper 脚底下"就是这一条引起的误认。）
+	{"id": "A", "desc": "2 近战(无技能) + 1 远程(阿莱特，带哨兵)", "weight": 70,
+	 "names": ["Gerald", "Gerald", "Alette"]},
 	{"id": "B", "desc": "3 个投掷手(带技能：地毯式轰炸)", "weight": 20,
 	 "names": ["Airburst mortar", "Airburst mortar", "Airburst mortar"]},
 	{"id": "C", "desc": "3 名萨尼铁塔", "weight": 10,
@@ -185,8 +188,37 @@ static func pick_kit_index(rng: RngService) -> int:
 	return SUMMON_KITS.size() - 1
 
 
-## 挑召唤位：**确定性**螺旋外扩，从 Reaper 周围一圈开始找空格
-## （不用字典/数组的迭代顺序，避免"每次跑落点都不一样"）
+## 召唤落点对 Reaper 身体的**安全余量**（第 109 轮用户口径）。
+## 用户原话：「将 REAPER 召唤的重生的移到 REAPER 碰撞体积外：现在召唤出来的投掷手
+## 会在其内部开火然后直接大额伤害 REAPER」。
+## 取 **1.0 格**的理由：a) Reaper 的 `body_r = 3`，于是中心距要求 4.0 格
+## （对角环 r=4 的边中点 `(4,0)` 欧氏距离正好 4.0 ✓）；b) 召唤物自己的体半径 0.3
+## -> 它的身体边缘离 Reaper 表面还有 **0.7 格**；c) 再放大（+2）会让召唤物离得太远、
+## 一出生就暴露在玩家火力下，反而不好平衡。
+const SUMMON_CLEARANCE := 1.0
+## 兜底搜索半径（严格档 / 放宽档）——保证**有限步**、不会死循环：
+## 12 格（半径 3 的身体之外一圈就够，正常地图必然成功）｜20 格（极端拥挤时放宽余量再找）
+const SUMMON_R_MAX := 12
+const SUMMON_R_MAX_RELAXED := 20
+
+
+## 挑召唤位：**确定性**螺旋外扩找空格（不用字典/数组的迭代顺序，避免"每次跑落点都不一样"）。
+##
+## ⚠ 第 109 轮修正（用户报的 bug）：**落点必须在 Reaper 的碰撞体之外**。
+## 螺旋是**方形**外扩（切比雪夫半径 r）、而身体是**圆**柱（欧氏半径 `body_r`），
+## 两者要分开算（验算见下），所以这里**同时**用两个判据：
+##   ① 起始切比雪夫半径 `r_start = ceil(body_r) + 1`（body_r = 3 -> r = 4）
+##   ② 再按**欧氏距离**过滤：`|落点中心 - Reaper 中心| >= body_r + SUMMON_CLEARANCE`
+## 验算（body_r = 3、r_start = 4）：
+##   · 切比雪夫环 r 上的欧氏距离范围 = **[r, r·√2]**（最小在边中点、最大在角上）
+##   · r = 4 时最小欧氏距离 = **4.0**（如偏移 `(4,0)`）> 3 = body_r ✓
+##   · 角上 `(4,4)` 是 5.66，更安全 ✓
+##   · 于是**任何**落点都不在半径 3 的圆柱内（最保守的欧氏判据也成立）✓
+##   · 旧实现 `r = 1` 起：`(1,0)` 欧氏距离 1.0 < 3 -> **落在身体里**（bug 的根因）✗
+##
+## ⚠ **退化**：严格档（r ≤ 12）找不满时，放宽余量到 `body_r + 0.5`、半径扩到 20 再找
+## （仍然是"身体之外"）；还找不满就返回已经找到的（调用方会打印实际落点数，
+## 不会静默少召）。**任何情况下都不会死循环**。
 static func summon_cells(reaper: Unit, units: Array[Unit], count: int) -> Array[Vector2i]:
 	var occupied := {}
 	for u in units:
@@ -196,23 +228,38 @@ static func summon_cells(reaper: Unit, units: Array[Unit], count: int) -> Array[
 			# `Targeting.unit_cells` 对普通单格角色返回 `[cell]`，所以既有行为逐字不变。
 			for c in Targeting.unit_cells(u):
 				occupied[c] = true
+	var body_r: float = Targeting.unit_body_r(reaper)
+	var r_start: int = maxi(1, int(ceil(body_r)) + 1)
 	var out: Array[Vector2i] = []
-	var r := 1
-	while out.size() < count and r <= 12:
-		for dy in range(-r, r + 1):
-			for dx in range(-r, r + 1):
-				if maxi(absi(dx), absi(dy)) != r:
-					continue
-				var c := reaper.cell + Vector2i(dx, dy)
-				if occupied.has(c) or not Level.in_play(c):
-					continue
-				occupied[c] = true
-				out.append(c)
+	# 两档：严格（body_r + 1.0，半径 ≤ 12）-> 放宽（body_r + 0.5，半径 ≤ 20）
+	var tiers: Array = [
+		[body_r + SUMMON_CLEARANCE, SUMMON_R_MAX],
+		[body_r + 0.5, SUMMON_R_MAX_RELAXED],
+	]
+	for tier in tiers:
+		var min_d: float = float(tier[0])
+		var r_max: int = int(tier[1])
+		var r := r_start
+		while out.size() < count and r <= r_max:
+			for dy in range(-r, r + 1):
+				for dx in range(-r, r + 1):
+					if maxi(absi(dx), absi(dy)) != r:
+						continue
+					var c := reaper.cell + Vector2i(dx, dy)
+					if occupied.has(c) or not Level.in_play(c):
+						continue
+					# ② 欧氏距离判据：中心距必须真的在身体之外（+余量）
+					if Vector2(float(dx), float(dy)).length() < min_d:
+						continue
+					occupied[c] = true
+					out.append(c)
+					if out.size() >= count:
+						break
 				if out.size() >= count:
 					break
-			if out.size() >= count:
-				break
-		r += 1
+			r += 1
+		if out.size() >= count:
+			break
 	return out
 
 

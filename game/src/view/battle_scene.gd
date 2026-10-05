@@ -1084,17 +1084,56 @@ func _is_lunchbox(u: Unit) -> bool:
 func _lb_state(u: Unit) -> Dictionary:
 	var st: Dictionary = _lb_states.get(u.name, {})
 	if st.is_empty():
+		var a := Lunchbox.Aim.new()
+		# ⚠ 用户口径（第 109 轮）：「**炮管初始状态为指向车头**（只是复活时的状态，
+		#   后续改变后不会自动恢复）」—— 车头 = 网格 +y = 方位角 **90°**
+		#   （`_lb_turn_body` / `set_body_yaw` 用同一套约定）。
+		#   状态字典按**单位名**缓存在 `_lb_states` 里；单位阵亡后重生会清掉重来
+		#   （见 `_lb_forget_states` 一类的收尾）→ 所以"复活时"自然回到指向车头。
+		a.theta = 90.0
 		st = {
-			"aim": Lunchbox.Aim.new(), "heat": Lunchbox.Heat.new(),
-			"lock": "", "order": [], "last_cell": u.cell, "still": 0.0,
+			"aim": a, "heat": Lunchbox.Heat.new(),
+			"lock": "", "order": [],
 		}
 		_lb_states[u.name] = st
 	return st
 
 
-## 车体中心（世界坐标，格）：锚点是 1×2 的前半格，所以中心在 +0.5 格
+## 清掉午餐盒的双机/热量/锁定状态（第 109 轮）。
+## 用途：**复活时**让"炮管初始状态回到指向车头"（用户口径：只是复活时的状态，
+## 后续改变后不会自动恢复）。下一次 `_lb_state(u)` 会重建，`theta` 回到 90° = 车头。
+## ⚠ 只删这一条，不影响别的单位。
+func _lb_forget_state(u: Unit) -> void:
+	if u == null:
+		return
+	if not _is_lunchbox(u):
+		return
+	_lb_states.erase(u.name)
+	_lb_move_mark.erase(u.name)
+
+
+## 车体中心（世界坐标，格）。
+## ⚠ 第 109 轮修正（用户口径）：「**尝试让车在行进中触发哨兵时开火位置与当前炮管口的位置绑定，
+##   不要现在车还在开呢子弹就已经在移动目的地往外冒了**」
+## **旧实现为什么错**：这里用的是 `u.cell`（**逻辑格**），而逻辑格是**移动发起那一刻就瞬移**的
+##   （真正在走的是视觉位置，见 `GridMath.unit_pos` 的注释）→ 于是车还在半路时，
+##   炮口/发射点已经算在**目的地**了，子弹从目的地冒出来。
+## **新实现**：用**视觉位置**（`GridMath.unit_pos` = `visual.position.x/z`），
+##   与 `_lb_turn_body`、瞄准用的 `GridMath.unit_pos(目标)` 保持同一套口径。
+## ⚠ 锚点是 1×2 的**前半格**，所以车体中心在**行进方向 +1 格**处 —— 沿"当前朝向"推 1 格，
+##   而不是写死 `+1` 到 y（车体转向之后那个偏移也要跟着转）。
 func _lb_center(u: Unit) -> Vector2:
-	return Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 1.0)
+	var anchor := GridMath.unit_pos(u)          # 视觉位置（走路中就是它当下真正所在）
+	var yaw := _lb_body_yaw_or_front(u)
+	return anchor + Vector2(cos(deg_to_rad(yaw)), sin(deg_to_rad(yaw)))
+
+
+## 车体当前朝向（度）；没有模型/没设过时退回"车头默认朝 +y"= 90°。
+func _lb_body_yaw_or_front(u: Unit) -> float:
+	var m := _lb_model(u)
+	if m == null:
+		return 90.0
+	return m.body_yaw()
 
 
 ## 炮口在**世界**坐标里的位置。

@@ -74,6 +74,7 @@ const MUZZLE_R := 0.11
 ## 必须按名字找 —— 这里给它一个稳定名字。
 const BARREL_PRISM_NAME := "TurretPrism"
 const BODY_ROOT_NAME := "BodyRoot"          # 车体容器（测试按名字/门面定位）
+const LOITER_ROOT_NAME := "LoiterLauncher"  # 巡飞弹发射器根（第 108 轮挪到车尾）
 
 var _turret: Node3D = null                 # 方向机（绕 y 转）
 var _barrel: Node3D = null                 # 高低机（绕 x 转）
@@ -274,7 +275,16 @@ func _build_turret() -> void:
 # ── 车顶右半边：巡飞弹发射器（套沙盒那台的造型：底座箱 + 上仰发射管 + 青色光环）──
 func _build_loiter_launcher() -> void:
 	var root := Node3D.new()
-	root.position = Vector3(0.30, ROOF_Y, 0.30)
+	root.name = LOITER_ROOT_NAME
+	# 用户口径（第 108 轮）：「巡飞弹发射器现在被藏在了炮管底下；请把它挪到车的尾部
+	#   （即现在是 x 方向，我需要它在 z 方向）」。
+	# 车头 = 本地 +z（第 107 轮车体容器口径），所以**车尾 = 本地 -z**。
+	# 位置依据（实测，见任务报告的包围盒）：
+	#   · 车顶面薄片本地 z 跨度 = ±0.700、x 跨度 = ±0.303（六边形顶点决定）
+	#   · 发射器底座箱 0.30×0.30 -> 居中放在 z=-0.50 时占 z[-0.65,-0.35]、x[-0.15,0.15]
+	#     => 完整落在车顶面**之内**（z 余量 0.05、x 余量 0.15），不悬空
+	#   · x = 0 居中；与炮塔轴线（TURRET_X=0，在本地 z=0）**在 z 上分离 0.50 格**
+	root.position = Vector3(0.0, ROOF_Y, -0.50)
 	_body_root.add_child(root)          # 车顶设备：跟着**车体**转（不属于炮塔）
 	var box := BoxMesh.new()
 	box.size = Vector3(0.30, 0.10, 0.30)
@@ -394,6 +404,10 @@ func t_prism() -> MeshInstance3D:
 
 func t_body_root() -> Node3D:
 	return _body_root
+
+
+func t_loiter_root() -> Node3D:
+	return _body_root.get_node_or_null(LOITER_ROOT_NAME) as Node3D
 
 
 func t_elevation() -> Node3D:

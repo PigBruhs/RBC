@@ -200,6 +200,10 @@ func on_revive_timeout(u: Unit) -> void:
 	u.power_cur = u.power_max
 	u.armor_cur = u.armor_max
 	u.energy = u.energy_max
+	# 第 109 轮：午餐盒复活时把它的**双机/热量状态清掉** —— 用户口径
+	# 「炮管初始状态为指向车头（**只是复活时的状态**，后续改变后不会自动恢复）」。
+	# 清掉之后下一次 `_lb_state(u)` 会重建，`theta` 回到 90°（= 车头）。
+	_st._lb_forget_state(u)
 	u.visual.visible = true
 	u.visual.update_orb()
 	_st._log("  ♻ %s 已满血复活（力%s 甲%s）" % [
@@ -217,6 +221,8 @@ func revive_hero(u: Unit) -> void:
 	u.energy = u.energy_max
 	u.has_moved = false
 	u.has_acted = false
+	# 第 109 轮：午餐盒复活 -> 双机/热量状态清掉（炮管回到指向车头，见 `on_revive_timeout`）
+	_st._lb_forget_state(u)
 	u.cell = revive_cell(u)
 	if u.visual != null:
 		u.visual.position = Vector3(float(u.cell.x) + 0.5, u.hover, float(u.cell.y) + 0.5)

@@ -53,7 +53,12 @@ func perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Placea
 	if guard_acted and u.has_acted:
 		return false
 	var prof := AttackProfile.for_unit(u)
-	var cost := int(prof["cost"])
+	# ⚠ 第 109 轮修的 bug（用户报「0 精力选择完目标后普攻不会释放」）：
+	#   这里原来读的是**模板里的原始 cost**（`int(prof["cost"])`），**绕过了按名覆盖**
+	#   `AttackProfile.cost_of(u)` —— 午餐盒与直升机共用 `BASIC_SALVO`（模板 cost=4），
+	#   于是车即使被覆盖成 0，这里仍按"4 精力"判定 → **0 精力时普攻被静默拒绝**。
+	#   一律走 `cost_of(u)`：它是"这一次普攻扣多少"的唯一来源。
+	var cost := AttackProfile.cost_of(u)
 	# 精力不足：**什么都不做**（不置已行动、不结束回合），由调用方决定怎么收尾。
 	# 拒绝类文案不写日志（用户口径：日志只记既定事实，提示只留在状态栏/菜单）。
 	if u.energy_points() < cost:
