@@ -132,6 +132,8 @@ func menu_attack() -> void:
 			# 只显示"当前位置能打到的格子"（紫色高亮）
 			_st.attackable = Targeting.attack_range_cells_rect(_st.active, _st.PX, _st.PY, _st.PW, _st.PH)
 			_st.attack.prune_air_cells()       # 近战：够不着的空中单位那格不亮（第 96 轮）
+			# ── 难点 2 接入（第 111 轮）：被连接的友军可**无视距离**点选"被雷达锁定的目标" ──
+			_st._radar_add_locked_targets(false, _st.active, _st.attackable)
 			_st.fx.draw_hints()
 			_st._refresh_all()
 

@@ -217,4 +217,56 @@ func _run(s: Node) -> void:
 			_ok(st4.links.size() == Radar.MAX_LINKS,
 				"**最多两名**（实际 %d）" % st4.links.size())
 
+	print("\n[8] 难点 2 接入：散布修正 + 无视距离选被锁定目标")
+	var cart: Unit = null
+	for u in s.units:
+		if u != null and u.name == "轮式齐射午餐盒":
+			cart = u
+			break
+	_ok(cart != null, "场上找到轮式齐射午餐盒（有散布的角色）")
+	if cart != null:
+		var st5: Radar.State = s.t_radar_state(RADAR)
+		st5.links.clear()
+		Radar.clear_lock(st5)
+		Radar.add_link(st5, cart.name)
+		# 未锁定 -> 基准半径 ×0.5
+		_ok(absf(s.radar_spread_mult(cart, 20.0) - 0.5) < 1e-6,
+			"**锁定完成前：散布倍率 = 0.5**（实际 %.3f）" % s.radar_spread_mult(cart, 20.0))
+		_ok(absf(s._radar_spread(1.5, cart) - 0.75) < 1e-6, "绝对半径 1.5 -> 0.75（×0.5）")
+		# 锁定完成 -> "直径 0.1 格的球"（半径 0.05）
+		var foe4: Unit = null
+		for u in s.units:
+			if u != null and u.is_alive() and u.side != radar.side:
+				foe4 = u
+				break
+		if foe4 != null:
+			s.t_radar_begin_lock(RADAR, foe4.name)
+			while not st5.locked():
+				s._radar_on_turn_begin(radar)
+			_ok(absf(s._radar_spread(1.5, cart) - 0.05) < 1e-6,
+				"**锁定完成后：绝对半径 = 0.05（= 直径 0.1 格的球）**（实际 %.3f）" % s._radar_spread(1.5, cart))
+			# 没被连接的角色不受影响
+			var other: Unit = null
+			for u in s.units:
+				if u != null and u.is_alive() and u.side == radar.side and u.name != RADAR \
+						and not st5.links.has(u.name):
+					other = u
+					break
+			if other != null:
+				_ok(absf(s._radar_spread(1.5, other) - 1.5) < 1e-6,
+					"**未被连接的友军散布不变**（%s）" % other.name)
+			# 无视距离选被锁定目标（走**普攻**那条选目标路：空 sid）
+			s.active = cart
+			s._aim_skill_id = ""
+			cart.cell = radar.cell
+			cart.visual.position = Vector3(float(cart.cell.x) + 0.5, cart.visual.position.y,
+				float(cart.cell.y) + 0.5)
+			foe4.cell = radar.cell + Vector2i(60, 0)
+			foe4.visual.position = Vector3(float(foe4.cell.x) + 0.5, foe4.visual.position.y,
+				float(foe4.cell.y) + 0.5)
+			s._begin_unit_targeting("")
+			var got: bool = s.t_attackable_cells().has(foe4.cell)
+			print("      被锁定目标挪到 60 格外 ｜ 进可选集合 = %s" % str(got))
+			_ok(got, "**被连接的友军可无视距离选被锁定目标**（60 格外也在可选集合里）")
+
 	print("\n── 雷达场景接线探针：%d 项检查，失败 %d 项 ──" % [_n, _f])

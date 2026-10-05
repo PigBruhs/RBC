@@ -533,6 +533,52 @@ func _begin_aim() -> void:
 
 ## 进入"点选敌方角色"阶段：照远程普攻 `attackable` 的成例——把射程内的敌方角色所在格高亮，
 ## 玩家点敌人即可（两次点击确认：第一次黄勾、第二次施放）。
+## 难点 2 接入（第 111 轮）：把"被雷达锁定、且施法者是被连接友军"的敌人加进可选集合，
+## **无视距离限制**。用户口径：
+## 「锁定完成后将该角色加入**所有连接友军的普攻和技能的攻击对象**中
+##  （齐射午餐盒的普攻是选择瞄准的，则可以**无视距离限制**选定被雷达车锁定的目标）」
+func _radar_add_locked_targets(_unused: bool, atk: Unit, out: Dictionary) -> void:
+	if atk == null:
+		return
+	var states := _radar_all_states()
+	for u in units:
+		if u == null or not u.is_alive() or u.side == atk.side:
+			continue
+		if Radar.may_target(states, atk.name, u.name):
+			out[u.cell] = true
+
+
+## 难点 2 接入（第 111 轮）：把雷达对"被连接友军"的**散布修正**作用到一个基准散布半径上。
+## 用户口径：「锁定完成前连接的角色弹道散布**降低 50%**」「锁定完成后……将其弹道散布
+## **缩小至直径 0.1 格的球**」。纯逻辑在 `Radar.spread_modifier/apply_spread`。
+## ⚠ 用户说"你尽力吧，可能出现没覆盖到的情况我不怪你" —— 所以这里覆盖**几个明显的**：
+##   车的齐射（普攻 + 哨兵）、萨尼的连发、直升机的火箭落点散布、弓箭手的箭。
+func _radar_spread(base_r: float, atk: Unit) -> float:
+	if atk == null:
+		return base_r
+	var states := _radar_all_states()
+	if states.is_empty():
+		return base_r
+	return Radar.apply_spread(base_r, Radar.spread_modifier(states, atk.name))
+
+
+## 同上，但返回的是"**倍率**"而不是绝对半径 —— 给那些"基准半径由距离公式现算"的弹种用
+## （例如萨尼的 `Spread.linear_radius(dist)`）。锁定完成后基准半径 ×0.05/基准 折算成倍率。
+func radar_spread_mult(atk: Unit, dist: float) -> float:
+	if atk == null:
+		return 1.0
+	var states := _radar_all_states()
+	if states.is_empty():
+		return 1.0
+	var base := Spread.linear_radius(dist)
+	if base <= 0.0001:
+		return 1.0
+	var mod := Radar.spread_modifier(states, atk.name)
+	if bool(mod.get("has_abs", false)):
+		return float(mod["abs_r"]) / base
+	return float(mod.get("mult", 1.0))
+
+
 func _begin_unit_targeting(sid: String) -> void:
 	var d := Skills.get_def(sid)
 	var rmax: float = float(d.get("range_max", 32.0))
@@ -554,6 +600,10 @@ func _begin_unit_targeting(sid: String) -> void:
 			continue
 		if cc.distance_to(GridMath.unit_pos(u)) <= rmax:
 			attackable[u.cell] = true
+	# ── 难点 2 接入（第 111 轮）：被连接的友军可**无视距离**点选"被雷达锁定的目标" ──
+	# ⚠ 用户明确：**巡飞弹虽然也是"选定"型，但不吃雷达效果** -> 这里按技能 id 排除。
+	if not want_ally and sid != "loiter_launch":
+		_radar_add_locked_targets(sid == "" , active, attackable)
 	fx.clear_hints()
 	fx.draw_hints()
 	_refresh_all()
@@ -1162,9 +1212,12 @@ func _radar_tick_beams(delta: float) -> void:
 		var fu: Unit = pairs[i][1]
 		var a := GridMath.unit_pos(ru)
 		var b := GridMath.unit_pos(fu)
-		# 抬到两者的身体中部，免得光柱贴地
-		beam.update(Vector3(a.x, RadarHud.size_for(ru).y * 0.5 + 0.6, a.y),
-			Vector3(b.x, RadarHud.size_for(fu).y * 0.5 + 0.4, b.y), _radar_beam_t)
+		# ⚠ 第 111 轮用户口径：光柱两端要**绑进车体 / 角色内部**（起点原来在车体外）。
+		#   所以两端都用**身体中心高度**（`Targeting.aim_height` = 体高的一半），
+		#   而不是"模型顶 + 某个偏移"。这样起点落在车体内部、终点落在角色体内。
+		var ya: float = Targeting.aim_height(ru)
+		var yb: float = Targeting.aim_height(fu)
+		beam.update(Vector3(a.x, ya, a.y), Vector3(b.x, yb, b.y), _radar_beam_t)
 
 
 ## 每帧刷新锁定 HUD（难点 1）：给每个"正被锁定"的敌人挂一个荧光绿矩形。
@@ -1705,7 +1758,7 @@ func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 	for k in Lunchbox.SALVO_PER_WAVE:
 		# 第 106 轮：**立体球内均匀**散布（旧实现是水平圆盘 -> 垂直散布恒为 0、子弹平行飞）
 		# 第 110 轮：半径由调用方给（哨兵 1.5 / 普攻 0.5）
-		var off3 := Lunchbox.spread_offset_3d(rng, spread_r)
+		var off3 := Lunchbox.spread_offset_3d(rng, _radar_spread(spread_r, u))
 		var aim3 := Vector3(base.x + dir.x * dist, tgt_y, base.y + dir.y * dist) + off3
 		aim3.x = clampf(aim3.x, float(PX) + 0.5, float(PX + PW) - 0.5)
 		aim3.z = clampf(aim3.z, float(PY) + 0.5, float(PY + PH) - 0.5)

@@ -84,6 +84,14 @@ func perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Placea
 			return basic_shell(u, aim)
 		AttackProfile.BASIC_SALVO:
 			return basic_salvo(u, aim)
+		AttackProfile.BASIC_LOCK:
+			# 第 111 轮：雷达午餐盒的普攻 = **纯锁定**（无伤害、无距离限制）。
+			# 用户口径：「选定一个敌对角色开始锁定，没有距离限制」。
+			# 这里只登记锁定并推进一次进度（"选定当回合算第 1 回合"——见 `probe_radar.gd`）。
+			if target == null:
+				return false
+			_st._radar_begin_lock(u, target.name)
+			return true
 	push_error("未知普攻模板：%s（%s）" % [prof["basic"], u.name])
 	return false
 
@@ -170,7 +178,8 @@ func volley_bullets(u: Unit, aim: Vector2, t: Unit, pl: Placeable,
 	var fly_y: float = Targeting.aim_height(t) if t != null and t.is_alive() else -1.0
 	var base_y: float = fly_y if fly_y >= 0.0 else from.y
 	for i in count:
-		var a := Spread.linear_scatter(ctr, dist, _st.rng)
+		# 雷达接入（第 111 轮）：被连接的友军散布受修正（锁前 ×0.5 / 锁后固定小半径）
+		var a := Spread.linear_scatter(ctr, dist, _st.rng, _st.radar_spread_mult(u, dist))
 		var last := i == count - 1
 		# ⚠ 第 107 轮用户口径（解耦两种子弹的散布）：
 		#   「萨尼的子弹按**圆盘**、车按**球**」—— 上一轮我给她也加了竖直偏移（球），

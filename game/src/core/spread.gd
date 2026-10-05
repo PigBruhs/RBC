@@ -63,10 +63,12 @@ static func linear_radius(dist: float) -> float:
 	return maxf(0.0, dist) / 12.0
 
 
-static func linear_scatter(dest: Vector2, dist: float, rng: RngService) -> Vector2:
+## `mult`：**散布半径倍率**（第 111 轮接入雷达）。默认 1.0 = 原样，既有调用方逐字不变。
+static func linear_scatter(dest: Vector2, dist: float, rng: RngService,
+		mult: float = 1.0) -> Vector2:
 	if rng == null:
 		return dest
-	var r := linear_radius(dist)
+	var r := linear_radius(dist) * mult
 	if r <= 0.0:
 		return dest
 	var ang := rng.next_float() * TAU

@@ -24,6 +24,9 @@ const BASIC_ARROW := "arrow"     # 弓箭：飞一支箭，命中后结算（可
 const BASIC_BURST := "burst"     # 连发子弹：一次 N 发，各自散布各自判定
 const BASIC_SHELL := "shell"     # 投掷炮弹：拖拽决定落点，抛物线 + 红圈 + 友伤
 const BASIC_SALVO := "salvo"     # 火箭齐射：左右开弓多轮次，发射完即结束回合
+## 第 111 轮：雷达午餐盒的普攻 = **纯锁定**（无伤害）。用户口径：
+## 「普攻：选定一个敌对角色开始锁定，**没有距离限制**；选定时距离里有多少个 20 格就需要多少回合」
+const BASIC_LOCK := "lock"
 
 ## ── 瞄准方式（决定 UI 怎么让玩家选目标）─────────────────────────────────────
 const AIM_TARGET := "target"     # 点单位/沙盒（近战、弓箭、连发）
@@ -44,9 +47,12 @@ const HELI_PREFIX := "俯冲轰炸直升机"
 ## 第 104 轮：轮式齐射午餐盒 —— 普攻也是**齐射**（与直升机的火箭齐射同一档模板），
 ## 但具体动作由 `basic_attack.basic_salvo` 按名字分派到 `_lunchbox_salvo`（12 波 × 6 发）。
 const LUNCHBOX_NAME := "轮式齐射午餐盒"
+## 第 111 轮：雷达午餐盒 —— 普攻是"选定敌人开始锁定"（`BASIC_LOCK`，无伤害、无距离限制）
+const RADAR_NAME := "雷达午餐盒"
 const BY_PREFIX := {
 	HELI_PREFIX: BASIC_SALVO,
 	LUNCHBOX_NAME: BASIC_SALVO,
+	RADAR_NAME: BASIC_LOCK,
 }
 
 ## 职业 -> 模板 id（兜底：没写名字的角色按职业走）
@@ -67,6 +73,8 @@ const DEFS := {
 		"shots": 3, "gap": 0.1, "spread": "linear12",
 	},
 	BASIC_SHELL: {"basic": BASIC_SHELL, "aim": AIM_DRAG, "cost": 0, "cn": "投掷炮弹"},
+	## 第 111 轮：雷达午餐盒 —— 点选敌人开始锁定（`AIM_TARGET` = 与弓箭手同一套两次确认交互）
+	BASIC_LOCK: {"basic": BASIC_LOCK, "aim": AIM_TARGET, "cost": 0, "cn": "雷达锁定"},
 	BASIC_SALVO: {
 		"basic": BASIC_SALVO, "aim": AIM_DRAG, "cost": 4, "cn": "火箭齐射",
 		"level": "heli",

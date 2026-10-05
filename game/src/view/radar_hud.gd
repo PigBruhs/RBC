@@ -54,12 +54,12 @@ func _build(size: Vector2) -> void:
 	_bar(Vector3(w * 0.5, 0, 0), Vector3(THICK, ht, THICK))
 
 	_lab_left = _label(HORIZONTAL_ALIGNMENT_LEFT)
-	# ⚠ 第 111 轮（截图核对后修）：角标原来放在矩形**外侧**（+0.10），实测会被单位自己的
-	#   力量/精力条挤住（截图里那个"0"卡在血条下沿）。改放**内侧**（贴着上边往下一点），
-	#   既避开头顶条子，也更符合"矩形左上角 / 右上角"的读法。
-	_lab_left.position = Vector3(-w * 0.5 + 0.10, ht * 0.5 - 0.20, 0)
+	# ⚠ 第 111 轮用户口径（第二版）：角标要放在**框外**、**紧贴矩形上边**。
+	#   （第一版在外侧被头顶血条挤住 -> 我改到内侧；用户看到后要求改回**框外并在上边之上**，
+	#    所以这里放到 `+ht/2` 之上一小段，两个角标都贴着上边。）
+	_lab_left.position = Vector3(-w * 0.5, ht * 0.5 + 0.16, 0)
 	_lab_right = _label(HORIZONTAL_ALIGNMENT_RIGHT)
-	_lab_right.position = Vector3(w * 0.5 - 0.10, ht * 0.5 - 0.20, 0)
+	_lab_right.position = Vector3(w * 0.5, ht * 0.5 + 0.16, 0)
 
 
 func _bar(pos: Vector3, box: Vector3) -> void:
