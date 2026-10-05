@@ -2744,6 +2744,18 @@ func t_tick_loiter_launchers(delta: float) -> void:
 func t_update_camera() -> void:
 	aim.update_camera()
 
+
+## 条子（力量/护甲可视化）的**下边**世界 y（第 109 轮）。
+## 用途：断言"条子不挡模型" —— 必须 **下边 > 模型最高点**，而不是"中心 > 模型顶"。
+## 公式与 `unit_visual` 里摆放条子那一处同源：中心 - 贴图半高。
+func t_bar_bottom_y(u: Unit) -> float:
+	if u == null or u.visual == null:
+		return -1.0
+	var v = u.visual
+	if not v.has_method("orb_center_y") or not v.has_method("orb_half_h"):
+		return -1.0
+	return float(v.orb_center_y()) - float(v.orb_half_h())
+
 func t_aim_skill_id() -> String:
 	return _aim_skill_id
 

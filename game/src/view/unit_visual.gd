@@ -382,6 +382,13 @@ func _body_lift() -> float:
 ## 于是条子（3.43）整个陷在模型里；午餐盒加了 1.2 格炮管之后同理。
 ## 默认角色不受影响：Gerald 数据口径 1.30 > 实测 1.11，取 1.30 -> 仍然是 0（第 104 轮保证不破）。
 func _model_top_y() -> float:
+	# ⚠ 第 109 轮：午餐盒这类**有可动部件**的模型要"报价最大高度"，不能只量建模型那一刻的姿态。
+	#   原因：炮管仰起时炮口会更高（实测 phi=60° 时 2.956，比水平的 2.34 高 0.616），
+	#   而 `_model_top_y` 只在建模型时被调一次（那时炮管水平）-> 仰起后可能顶到条子。
+	#   见 `LunchboxModel.max_height()`。
+	var mm := _movable_model()
+	if mm != null:
+		return mm.max_height()
 	var top := 0.0
 	for mi in _all_meshes(self):
 		# 沿父链把变换累加到 self（UnitVisual 根）——模型网格可能是**嵌套**的
@@ -405,6 +412,32 @@ func _all_meshes(n: Node, out: Array = []) -> Array:
 			out.append(c)
 		_all_meshes(c, out)
 	return out
+
+
+## 本单位那个"有可动部件"的模型（第 109 轮）。目前只有午餐盒：
+##   它有炮塔（`set_aim` 能仰到 60°）与车体（`set_body_yaw`），所以"最高点"随姿态变化，
+##   必须由模型自己报价（`max_height()`），不能只量建模型那一刻。
+## 其它单位（含 Reaper）返回 null -> 走原来的静态包围盒路径，**行为逐字不变**。
+func _movable_model() -> LunchboxModel:
+	for c in get_children():
+		if c is LunchboxModel:
+			return c
+	return null
+
+
+## ── 条子几何报价（第 109 轮，供测试与断言用）────────────────────────────────
+## 条子中心的世界 y —— **与 `update_orb()` 里摆放 `_orb_sprite` 的公式同源**，
+## 所以断言的是"真实渲染位置"，不是另算一份。
+## `orb_half_h()` 是条子贴图的半高（含选中时最大 1.18 倍），所以
+## **下边 = 中心 - 半高** 就是"条子会不会压到模型"的判据。
+func orb_center_y() -> float:
+	if _orb_sprite == null:
+		return 0.0
+	return float(_orb_sprite.position.y)
+
+
+func orb_half_h() -> float:
+	return ORB_HALF_H * 1.18        # 1.18 = 选中时的最大放大（与 LABEL_ABOVE_ORB 同源）
 
 
 func _build_orb() -> void:

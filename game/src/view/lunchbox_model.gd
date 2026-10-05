@@ -413,6 +413,70 @@ func body_yaw() -> float:
 	return _body_yaw
 
 
+## ── 最大高度（第 109 轮，根治"条子被仰起的炮管顶到"的脆弱性）─────────────────
+## **问题**：`UnitVisual._model_top_y()` 是**建模型那一刻**量包围盒 —— 那时炮管是水平的
+##   （`phi = 0`，顶 2.34）。而现在模型顶由**车尾发射器**决定（3.49），恰好 > 炮管在
+##   `PHI_MAX` 的实顶（2.956），所以"条子抬到 3.49 以上"**顺带**覆盖了仰起的炮管。
+##   但这是**巧合**：谁把发射器降到 2.956 以下，仰起的炮管就会重新顶到条子，而公式不知道。
+##
+## **根治**：让模型**主动报价**"我这辈子能长到的最高点" = max(当前姿态实测, 炮管扫掠顶)。
+##   `UnitVisual` 用它代替 `_model_top_y()` 的结果。
+##
+## ⚠ **必须在"基准姿态"下量**：调用方（`_model_top_y`）先把炮管归零再调这里，
+##   所以实测那一项是可信的；否则会把"已经仰起的炮管"当成静态顶重复计入。
+## · **遍历全部 theta**：炮管绕 y 扫掠时，同一个 `phi` 下的最高点与 theta 无关
+##   （绕 y 转不改变高度）—— 但**棱柱有半径**，转动时它的外沿会画出一个圆盘，
+##   所以稳妥起见还是扫一圈（8 个方位足够，量的是 AABB 端点，误差可忽略）。
+func max_height() -> float:
+	var cur := _measure_top()
+	if _turret == null or _barrel == null:
+		return cur
+	var saved_t := _turret.rotation_degrees
+	var saved_b := _barrel.rotation_degrees
+	var top := cur
+	# phi 取正的最大仰角（负值是压炮口，一定更低）
+	for i in 8:
+		var th := 45.0 * float(i)
+		_turret.rotation_degrees = Vector3(0.0, 90.0 - th, 0.0)
+		_barrel.rotation_degrees = Vector3(-PHI_MAX_DEG_REF, 0.0, 0.0)
+		top = maxf(top, _measure_top())
+	_turret.rotation_degrees = saved_t
+	_barrel.rotation_degrees = saved_b
+	return top
+
+
+## 炮管在最高仰角时的度数（与 `Lunchbox.PHI_MAX_DEG` 同值）。
+## ⚠ 这里**自己写一份常量**而不是 import `Lunchbox`：`lunchbox_model.gd` 是**表现层**，
+##   不该依赖 `core/lunchbox.gd` 的机制常量；两处都有断言锁（`probe_turret`）。
+const PHI_MAX_DEG_REF := 60.0
+
+
+## 量当前姿态下、以 self 为根的子树最高点（与 `UnitVisual._model_top_y` 同一套算法：
+## 沿父链累加变换到 self，再取 8 个 AABB 端点）。
+func _measure_top() -> float:
+	var top := 0.0
+	for mi in _meshes(self):
+		var t := Transform3D.IDENTITY
+		var n: Node = mi
+		while n != null and n != self:
+			t = (n as Node3D).transform * t
+			n = n.get_parent()
+		var aabb: AABB = (mi as MeshInstance3D).get_aabb()
+		for k in 8:
+			var y: float = (t * aabb.get_endpoint(k)).y
+			if y > top:
+				top = y
+	return top
+
+
+func _meshes(n: Node, out: Array = []) -> Array:
+	for c in n.get_children():
+		if c is MeshInstance3D:
+			out.append(c)
+		_meshes(c, out)
+	return out
+
+
 ## 棱柱发红 + 变亮（用户第 105 轮口径）：
 ##   · **整根棱柱一起变红**（同一个 `_prism_mat` 覆盖整个六边形棱柱的每一面，所以天然一致）
 ##   · **变红的同时要变亮** —— 在"热量 -> 颜色"之外**再加一条"热量 -> 亮度"映射**
