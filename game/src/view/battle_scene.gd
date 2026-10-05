@@ -611,7 +611,9 @@ func _ready() -> void:
 	# 弹道物场：只做物理与上报，后果由 ProjectileSink 处理
 	# ⚠️ 这里传的是**模块方法**（Callable 事实接口）：改名即断，两处都在本函数里
 	field = ProjectileField.new()
-	field.setup(self, gm, sink.arrow_hit_check)
+	# 第 108 轮：第 4 参 = 子弹地板反弹用的骰子。传场景的 `rng` 才能和全局同一股随机流
+	# （同种子整局可复现）；不传则场会退化成自己的固定种子流（不会崩）。
+	field.setup(self, gm, sink.arrow_hit_check, rng)
 	field.log_fn = _log
 	field.grid_w = GW
 	field.grid_h = GH
@@ -625,6 +627,11 @@ func _ready() -> void:
 	sentry_range.grid_y0 = PY
 	_build_env()
 	_build_terrain()
+	# ⚠ 第 108 轮：`_cam_focus` 的初值是**世界原点**，而可到达区不一定从原点开始
+	#   （Reaper 战是 `play=[0,0,41,65]`、物理边界 100×100）。
+	#   不摆正的话开场镜头对着空地形 —— 实测截图里**一个单位都看不到**。
+	#   所以相机建好之后立刻把注视点放到**可到达区中心**。
+	_cam_focus = Vector3(float(PX) + float(PW) * 0.5, 0.0, float(PY) + float(PH) * 0.5)
 	aim.build_camera()
 	_build_aim_helpers()
 	_init_passive_hooks()          # 受伤触发的被动钩子表（坠机…）
@@ -1147,6 +1154,10 @@ func _lunchbox_tick(delta: float) -> void:
 		var aim: Lunchbox.Aim = st["aim"]
 		var heat: Lunchbox.Heat = st["heat"]
 		# ── 索敌：只收"敌方 + 24 格内 + 正在移动"的，按"进入范围的先后"排队 ──
+		# ⚠ 用户口径（第 108 轮）：
+		#   ① 「**要检测的是绝对速度**」→ `_lb_is_moving` 现在读走路动画（见其注释）
+		#   ② 「车的哨兵模式**必须**要能瞄准**炮弹类飞行物**」→ 下面把炮弹类也收进候选。
+		#      炮弹没有"单位名"，所以用 `P:` 前缀区分（`_lb_target_label` 负责生成）。
 		var eligible: Array = []
 		var order: Array = st["order"]
 		for e in units:
@@ -1156,20 +1167,32 @@ func _lunchbox_tick(delta: float) -> void:
 				continue
 			if not _lb_is_moving(e):
 				continue                          # 静止 -> 不是合法目标
-			eligible.append(e.name)
-			if not order.has(e.name):
-				order.append(e.name)              # 记录"谁先进入范围"
-		# 清理：离开范围 / 死掉 / 停下来的，都要出队（与上面的收集口径严格对齐）
+			var lb := _lb_target_label(e)
+			eligible.append(lb)
+			if not order.has(lb):
+				order.append(lb)                  # 记录"谁先进入范围"
+		# 炮弹类飞行物：只收**敌方发射**的（友方炮弹不主动打，但仍然可能被误伤）
+		for it in field.items:
+			var pr: Projectile = it["p"]
+			if not pr.alive or not Ballistics.is_shell_class(pr.kind):
+				continue
+			if pr.side == u.side:
+				continue
+			if _lb_center(u).distance_to(pr.pos()) > Lunchbox.SENTRY_RANGE:
+				continue
+			var lp := _lb_target_label(pr)
+			eligible.append(lp)
+			if not order.has(lp):
+				order.append(lp)
+		# 清理：离开范围 / 死掉 / 停下 / 落地 的，都要出队（与上面的收集口径严格对齐）
 		for nm in order.duplicate():
 			if not eligible.has(nm):
 				order.erase(nm)
 		var lock: String = String(st["lock"])
-		var lock_u: Unit = _lb_unit_by_name(lock)
-		var alive := lock_u != null and lock_u.is_alive()
-		var in_range_now := lock_u != null \
-			and _lb_center(u).distance_to(GridMath.unit_pos(lock_u)) <= Lunchbox.SENTRY_RANGE
-		var moving_now := lock_u != null and _lb_is_moving(lock_u)
-		var want := Lunchbox.pick_sentry_target(lock, alive, in_range_now, moving_now, order)
+		# 锁定的东西可能是"单位名"或"P:<id>"炮弹 —— 统一走 `_lb_live_target`
+		var live := _lb_live_target(u, lock)
+		var want := Lunchbox.pick_sentry_target(lock, live["alive"], live["in_range"],
+			live["moving"], order)
 		# ⚠ 第 106 轮（Lead 定位的根因）：**这里绝对不能再用 order[0] 兜底** ——
 		#   `pick_sentry_target` 返回 "" 就是"没有合法目标"（静止/友方/没目标），
 		#   以前那句兜底会把它从 order 里捞回来照样开火。
@@ -1178,11 +1201,15 @@ func _lunchbox_tick(delta: float) -> void:
 		var firing_salvo := (_lb_salvo_u == u)
 		var sentry: Lunchbox.Sentry = st["sentry"] if st.has("sentry") else Lunchbox.Sentry.new()
 		st["sentry"] = sentry
+		# ⚠ 第 108 轮修的**逻辑不一致**：以前 `moving_now` 算的是**旧锁** `lock_u`，
+		#   却拿它去门**新选出来的** `tgt` —— 两者常常不是同一个东西。
+		#   现在统一按"最终选中的 `want`"重新算一遍。
+		var live_want := _lb_live_target(u, want)
 		var tgt: Unit = _lb_unit_by_name(want)
-		if tgt != null and moving_now and not firing_salvo:
-			var tp := GridMath.unit_pos(tgt)
-			var want_aim := Lunchbox.aim_to(_lb_center(u), LunchboxModel.TURRET_Y, tp,
-				Targeting.aim_height(tgt))
+		var tgt_pos: Vector2 = live_want["pos"]
+		var tgt_y: float = live_want["y"]
+		if want != "" and live_want["alive"] and live_want["moving"] and not firing_salvo:
+			var want_aim := Lunchbox.aim_to(_lb_center(u), LunchboxModel.TURRET_Y, tgt_pos, tgt_y)
 			var at := Lunchbox.step_aim(aim, float(want_aim[0]), float(want_aim[1]), delta)
 			if sentry.tick(delta, true, at) and Lunchbox.can_fire(heat):
 				_lb_fire_wave(u, st, 0)                  # 哨兵：一波 6 发
@@ -1192,7 +1219,7 @@ func _lunchbox_tick(delta: float) -> void:
 					_log("  🚙 %s 哨兵连发满 12 轮 -> 冷却 %.0f 秒" % [u.name, Lunchbox.SALVO_COOLDOWN])
 			elif not Lunchbox.can_fire(heat):
 				sentry.react = 0.0
-		elif tgt == null:
+		elif want == "":
 			sentry.tick(delta, false, false)
 		# ── 热量/冷却 + 棱柱颜色 ──
 		Lunchbox.heat_tick(heat, delta)
@@ -1211,40 +1238,95 @@ func _lb_unit_by_name(nm: String) -> Unit:
 	return null
 
 
-# ── "谁在动"（第 106 轮哨兵口径）─────────────────────────────────────────────
-## 每帧记录一次每个单位的格子；**换过格 = 在动**，并把这个状态保持 `MOVE_HOLD_SEC` 秒
-## （走一格是瞬时的，但"移动中"要覆盖整段移动时间，否则哨兵会在走路的两格之间误判成静止）。
-## 静止超过 `MOVE_HOLD_SEC` 就视为静止 -> 哨兵不开火 ✓。
-const MOVE_HOLD_SEC := 0.35
-var _lb_move_mark: Dictionary = {}      # 单位名 -> {"cell": Vector2i, "until": float}
+# ── "谁在动"（第 108 轮口径：**绝对速度**，不是相对速度）──────────────────────
+## 每帧刷新：单位名 -> 是否**真的在位移**（读走路动画 `UnitVisual.is_walking()`）。
+## ⚠ 旧实现（第 106/107 轮）比的是"逻辑格 `u.cell` 有没有变"并保留 0.35 秒窗口 ——
+##   而 `cell` 是**移动发起那一刻就瞬移**的，于是"车自己一移动，相对视角下谁都像在动"，
+##   静止友军也会被索敌。用户原话：「**要检测的是绝对速度**」→ 改用走路动画做唯一信号。
+var _lb_move_mark: Dictionary = {}      # 单位名 -> bool（是否在动）
 
 
+## 每帧标记"谁在动"，供哨兵索敌用。
+##
+## ⚠ 用户口径（第 108 轮）：「**你要检测的不是相对速度而是那个角色的绝对速度！**
+##   不然车开起来谁都锁！」
+## **旧实现为什么错**：它比较的是 `u.cell` **在相邻两帧之间有没有变**。
+##   而 `u.cell` 是**逻辑格、移动发起那一刻就瞬移到终点了**，所以：
+##   · 一个**真正的瞬时换格**只发生一帧 → 靠 `MOVE_HOLD_SEC` 的窗口把它"记住"；
+##   · 于是**任何一帧里只要有任何单位换过格，全表都可能被刷新** ——
+##     而车自己一移动，相对视角下"整个战场都像在动"，静止的友军也被算成"在动"。
+##
+## **新实现：读绝对速度** —— 直接用**走路动画是否在跑**（`UnitVisual.is_walking()`）。
+##   它天然是"绝对运动"（与相机/车在哪无关），而且：
+##   · 只有**真的在位移**的单位才为 true（逐格瞬移的 `cell` 变化不再是信号）；
+##   · 停下时动画结束 → 自动变 false，不需要 `until` 窗口去"猜"；
+##   · **弹射物不在这里**（索敌队列的收集源只有 `units`，见 `_lb_tick`）→
+##     用户要的"弹射物静止即出队"由"弹射物结构上就进不了队列"保证。
 func _lb_update_moving_marks() -> void:
-	var now := float(Time.get_ticks_msec()) / 1000.0
 	for u in units:
-		if u == null or not u.is_alive():
+		if u == null or not u.is_alive() or u.visual == null:
+			_lb_move_mark.erase(u.name if u != null else "")
 			continue
-		var m: Dictionary = _lb_move_mark.get(u.name, {})
-		if m.is_empty():
-			# ⚠ 第 107 轮修的初值 bug（Lead 怀疑点 #1）：
-			#   以前"第一次看到这个单位"就当成"刚移动过"（until = now + 0.35），
-			#   于是**一个从来没动过的静止单位**（尤其静止的友军）在最开始的 0.35 秒里
-			#   会被判定成"在动" -> 被收进索敌队列 -> 哨兵对着静止友军开火。
-			#   现在初值 = **不在动**（until = now = 已经过期）：只有**真的换过格**才算在动。
-			m = {"cell": u.cell, "until": now}
-			_lb_move_mark[u.name] = m
-		elif Vector2i(m["cell"]) != u.cell:
-			m = {"cell": u.cell, "until": now + MOVE_HOLD_SEC}
-			_lb_move_mark[u.name] = m
+		_lb_move_mark[u.name] = u.visual.is_walking()
 
 
 func _lb_is_moving(u: Unit) -> bool:
 	if u == null:
 		return false
-	var m: Dictionary = _lb_move_mark.get(u.name, {})
-	if m.is_empty():
-		return false
-	return float(Time.get_ticks_msec()) / 1000.0 < float(m["until"])
+	return bool(_lb_move_mark.get(u.name, false))
+
+
+# ── 哨兵的"目标"抽象（第 108 轮）──────────────────────────────────────────────
+## 用户口径：车的哨兵**必须**能瞄准**炮弹类飞行物**。但炮弹没有"单位名"，
+## 而索敌队列/锁定字段都是字符串 —— 所以统一成一个 **label**：
+##   · 角色 -> 它的名字（既有口径，字符串不变）
+##   · 炮弹 -> `"P:<id>"`（`Projectile.id` 唯一）
+## 下面两个函数就是这层抽象的**唯一出入口**，别在别处再拼字符串。
+const LB_PROJ_PREFIX := "P:"
+
+
+func _lb_target_label(x) -> String:
+	if x is Unit:
+		return (x as Unit).name
+	if x is Projectile:
+		return "%s%d" % [LB_PROJ_PREFIX, (x as Projectile).id]
+	return ""
+
+
+## 按 label 找出"活着的目标"及其位置/高度/是否在动。
+## 返回 `{alive, in_range, moving, pos: Vector2, y: float}`（找不到时全 false、pos 为零）。
+func _lb_live_target(u: Unit, label: String) -> Dictionary:
+	var out := {"alive": false, "in_range": false, "moving": false,
+		"pos": Vector2.ZERO, "y": 0.0}
+	if label == "" or u == null:
+		return out
+	var ctr := _lb_center(u)
+	if label.begins_with(LB_PROJ_PREFIX):
+		var pid := int(label.substr(LB_PROJ_PREFIX.length()))
+		for it in field.items:
+			var p: Projectile = it["p"]
+			if p.id != pid or not p.alive:
+				continue
+			# 炮弹类才收；箭矢类进不了队列（口径：哨兵只拦炮弹）
+			if not Ballistics.is_shell_class(p.kind):
+				continue
+			out["alive"] = true
+			out["pos"] = p.pos()
+			out["y"] = p.height()
+			# 炮弹一直在飞 -> 恒为"在动"（停下就等于落地，那时它已经不是合法目标了）
+			out["moving"] = true
+			out["in_range"] = ctr.distance_to(p.pos()) <= Lunchbox.SENTRY_RANGE
+			return out
+		return out
+	var tu: Unit = _lb_unit_by_name(label)
+	if tu == null or not tu.is_alive():
+		return out
+	out["alive"] = true
+	out["pos"] = GridMath.unit_pos(tu)
+	out["y"] = Targeting.aim_height(tu)
+	out["moving"] = _lb_is_moving(tu)
+	out["in_range"] = ctr.distance_to(GridMath.unit_pos(tu)) <= Lunchbox.SENTRY_RANGE
+	return out
 
 
 ## 普攻（`basic_attack.basic_salvo` 分派到这里）：**12 波 × 6 发**，间隔 133ms。
