@@ -25,7 +25,12 @@ extends RefCounted
 # ── 弹体 ──
 const SPEED := 4.0                 # 格/秒（恒定，只改方向；第 92 轮 3 -> 4）
 const HEIGHT := 1.5                # 定高（不受重力）
-const MAX_DIST := 32.0             # 飞满这么远自动引爆
+## 飞满这么远自动引爆（第 104 轮用户口径：**32 -> 64**，午餐盒的技能要在 32 格外仍能飞）
+const MAX_DIST := 64.0
+## 安全引信（第 104 轮）：**飞出去 3 格才开碰撞与近炸**。
+## 用户口径："记得设置安全引信，飞出去三格才开碰撞和近炸" ——
+## 刚出膛时弹还在发射器/车体附近，立刻开引信会炸到自己人（尤其从车顶发射器打出去那一下）。
+const ARM_DIST := 3.0
 const BODY_R := 0.5                # 模型/碰撞：直径一格的球
 const BLAST_R := 1.0               # 造伤：直径两格的球
 ## 近炸引信的感应范围（第 92 轮：从"造伤范围"独立出来，直径 2 -> **1.5 格**，贴得更近才引爆）
@@ -111,9 +116,16 @@ static func opts(rng) -> Dictionary:
 
 ## 巡飞弹会不会打到这个位置（**造伤**范围：直径两格的球）
 ## 碰撞圆柱按单位取（第 98 轮）：既有角色缺省 0.30/1.00 = Damage.BODY_R/BODY_H，逐字不变。
+## 第 104 轮：改成走 `Targeting.sphere_hits_unit`（支持"一个角色多个圆柱"，缺省单圆柱不变）。
 static func ball_touches_unit(ctr: Vector3, u: Unit) -> bool:
-	return Targeting.sphere_hits_body(ctr, BLAST_R, u.cell,
-		Targeting.unit_body_r(u, Damage.BODY_R), Targeting.unit_body_h(u, Damage.BODY_H), u.body_h())
+	return Targeting.sphere_hits_unit(ctr, BLAST_R, u)
+
+
+## 安全引信是否已解除（已经飞够 `p.arm_dist` 格）。**未解除时既不近炸也不参与碰撞**。
+## ⚠ 这是**按弹体**的：`arm_dist = 0`（缺省，沙盒发射器的巡飞弹）永远返回 true，
+## 所以既有行为逐字不变；只有午餐盒的技能弹会把 `arm_dist` 设成 `ARM_DIST`。
+static func armed(p: Projectile) -> bool:
+	return p != null and p.flown >= p.arm_dist
 
 
 ## 近炸引信：只在**敌方角色**进入 FUSE_R（直径 1.5 格）时触发（第 92 轮）。
@@ -121,8 +133,7 @@ static func ball_touches_unit(ctr: Vector3, u: Unit) -> bool:
 static func fuse_touches_unit(ctr: Vector3, u: Unit) -> bool:
 	if not is_target(u):
 		return false
-	return Targeting.sphere_hits_body(ctr, FUSE_R, u.cell,
-		Targeting.unit_body_r(u, Damage.BODY_R), Targeting.unit_body_h(u, Damage.BODY_H), u.body_h())
+	return Targeting.sphere_hits_unit(ctr, FUSE_R, u)
 
 
 ## 沙盒元素：只按"沾到格子"判定（道具没有高度轴）

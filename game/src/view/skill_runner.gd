@@ -136,6 +136,14 @@ func perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 				u.name, d["name"], cell.x, cell.y, md, md / Ordnance.SHELL_TILES_PER_SEC])
 			_st.sink.spawn_marker(u, aim)                # 落地后由 _fire_skill_at 登记 GM 计时
 			return true
+		Skills.CAST_LOITER:
+			# 第 104 轮：轮式齐射午餐盒的巡飞弹（耗 12 精力）。
+			# 放出去了才扣精力 + 结束回合；没放出（无目标/超距）就当没施放。
+			if not _st.air.launch_loiter_skill(u, aim):
+				return false
+			commit_skill(u, sid)
+			_st._finish_turn()
+			return true
 	push_error("未知技能施放方式：%s（%s）" % [Skills.cast_of(sid), sid])
 	return false
 

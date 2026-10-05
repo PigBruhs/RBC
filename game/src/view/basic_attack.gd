@@ -133,8 +133,14 @@ func basic_shell(u: Unit, aim: Vector2) -> bool:
 	return true
 
 
-## 火箭齐射（直升机）：耗精力、左右开弓、发射完即结束回合，全部在 _rocket_salvo 里
+## 齐射（BASIC_SALVO）：
+##   · 直升机 = 吊射火箭（左右开弓，8 波 × 2 发）
+##   · 轮式齐射午餐盒（第 104 轮）= 12 波 × 6 发子弹（方向机 ±10° 摇动 + 每波重算俯仰）
+## 两者都"发射完即结束回合"，收尾各自在自己的协程里做。
 func basic_salvo(u: Unit, aim: Vector2) -> bool:
+	if Unit.base_name(u.name) == AttackProfile.LUNCHBOX_NAME:
+		_st._lunchbox_salvo(u, aim)
+		return true
 	_st._rocket_salvo(u, aim)
 	return true
 

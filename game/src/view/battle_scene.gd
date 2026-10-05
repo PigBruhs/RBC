@@ -1010,6 +1010,212 @@ func _rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	await sink.rocket_salvo(u, fpos)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 轮式齐射午餐盒（第 104 轮 · 新角色）：方向机/高低机 + 齐射 + 哨兵模式
+#
+# 用户口径（逐字要点）：
+#   · 双机："棱柱永远在指向要射击的方向后才能发射子弹"；"方向机 10 度每秒、高低机 5 度每秒"；
+#     "每次射击完毕后角度都保留在最后一次射击时的角度"；"高低机和方向机可以一起调"
+#   · 齐射：一轮 6 发、散布 1 格、间隔 133ms；**每 12 轮冷却 3 秒**；
+#     棱柱逐渐发红、第 12 波最红、**冷却 1 秒后恢复黑色**
+#   · 普攻 24 格：以"车→目标"连线为中轴 **-10°~+10° 左右摇动**，共 **12 波 72 发**，
+#     "记得高度也要调整使其能正确射到对面"
+#   · 哨兵 24 格：**索敌队列只有一个位置**（锁第一个进范围的，直到它**停下**或**被摧毁**）；
+#     **双机延迟 + 固定 500ms 反应延迟**；没有提前量，靠 1 格散布
+#   · 哨兵**每 12 轮仍要冷却 3 秒**；**没满 12 轮停火 500ms 后开始散热，每 250ms 减 1 轮**
+#
+# ⚠ 两处"转速"用在哪要说清（本轮实现口径）：
+#   · **索敌/转火**（哨兵锁定新目标、普攻锁定新方向）：受 TRAVERSE/ELEV 转速限制，
+#     到位（`Lunchbox.step_aim` 返回 true）之后才允许开火 —— 这就是用户要的"延迟"；
+#   · **普攻扫射的 ±10° 摇动**：是"炮手主动摇炮"，每波直接给角度（133ms 一波 × 6 发），
+#     不按 10°/s 慢慢转 —— 否则摇完 ±10° 要 2 秒，12 波根本打不完。
+#   · 角度**保留**：`st["aim"]` 常驻（跨回合、跨射击都不归位）。
+# ══════════════════════════════════════════════════════════════════════════════
+
+const LB_NAME := "轮式齐射午餐盒"
+
+## 每辆车的状态：单位名 -> {"aim": Lunchbox.Aim, "heat": Lunchbox.Heat, "lock": String,
+##                          "order": Array[String], "last_cell": Vector2i, "still": float}
+var _lb_states: Dictionary = {}
+## 齐射期间"占着回合"（照 _salvo_u 的套路：AI 看门狗让位）
+var _lb_salvo_u: Unit = null
+
+
+func _is_lunchbox(u: Unit) -> bool:
+	return u != null and Unit.base_name(u.name) == LB_NAME
+
+
+func _lb_state(u: Unit) -> Dictionary:
+	var st: Dictionary = _lb_states.get(u.name, {})
+	if st.is_empty():
+		st = {
+			"aim": Lunchbox.Aim.new(), "heat": Lunchbox.Heat.new(),
+			"lock": "", "order": [], "last_cell": u.cell, "still": 0.0,
+		}
+		_lb_states[u.name] = st
+	return st
+
+
+## 车体中心（世界坐标，格）：锚点是 1×2 的前半格，所以中心在 +0.5 格
+func _lb_center(u: Unit) -> Vector2:
+	return Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 1.0)
+
+
+## 枪口世界坐标：车体中心 + 模型里的炮塔偏移（左手边 0.6 格、离地 1.3 格）
+func _lb_muzzle(u: Unit, st: Dictionary) -> Vector3:
+	var ml := Vector3(LunchboxModel.TURRET_X, LunchboxModel.TURRET_Y, 0.0)
+	var c := _lb_center(u)
+	return Vector3(c.x + ml.x, ml.y, c.y + ml.z)
+
+
+func _lb_model(u: Unit) -> LunchboxModel:
+	if u.visual == null:
+		return null
+	for ch in u.visual.get_children():
+		if ch is LunchboxModel:
+			return ch
+	return null
+
+
+## 每帧推进（`_process` 里调）：转塔 -> 哨兵锁定/开火 -> 热量与冷却 -> 棱柱颜色
+func _lunchbox_tick(delta: float) -> void:
+	for u in units:
+		if not _is_lunchbox(u) or not u.is_alive():
+			continue
+		var st := _lb_state(u)
+		var aim: Lunchbox.Aim = st["aim"]
+		var heat: Lunchbox.Heat = st["heat"]
+		# ── 索敌：24 格内的敌方角色，按"进入范围的先后"排队（索敌队列只有一个位置）──
+		var in_range: Array = []
+		var order: Array = st["order"]
+		for e in units:
+			if e == null or not e.is_alive() or e.side == u.side:
+				continue
+			if _lb_center(u).distance_to(GridMath.unit_pos(e)) <= Lunchbox.SENTRY_RANGE:
+				in_range.append(e.name)
+				if not order.has(e.name):
+					order.append(e.name)                 # 记录"谁先进入范围"
+		for nm in order.duplicate():
+			if not in_range.has(nm):
+				order.erase(nm)                          # 离开范围 -> 出队
+		var lock: String = String(st["lock"])
+		var lock_u: Unit = _lb_unit_by_name(lock)
+		var alive := lock_u != null and lock_u.is_alive()
+		var stopped := false
+		if alive:
+			# "停下" = 连续 0.35 秒没换格（用户口径：直到目标停下才换下一个）
+			if lock_u.cell == st["last_cell"]:
+				st["still"] = float(st["still"]) + delta
+			else:
+				st["still"] = 0.0
+				st["last_cell"] = lock_u.cell
+			stopped = float(st["still"]) >= 0.35
+		var want := Lunchbox.pick_sentry_target(lock, alive, stopped, order)
+		if want == "":
+			want = String(order[0]) if not order.is_empty() else ""
+		st["lock"] = want
+		# ── 转塔：锁到目标就一边跟随一边转（两轴同时）──
+		var firing_salvo := (_lb_salvo_u == u)
+		var sentry: Lunchbox.Sentry = st["sentry"] if st.has("sentry") else Lunchbox.Sentry.new()
+		st["sentry"] = sentry
+		var tgt: Unit = _lb_unit_by_name(want)
+		if tgt != null and not firing_salvo:
+			var tp := GridMath.unit_pos(tgt)
+			var want_aim := Lunchbox.aim_to(_lb_center(u), LunchboxModel.TURRET_Y, tp,
+				Targeting.aim_height(tgt))
+			var at := Lunchbox.step_aim(aim, float(want_aim[0]), float(want_aim[1]), delta)
+			if sentry.tick(delta, true, at) and Lunchbox.can_fire(heat):
+				_lb_fire_wave(u, st, 0)                  # 哨兵：一波 6 发
+				Lunchbox.heat_fire(heat)
+				if heat.rounds >= Lunchbox.SALVO_WAVES:
+					Lunchbox.heat_start_cooldown(heat)
+					_log("  🚙 %s 哨兵连发满 12 轮 -> 冷却 %.0f 秒" % [u.name, Lunchbox.SALVO_COOLDOWN])
+			elif not Lunchbox.can_fire(heat):
+				sentry.react = 0.0
+		elif tgt == null:
+			sentry.tick(delta, false, false)
+		# ── 热量/冷却 + 棱柱颜色 ──
+		Lunchbox.heat_tick(heat, delta)
+		var m := _lb_model(u)
+		if m != null:
+			m.set_aim(aim.theta, aim.phi)
+			m.set_heat_ratio(Lunchbox.heat_ratio(heat))
+
+
+func _lb_unit_by_name(nm: String) -> Unit:
+	if nm == "":
+		return null
+	for u in units:
+		if u.name == nm and u.is_alive():
+			return u
+	return null
+
+
+## 普攻（`basic_attack.basic_salvo` 分派到这里）：**12 波 × 6 发**，间隔 133ms。
+## 以"车 → 瞄准点"连线为中轴，theta 在 -10°~+10° 左右摇；phi 每波按距离重算（保证真能打到）。
+## 打完 12 波 -> 冷却 3 秒。全部出膛即结束回合（照火箭齐射的套路）。
+func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
+	var st := _lb_state(u)
+	var aim: Lunchbox.Aim = st["aim"]
+	var heat: Lunchbox.Heat = st["heat"]
+	_lb_salvo_u = u
+	var base := _lb_center(u)
+	var dir := fpos - base
+	if dir.length() < 0.001:
+		dir = Vector2(0.0, 1.0)
+	var dist := clampf(dir.length(), 1.0, Lunchbox.SALVO_RANGE)
+	var base_theta := rad_to_deg(dir.angle())
+	# 目标高度：瞄角色就瞄身体中心（子弹按这个高度平飞，才能"正确射到对面"）
+	var tgt := _lb_unit_by_name(String(st["lock"]))
+	var tgt_y := Targeting.aim_height(tgt) if tgt != null else 0.5
+	_log("  🚙 %s 齐射：%d 波 × %d 发（中轴 %.1f°，±%.0f° 摇动，散布 %.1f 格，射程 %.0f）" % [
+		u.name, Lunchbox.SALVO_WAVES, Lunchbox.SALVO_PER_WAVE, base_theta,
+		Lunchbox.SALVO_SWING_DEG, Lunchbox.SALVO_SPREAD_R, dist])
+	for i in Lunchbox.SALVO_WAVES:
+		aim.theta = Lunchbox.wave_theta(base_theta, i)
+		aim.phi = Lunchbox.wave_phi(base_theta, i, dist, LunchboxModel.TURRET_Y, tgt_y)
+		var m := _lb_model(u)
+		if m != null:
+			m.set_aim(aim.theta, aim.phi)
+		_lb_fire_wave(u, st, i, tgt_y, dist)
+		Lunchbox.heat_fire(heat)
+		if heat.rounds >= Lunchbox.SALVO_WAVES:
+			Lunchbox.heat_start_cooldown(heat)
+		if i < Lunchbox.SALVO_WAVES - 1:
+			await get_tree().create_timer(Lunchbox.SALVO_GAP).timeout
+	_lb_salvo_u = null
+	if active == u:
+		_finish_turn()
+	_log("  🚙 %s 齐射结束：%d 波 / %d 发全部出膛，进入冷却 %.1f 秒" % [
+		u.name, Lunchbox.SALVO_WAVES, Lunchbox.SALVO_TOTAL, Lunchbox.SALVO_COOLDOWN])
+
+
+## 打一波：6 发子弹。`wave_i` 只用于日志；方向取当前 `aim`（普攻时是摇动后的角度）。
+func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
+		dist: float = 12.0) -> void:
+	var aim: Lunchbox.Aim = st["aim"]
+	var base := _lb_center(u)
+	var th := deg_to_rad(aim.theta)
+	var dir := Vector2(cos(th), sin(th))
+	var fly_y: float = tgt_y
+	var perp := Vector2(-dir.y, dir.x)
+	for k in Lunchbox.SALVO_PER_WAVE:
+		var off := Lunchbox.spread_offset(rng)                    # 散布 1 格
+		var aim_pt := base + dir * dist + off
+		aim_pt.x = clampf(aim_pt.x, float(PX) + 0.5, float(PX + PW) - 0.5)
+		aim_pt.y = clampf(aim_pt.y, float(PY) + 0.5, float(PY + PH) - 0.5)
+		var lat := (float(k) - 2.5) * 0.06                        # 6 发沿炮口横向铺开一点
+		var from := _lb_muzzle(u, st) + Vector3(perp.x * lat, 0.0, perp.y * lat)
+		var p := Ordnance.make_bullet(u, from, aim_pt, false, fly_y)
+		p.shot.target = null
+		field.register(p)
+	var m := _lb_model(u)
+	if m != null:
+		m.set_heat_ratio(Lunchbox.heat_ratio(st["heat"]))
+	_log("  🚙 %s 齐射第 %d 波：%d 发出膛（theta %.1f° / phi %.1f°）" % [
+		u.name, wave_i + 1, Lunchbox.SALVO_PER_WAVE, aim.theta, aim.phi])
+
+
 ## ── 枪榴弹：地上的模型 + 4 回合后爆炸出 8 枚破片 ─────────────────────────
 var _grenade_models: Dictionary = {}      # 格 -> Node3D（模型，不可交互）
 
@@ -1502,6 +1708,9 @@ func _process(delta: float) -> void:
 	laser_mod.tick(delta)
 	# 医疗包（第 98 轮 · 圣萨尼）：在途的绿色箭头自己慢慢飞（不进 ProjectileField）
 	_tick_medkits(delta)
+	# 轮式齐射午餐盒（第 104 轮）：方向机/高低机跟随 + 哨兵索敌开火 + 热量冷却 + 棱柱变红。
+	# 放在最后：它读的是本帧最终位置，转塔与开火都以稳定状态为准。
+	_lunchbox_tick(delta)
 
 
 ## 队列条动画计时：到点就收尾；期间攒下的刷新请求在这里补做（最小间隔 0.5 秒）

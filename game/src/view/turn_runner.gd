@@ -359,7 +359,9 @@ func path_to(u: Unit, goal: Vector2i) -> Array[Vector2i]:
 	var occupied: Dictionary = _st._blocked_cells()          # 沙盒道具：阻挡移动的占格
 	for o in _st.units:
 		if o.is_alive() and o != u:
-			occupied[o.cell] = true
+			# 第 104 轮：占多格的角色（车 1×2）**每一格都挡人**
+			for c in Targeting.unit_cells(o):
+				occupied[c] = true
 	var start: Vector2i = u.cell
 	if start == goal:
 		return [start]
@@ -372,6 +374,9 @@ func path_to(u: Unit, goal: Vector2i) -> Array[Vector2i]:
 			for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var n: Vector2i = c + off
 				if not Level.in_play(n):
+					continue
+				# 第 104 轮：落点要能让**整个**占地放得下（车 1×2 的第二格也不能压人）
+				if not Targeting.unit_fits_at(u, n, occupied):
 					continue
 				if prev.has(n) or occupied.has(n):
 					continue
@@ -401,7 +406,9 @@ func compute_reachable(u: Unit) -> Dictionary:
 	var occupied: Dictionary = _st._blocked_cells()          # 沙盒道具：阻挡移动的占格
 	for o in _st.units:
 		if o.is_alive():
-			occupied[o.cell] = true
+			# 第 104 轮：占多格的角色**每一格都挡人**（含它自己：锚点格本来就该被 dist 排除）
+			for c in Targeting.unit_cells(o):
+				occupied[c] = true
 	var frontier: Array[Vector2i] = [u.cell]
 	var dist := {u.cell: 0}
 	while not frontier.is_empty():
@@ -413,6 +420,9 @@ func compute_reachable(u: Unit) -> Dictionary:
 			for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var n: Vector2i = c + off
 				if not Level.in_play(n):
+					continue
+				# 第 104 轮：落点要能让**整个**占地放得下（车 1×2 的第二格也不能压人）
+				if not Targeting.unit_fits_at(u, n, occupied):
 					continue
 				if occupied.has(n) or dist.has(n):
 					continue
@@ -489,7 +499,7 @@ func unit_at(cell: Vector2i) -> Unit:
 
 func cell_occupied(c: Vector2i, except: Unit) -> bool:
 	for o in _st.units:
-		if o != except and o.is_alive() and o.cell == c:
+		if o != except and o.is_alive() and c in Targeting.unit_cells(o):
 			return true
 	return false
 

@@ -26,12 +26,14 @@ const CAST_DIVE := "dive"
 const CAST_CARPET := "carpet"
 const CAST_GRENADE := "grenade"
 const CAST_MARKER := "marker"
-const CAST_ALL := [CAST_SENTRY, CAST_DIVE, CAST_CARPET, CAST_GRENADE, CAST_MARKER]
+const CAST_LOITER := "loiter"                        # 第 104 轮：巡飞弹（午餐盒的技能）
+const CAST_ALL := [CAST_SENTRY, CAST_DIVE, CAST_CARPET, CAST_GRENADE, CAST_MARKER, CAST_LOITER]
 
 const AIM_SELF := "self"
 const AIM_CELL := "cell"
 const AIM_DRAG := "drag"
-const AIM_ALL := [AIM_SELF, AIM_CELL, AIM_DRAG]
+const AIM_UNIT := "unit"                             # 第 104 轮：点一个**角色**（巡飞弹选目标）
+const AIM_ALL := [AIM_SELF, AIM_CELL, AIM_DRAG, AIM_UNIT]
 
 ## 技能定义。key = 技能 id
 const DEFS := {
@@ -112,6 +114,28 @@ const DEFS := {
 		"min_gap": 0.2,                          # 任意两个落点的最小间距（格）
 		"flight_sec": 1.0,                       # 单发炮弹飞行时间
 		"gap_sec": 0.2,                          # 两发之间的起飞间隔
+	},
+	## 第 104 轮：轮式齐射午餐盒的技能 —— 车顶右半边那台巡飞弹发射器。
+	## 用户口径："作为技能向选定的目标释放，目标必须在 32 格内；初始角度的随机范围与
+	## 沙盒元素的巡飞弹发射器一致；技能耗费 12 点精力；记得设置安全引信，飞出去三格才开碰撞和近炸"。
+	"loiter_launch": {
+		"id": "loiter_launch",
+		"name": "巡飞弹",
+		"owner": "轮式齐射午餐盒",
+		"cost": 12,                              # 用户口径：耗 12 点精力
+		"kind": "loiter",                        # loiter = 朝选定目标放一枚巡飞弹（可 Q/E 制导）
+		"cast": CAST_LOITER,
+		# 瞄准方式：**拖拽**（复用既有 UI 流程）。用户口径是"向选定的目标释放"，
+		# 但"点角色"这种选目标流程要改 action_menu/battle_ui（mod-fx 的写区），
+		# 所以这里走拖拽：**落点附近 32 格内最近的那个敌人 = 选定的目标**
+		# （见 `air_runner.launch_loiter_skill`）。
+		"aim": AIM_DRAG,
+		"desc": "朝 32 格内选定的敌人放出一枚巡飞弹。巡飞弹可以用 Q/E 左右制导，"
+			+ "带安全引信（飞出去 3 格后才开碰撞与近炸），近炸引信半径 0.75 格，"
+			+ "飞满 64 格自动引爆。爆炸是直径两格的三维球，不分敌我。",
+		"range_min": 1.0,
+		"range_max": 32.0,                       # 用户口径：目标必须在 32 格内
+		"arm_dist": 3.0,                         # 安全引信：飞出去 3 格才武装
 	},
 	"sentry": {
 		"id": "sentry",

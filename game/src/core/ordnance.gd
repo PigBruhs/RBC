@@ -84,7 +84,8 @@ static func rocket_speed_at(s: float) -> float:
 ## 巡飞弹（发射器发射，玩家用 Q/E 制导）：炮弹类 —— 可被箭击落、惊动哨兵、撞人=在命中处引爆。
 ## 不受重力（定高 1.5 格）、恒速 3 格/秒、飞满 32 格自动引爆；近炸引信在 battle_scene 每帧判。
 ## side = 发射方（沙盒发射器传 -1：不分敌我）；owner_name 只用于日志。
-static func make_loiter(side: int, owner_name: String, from: Vector2, heading: float, rng) -> Projectile:
+static func make_loiter(side: int, owner_name: String, from: Vector2, heading: float, rng,
+		arm_dist: float = 0.0) -> Projectile:
 	var dir := Vector2(cos(heading), sin(heading))
 	var p := Projectile.make(Projectile.KIND_LOITER, from, from + dir * Loiter.MAX_DIST, 1.0)
 	p.steering = true
@@ -93,6 +94,8 @@ static func make_loiter(side: int, owner_name: String, from: Vector2, heading: f
 	p.steer_speed = Loiter.SPEED
 	p.steer_h = Loiter.HEIGHT
 	p.max_dist = Loiter.MAX_DIST
+	# 第 104 轮：安全引信（0 = 一直武装 = 沙盒发射器的既有行为）
+	p.arm_dist = arm_dist
 	p.hit_r = Loiter.BODY_R                     # 碰撞体积 = 直径一格的球
 	p.side = side
 	p.owner_name = owner_name

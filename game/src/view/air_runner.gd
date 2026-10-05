@@ -116,6 +116,9 @@ func tick_loiter_fuse() -> void:
 		var p: Projectile = it["p"]
 		if p.kind != Projectile.KIND_LOITER or not p.alive:
 			continue
+		# 第 104 轮 · 安全引信：**飞出去 3 格才开近炸**（刚出膛时还在发射器/车体旁边）
+		if not Loiter.armed(p):
+			continue
 		var ctr := p.pos3()
 		var why := ""
 		for u in _st.units:
@@ -127,6 +130,46 @@ func tick_loiter_fuse() -> void:
 		_st._log("  💥 巡飞弹近炸引信：感应范围内出现 %s → 引爆" % why)
 		p.kill("fuse")
 		loiter_burst(p, ctr)
+
+
+## 轮式齐射午餐盒的技能【巡飞弹】（第 104 轮）：
+## "作为技能向选定的目标释放，目标必须在 32 格内；初始角度的随机范围与沙盒元素的
+##  巡飞弹发射器一致；技能耗费 12 点精力；记得设置安全引信，飞出去三格才开碰撞和近炸。"
+##
+## 实现：`aim` 是拖拽落点 -> 取"落点附近 32 格内最近的那个敌人"当选定目标；
+## 初始航向走 `Loiter.launch_heading`（**与沙盒发射器同一个随机范围**）；
+## 安全引信由 `Loiter.armed`（飞够 ARM_DIST 格）保证 —— 未武装前不近炸、不碰撞。
+## 返回 false = 没放出（没目标 / 超距）。
+func launch_loiter_skill(caster: Unit, aim: Vector2) -> bool:
+	var d := Skills.get_def("loiter_launch")
+	var reach := float(d.get("range_max", 32.0))
+	var base := GridMath.unit_pos(caster)
+	if base.distance_to(aim) > reach:
+		_st._log("  🚙 %s 的巡飞弹打不到那么远（%.1f > %.1f 格）" % [
+			caster.name, base.distance_to(aim), reach])
+		return false
+	# 选定目标 = 落点附近最近的敌方角色（拖拽落点 -> 目标）
+	var tgt: Unit = null
+	var best := 1.0e9
+	for u in _st.units:
+		if u == null or not u.is_alive() or u.side == caster.side:
+			continue
+		var dd := GridMath.unit_pos(u).distance_to(aim)
+		if dd < best:
+			best = dd
+			tgt = u
+	var to := GridMath.unit_pos(tgt) if tgt != null else aim
+	if base.distance_to(to) > reach:
+		_st._log("  🚙 %s 的巡飞弹目标超出 %.0f 格，放弃" % [caster.name, reach])
+		return false
+	var heading := Loiter.launch_heading(base, to, _st.rng)      # 与沙盒发射器同一套随机初始角
+	var p := Ordnance.make_loiter(caster.side, caster.name, base, heading, _st.rng, Loiter.ARM_DIST)
+	p.shot.target = tgt
+	_st.field.register(p)
+	_st._log("  🚙 %s 放出巡飞弹：目标 %s（%.1f 格），初始航向 %.1f°，安全引信 %.0f 格" % [
+		caster.name, tgt.name if tgt != null else "落点", base.distance_to(to),
+		rad_to_deg(heading), Loiter.ARM_DIST])
+	return true
 
 
 

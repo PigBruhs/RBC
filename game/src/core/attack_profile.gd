@@ -41,8 +41,12 @@ const BY_NAME := {
 
 ## 名字前缀 -> 模板 id（镜像/改型自动继承，例："俯冲轰炸直升机（不要问那么多） (E)"）
 const HELI_PREFIX := "俯冲轰炸直升机"
+## 第 104 轮：轮式齐射午餐盒 —— 普攻也是**齐射**（与直升机的火箭齐射同一档模板），
+## 但具体动作由 `basic_attack.basic_salvo` 按名字分派到 `_lunchbox_salvo`（12 波 × 6 发）。
+const LUNCHBOX_NAME := "轮式齐射午餐盒"
 const BY_PREFIX := {
 	HELI_PREFIX: BASIC_SALVO,
+	LUNCHBOX_NAME: BASIC_SALVO,
 }
 
 ## 职业 -> 模板 id（兜底：没写名字的角色按职业走）

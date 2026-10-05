@@ -191,6 +191,11 @@ func _build_model() -> void:
 	if bname == "Reaper":
 		ReaperModel.attach(self, _faction_color())
 		return
+	# 轮式齐射午餐盒（第 104 轮）：轮式战车（拉长的正六边形车体 + 8 轮胎 + 六边形棱柱炮塔
+	# + 车顶右半边的巡飞弹发射器）。模型占 1×2 格，与它的两个碰撞圆柱对齐 —— 见 lunchbox_model.gd
+	if bname == LunchboxModel.LUNCHBOX_NAME:
+		LunchboxModel.attach(self, _faction_color())
+		return
 	# 萨尼铁塔：远程造型 + 背上背一根医疗拐杖（用户口径）
 	if bname == "萨尼铁塔":
 		_build_ranged(body_mat, dark_mat, metal_mat)

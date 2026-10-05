@@ -70,6 +70,13 @@ func body_h() -> float:
 var body_r: float = 0.30
 var body_height: float = 1.00
 
+## 第 104 轮：**碰撞体组**（一个角色可以有好几个圆柱）。
+## 空数组 = 走缺省的单圆柱（锚点格 + body_r/body_height）——
+## **既有角色全是空数组**，所以 `Targeting.unit_bodies()` 对它们返回的就是以前那一个圆柱，逐字不变。
+## 由 `from_data` 按数据行的 `foot_y`（占地 1×N）生成，见下。
+## 每个元素：{"offset": Vector2i, "r": float, "h": float}
+var bodies: Array = []
+
 # 表现层引用（由 battle_scene 注入）
 var visual: Node3D = null
 
@@ -98,6 +105,13 @@ static func from_data(d: Dictionary) -> Unit:
 	# 碰撞圆柱：表格里写了就用（Reaper 3.0/12.0），没写走缺省 —— 缺省与 Damage 的常量同值
 	u.body_r = float(d.get("body_r", 0.30))
 	u.body_height = float(d.get("body_h", 1.00))
+	# 第 104 轮：占地 1×N 的角色（轮式齐射午餐盒 = 1×2）→ 生成 N 个碰撞圆柱，
+	# 第 i 个的锚点在 **+y（车身前方）偏移 i 格**；N 缺省 1 = 不生成（既有角色逐字不变）。
+	var foot_y := int(d.get("foot_y", 1))
+	if foot_y > 1:
+		u.bodies = []
+		for i in foot_y:
+			u.bodies.append({"offset": Vector2i(0, i), "r": u.body_r, "h": u.body_height})
 	return u
 
 

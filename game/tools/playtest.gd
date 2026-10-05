@@ -152,6 +152,10 @@ func _skill_effect(sid: String, caster: Unit) -> int:
 			return _count_kind(Projectile.KIND_GRENADE)
 		"orbital_strike":
 			return _count_kind(Projectile.KIND_MARKER)
+		"loiter_launch":
+			# 第 104 轮新技能（轮式齐射午餐盒）：朝"落点附近 32 格内最近的敌人"放一枚巡飞弹。
+			# 效果 = 在飞的巡飞弹数量（放不出来就是 0，断言会红）。
+			return _count_kind(Projectile.KIND_LOITER)
 	return -1
 
 
@@ -2145,12 +2149,35 @@ func _initialize() -> void:
 
 	# ── 38c. 技能：玩家入口与 AI 入口同一条生产线 ──
 	print("\n[38c] 技能双路径（玩家 / AI）")
+	# ⚠ 第 104 轮：新角色「轮式齐射午餐盒」按用户口径**只出场在竞技场 / Reaper 战**，
+	#   测试场（本试玩跑的关卡）刻意没有它。但它带一个技能 `loiter_launch`，
+	#   而下面这组是"**每个技能都必须有测试施法者**"的通用契约 —— 为了不让它漏测，
+	#   这里**在试玩场景里就地造一辆**（就地造比中途 reload 关卡安全得多：
+	#   reload 会把前面几十节的场景状态全冲掉，而且是无头下最容易挂住的写法）。
+	var lb: Unit = _unit_by("轮式齐射午餐盒", 0)
+	if lb == null:
+		var lb_def := {}
+		for d in UnitData.UNITS:
+			if String(d["name"]) == "轮式齐射午餐盒":
+				lb_def = d
+		if not lb_def.is_empty():
+			lb = Unit.from_data(lb_def)
+			lb.cell = Vector2i(8, 8)
+			lb.home_cell = lb.cell
+			_s.units.append(lb)
+			# 挂 visual：照 `_reaper_do_summon` 的成例（宿主没有公开的 attach 门面，
+			# 而 `UnitVisual.setup` 是既有的公开入口）
+			var lv := UnitVisual.new()
+			_s.add_child(lv)
+			lv.setup(lb)
+			print("    就地造了一辆轮式齐射午餐盒 @ %s（它不在测试场名单里）" % str(lb.cell))
 	var casters := {
 		"sentry": _unit_by("Alette", 0),
 		"dive_bomb": _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0),
 		"grenade_launcher": _unit_by("萨尼铁塔", 0),
 		"carpet_bomb": _unit_by("Airburst mortar", 0),
 		"orbital_strike": _unit_by("Gerald", 0),
+		"loiter_launch": lb,
 	}
 	for sid in Skills.DEFS:
 		var sid_s := String(sid)

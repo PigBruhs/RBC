@@ -191,7 +191,11 @@ static func summon_cells(reaper: Unit, units: Array[Unit], count: int) -> Array[
 	var occupied := {}
 	for u in units:
 		if u != null and u.is_alive():
-			occupied[u.cell] = true
+			# 第 104 轮：占位要按**单位的全部格子**算 —— 轮式齐射午餐盒占 1×2，
+			# 只记 `u.cell` 会让召唤物落在它第二格的身体里。
+			# `Targeting.unit_cells` 对普通单格角色返回 `[cell]`，所以既有行为逐字不变。
+			for c in Targeting.unit_cells(u):
+				occupied[c] = true
 	var out: Array[Vector2i] = []
 	var r := 1
 	while out.size() < count and r <= 12:

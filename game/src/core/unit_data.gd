@@ -126,6 +126,20 @@ const UNITS := [
 		"body_r": 0.3,
 		"body_h": 1.0,
 	},
+	{
+		"name": "轮式齐射午餐盒",
+		"side": Side.PLAYER,
+		"role": Role.RANGED,
+		"power": 24, "armor": 90, "armor_break": 0,
+		"energy_max": 12, "move": 8,
+		"rest_power": 0, "rest_armor": 0, "rest_energy": 6,
+		"pr": 0, "mr": 0,
+		"rng_min": 1, "rng_max": 24,
+		"controllable": false,
+		"body_r": 0.5,
+		"body_h": 1.0,
+		"foot_y": 2,
+	},
 ]
 
 # 敌方角色（来自 bc_stat.md 的「敌方角色」表）

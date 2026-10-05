@@ -49,6 +49,9 @@ COLS = {
     # 碰撞体尺寸（第 99 轮新增，给 Reaper 这种"大个子圆柱"用；不写 = 用 Targeting 的缺省值）
     "体半径": "body_r", "body_r": "body_r", "半径": "body_r",
     "体高": "body_h", "body_h": "body_h", "身高": "body_h",
+    # 占地（第 104 轮新增，角色用）：1x2 = 车身占两格 -> 两个碰撞圆柱（沿 +y 排）。
+    # ⚠ 列名不能叫「占地」——那个名字被可放置物表占了（PLACEABLE_COLS 用它识别第 3 张表）。
+    "占格": "foot", "foot": "foot", "占地格": "foot", "footprint": "foot",
 }
 
 # 第 3 张表 = 可放置物。它没有"攻击方式"，靠这一列区分。
@@ -177,6 +180,8 @@ def parse(text: str):
             # 碰撞体尺寸：不写就交给 Targeting.BODY_R / BODY_H 的缺省值
             "body_r": _fnum(d.get("body_r"), None),
             "body_h": _fnum(d.get("body_h"), None),
+            # 第 104 轮：占地 1xN -> foot_y = N（N>1 时 Unit.from_data 会生成 N 个碰撞圆柱）
+            "foot_y": _foot_y(d.get("foot")),
             "note": (d.get("note") or "").strip(),
         }
         # 兜底值：休息恢复力量/护甲 = 0，休息恢复精力 = 2（用户指定）
@@ -197,6 +202,21 @@ def _yes(cell) -> bool:
     """'yes'/'no'/'true'/'false'/'是'/'否'/1/0 都认。"""
     t = str(cell or "").strip().lower()
     return t in ("yes", "y", "true", "1", "是", "可")
+
+
+def _foot_y(cell):
+    """占格 '1x2'/'1×2' -> 2（车身沿 +y 占几格）；'1x1'/空 -> 1。
+    只认 x 为 1 的写法：本项目没有"横向占两格"的角色，遇到 x>1 直接报错，避免悄悄算错。"""
+    if cell is None or str(cell).strip() == "":
+        return 1
+    t = str(cell).strip().lower().replace("×", "x").replace("*", "x")
+    if "x" not in t:
+        return int(_num(t, 1))
+    a, b = t.split("x", 1)
+    nx, ny = int(_num(a, 1)), int(_num(b, 1))
+    if nx != 1:
+        raise SystemExit("占格只支持 1xN（横向固定 1 格）：%r" % cell)
+    return max(1, ny)
 
 
 def _fnum(cell, default):
@@ -274,6 +294,9 @@ def gd_emit(players, enemies, placeables) -> str:
             L.append('\t\t"body_r": %s,' % _ftxt(u["body_r"]))
         if u.get("body_h") is not None:
             L.append('\t\t"body_h": %s,' % _ftxt(u["body_h"]))
+        # 第 104 轮：占地 1xN 才输出（既有角色不输出 -> 生成结果逐字不变）
+        if int(u.get("foot_y", 1)) > 1:
+            L.append('\t\t"foot_y": %d,' % int(u["foot_y"]))
         L.append("\t},")
 
     L.append("# 我方角色（来自 bc_stat.md 的「我方角色」表）")

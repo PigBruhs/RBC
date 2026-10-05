@@ -62,6 +62,10 @@ var arc_max: float = 3.6
 var hit_r: float = 0.26
 var hit_tags: Array[String] = []     # 谁能击落我
 var sentry_trigger: bool = false     # 进射界要不要惊动哨兵
+## 安全引信距离（格，第 104 轮）：飞够这么远才开碰撞与近炸。
+## **0 = 一直武装**（既有弹种行为逐字不变）；只有"出膛后要先安全飞一段"的弹种才设它
+## （轮式齐射午餐盒的技能巡飞弹 = `Loiter.ARM_DIST`）。见 `Loiter.armed()`。
+var arm_dist: float = 0.0
 ## 命中判定要跳过谁。默认 null = 跳过 owner_unit（自己的箭不打自己）。
 ## 弹反箭例外：它的 owner_unit 是【原射手】（用来算伤害），但物理上是从杰拉尔德身上
 ## 出手的，所以要跳过的是杰拉尔德而不是射手 —— 否则永远打不回射手身上。

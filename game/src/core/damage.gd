@@ -58,7 +58,14 @@ static func blast(attacker: Unit, ctr: Vector2, radius: float, opts: Dictionary,
 	for u in units:
 		if not u.is_alive() or u == skip:
 			continue
-		if not _covered(ctr, u.cell, radius, touch_cells):
+		# 第 104 轮：占两格的角色（轮式齐射午餐盒）**任一格被覆盖**就算被炸到；
+		# 缺省单格（unit_cells 只返回锚点格）-> 既有角色逐字不变。
+		var covered := false
+		for c in Targeting.unit_cells(u):
+			if _covered(ctr, c, radius, touch_cells):
+				covered = true
+				break
+		if not covered:
 			continue
 		var h := Hit.new()
 		h.unit = u
@@ -112,8 +119,9 @@ static func air_burst(attacker: Unit, ctr: Vector3, opts: Dictionary, units: Arr
 		# 身体底面 = 它【现在】的高度（悬停 2 格 / 爬升到 4 格都按真实高度算，第 89 轮）
 		# 碰撞圆柱**按单位取**（第 98 轮）：Reaper 半径 3 / 高 12；既有角色走缺省 = BODY_R/BODY_H
 		# 同值 -> 行为与"全项目一个尺寸"逐字相同。
-		if not Targeting.sphere_hits_body(ctr, radius, u.cell,
-				Targeting.unit_body_r(u, BODY_R), Targeting.unit_body_h(u, BODY_H), u.body_h()):
+		# 第 104 轮：一个角色可以有**多个**碰撞圆柱（轮式齐射午餐盒 1×2）——
+		# 任一圆柱被球碰到即算命中；缺省单圆柱 -> 既有角色逐字不变。
+		if not Targeting.sphere_hits_unit(ctr, radius, u):
 			continue
 		var h := Hit.new()
 		h.unit = u

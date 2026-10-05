@@ -117,25 +117,38 @@ static func hits_placeable(a: Vector3, b: Vector3, pl: Placeable) -> bool:
 ## 光束会不会打到这个角色。
 ##
 ## 三维口径：光束是 `a -> b` 的线段；角色是**竖直圆柱**
-## （半径 `Targeting.unit_body_r(u)`、高 `Targeting.unit_body_h(u)`、底面 `u.body_h()`）。
+## （半径 `Targeting.unit_bodies(u)[i].r`、高 `.h`、底面 `u.body_h()`）。
 ## 做法分两步，精确解、不采样：
 ##   ① 把线段按圆柱的高度区间 [y0, y1] 裁一刀（`_clip_seg_y`）；
 ##   ② 算这一小段到"圆柱中轴"的**水平**距离 <= HIT_R + 角色半径 即命中（`_dist_point_to_seg_2d`）。
 ##
 ## 于是"贴地飞的水平光束"打不到地面角色（高度轴生效），而"从 6 格高处斜射到目标身上"
 ## 的线段一定在末端命中目标 —— 这正是 Reaper 激光的几何。
+##
+## 第 104 轮：身体从**单个**圆柱泛化成**一组**（`Targeting.unit_bodies`）——
+## 任何一个圆柱被碰到就算命中。既有角色（组里只有一个 (0,0)）行为逐字不变。
 static func hits_unit(a: Vector3, b: Vector3, u: Unit) -> bool:
 	if u == null or not u.is_alive():
 		return false
 	var y0 := u.body_h()
-	var y1 := y0 + Targeting.unit_body_h(u)
-	var seg := _clip_seg_y(a, b, y0, y1)
+	for body in Targeting.unit_bodies(u):
+		if not _hits_body(a, b, u.cell + (body["offset"] as Vector2i),
+				float(body["r"]), float(body["h"]), y0):
+			continue
+		return true
+	return false
+
+
+## 单个圆柱的判定（见 `hits_unit` 的两步法）
+static func _hits_body(a: Vector3, b: Vector3, cell: Vector2i, body_r: float, body_h: float,
+		y0: float) -> bool:
+	var seg := _clip_seg_y(a, b, y0, y0 + body_h)
 	if seg.is_empty():
 		return false
 	var p0: Vector3 = seg[0]
 	var p1: Vector3 = seg[1]
-	var ctr := Vector2(float(u.cell.x) + 0.5, float(u.cell.y) + 0.5)
-	var rr := HIT_R + Targeting.unit_body_r(u)
+	var ctr := Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5)
+	var rr := HIT_R + body_r
 	return _dist_point_to_seg_2d(ctr, Vector2(p0.x, p0.z), Vector2(p1.x, p1.z)) <= rr
 
 

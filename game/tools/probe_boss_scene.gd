@@ -125,7 +125,14 @@ func _initialize() -> void:
 	#     拿她断言"扣 10"会误判成 bug。
 	#   · 护甲那一半会被**目标自己的护甲池上限截断**：对 Airburst mortar（5 甲）只扣得动 5 点，
 	#     拿它断言"扣 20"同样会误判。
-	#   所以优先挑"护甲 ≥ 25 且魔抗 = 0"的玩家英雄；一个都没有时退回"只验被选中 + 单调下降"。
+	#   · ⚠ 第 104 轮新增第 4 个坑：**护甲太高也会把力量那半吃光**。
+	#     新角色「轮式齐射午餐盒」有 **90 甲**，满足原来的"护甲 ≥ 25"条件被选成理想目标，
+	#     但被动的 10 点力量**先减护甲**就归零了 → "掉 10 点力量"必然假红（实测差 0）。
+	#     所以理想目标要约束**护甲上限**：要够大（不被池子截断，≥25）
+	#     但又要够小（力量能打得进去，≤40）。
+	#   所以优先挑"护甲 25~40 且魔抗 = 0"的玩家英雄；一个都没有时退回"只验被选中 + 单调下降"。
+	var ARMOR_IDEAL_MIN := Rules.points_to_milli(25)
+	var ARMOR_IDEAL_MAX := Rules.points_to_milli(40)
 	var mover: Unit = null
 	var ideal: Unit = null
 	for u in s.units:
@@ -133,7 +140,7 @@ func _initialize() -> void:
 			continue
 		if mover == null:
 			mover = u
-		if ideal == null and u.mr == 0 and u.armor_cur >= Rules.points_to_milli(25):
+		if ideal == null and u.mr == 0 and u.armor_cur >= ARMOR_IDEAL_MIN and u.armor_cur <= ARMOR_IDEAL_MAX:
 			ideal = u
 	if ideal != null:
 		mover = ideal
@@ -149,7 +156,7 @@ func _initialize() -> void:
 		var ar_diff: int = ar0 - mover.armor_cur
 		var pw_diff: int = pw0 - mover.power_cur
 		_chk(hit_list.has(mover), "5 格外的单位被 6 格被动选中")
-		if mover.mr == 0 and ar0 >= Rules.points_to_milli(25):
+		if mover.mr == 0 and ar0 >= ARMOR_IDEAL_MIN and ar0 <= ARMOR_IDEAL_MAX:
 			_chk(ar_diff == Rules.points_to_milli(20),
 				"5 格处掉 20 点护甲（%s: %d -> %d，差 %d）" % [mover.name, ar0 / 1000, mover.armor_cur / 1000, ar_diff / 1000])
 			_chk(pw_diff == Rules.points_to_milli(10),

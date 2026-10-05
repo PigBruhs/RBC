@@ -32,6 +32,96 @@ static func unit_body_h(u: Unit, fallback: float = BODY_H_DEFAULT) -> float:
 	return fallback if u == null else u.body_height
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 碰撞体**组**（第 104 轮 · 轮式齐射午餐盒：一个角色两个圆柱）
+#
+# 用户口径（逐字）："你的模型占两格，然后碰撞体积用两个现成的圆柱……相当于一个角色
+# 有两个角色的碰撞体积；这样是不是既不用加多格模型的支持又可以实现两格模型？"
+#
+# 实现口径：把"一个角色的身体"从**单个** body_r/body_h 泛化成**一组**碰撞体，
+# 每个体 = `{offset: Vector2i（相对锚点格 u.cell）, r: float, h: float}`。
+#   · **缺省 = 单个 (0,0) + u.body_r + u.body_height** —— 既有角色（bodies 为空）逐字不变；
+#   · 车的 `bodies` 由 `Unit.from_data` 按数据行的 `foot_y`（占地 1×N）生成，
+#     第二格在 **+y（车身前方）**，与建模的长轴一致。
+# 所有"判角色身体"的地方都应该走 `unit_bodies()` / `sphere_hits_unit()` / `seg_hits_unit()`，
+# 不要再直接读 unit_body_r/unit_body_h（那是单圆柱时代的写法）。
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 这个角色的全部碰撞体。**缺省返回单个 (0,0)**，所以既有角色行为逐字不变。
+static func unit_bodies(u: Unit) -> Array:
+	if u == null:
+		return [{"offset": Vector2i.ZERO, "r": BODY_R_DEFAULT, "h": BODY_H_DEFAULT}]
+	if u.bodies.is_empty():
+		return [{"offset": Vector2i.ZERO, "r": unit_body_r(u), "h": unit_body_h(u)}]
+	return u.bodies
+
+
+## 这个角色**占的格**（锚点 + 每个碰撞体的偏移）。缺省 = 仅锚点格。
+## 用途：空爆/炮击的"格子覆盖"判定、寻路占位（两格都要挡人）。
+static func unit_cells(u: Unit) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if u == null:
+		return out
+	if u.bodies.is_empty():
+		out.append(u.cell)
+		return out
+	for b in u.bodies:
+		out.append(u.cell + (b["offset"] as Vector2i))
+	return out
+
+
+## 这个角色能不能**整个**挪到 `anchor`（锚点格）：它每一个碰撞体格都要在界内、且不被别人占。
+## `occupied` = 别人的占格字典（调用方自己排除本单位）。
+## 1×1 单位与"只判锚点格"逐字等价；1×2 的车要靠它才不会把第二格压到别人身上。
+static func unit_fits_at(u: Unit, anchor: Vector2i, occupied: Dictionary) -> bool:
+	if u == null:
+		return false
+	var own := unit_cells(u)
+	for b in unit_bodies(u):
+		var c: Vector2i = anchor + (b["offset"] as Vector2i)
+		if not Level.in_play(c):
+			return false
+		if c in own:
+			continue                     # 自己现在占的格不算被挡（原地/微调不算撞自己）
+		if occupied.has(c):
+			return false
+	return true
+
+
+## 球（爆心 ctr + 半径 radius）是否碰到这个角色的**任一**碰撞体。
+## 单圆柱单位与逐字写法等价；多圆柱单位 = "任一格被碰到就算碰到"。
+static func sphere_hits_unit(ctr: Vector3, radius: float, u: Unit) -> bool:
+	if u == null:
+		return false
+	var y0 := u.body_h()
+	for b in unit_bodies(u):
+		if sphere_hits_body(ctr, radius, u.cell + (b["offset"] as Vector2i),
+				float(b["r"]), float(b["h"]), y0):
+			return true
+	return false
+
+
+## 细圆柱线段（弹道物：从 from 到 to、自身半径 seg_r）是否碰到这个角色的**任一**碰撞体。
+static func seg_hits_unit(from: Vector3, to: Vector3, u: Unit, seg_r: float) -> bool:
+	if u == null:
+		return false
+	var steps := maxi(2, int(from.distance_to(to) / 0.05) + 1)
+	var y0 := u.body_h()
+	for s in steps + 1:
+		var p := from.lerp(to, float(s) / float(steps))
+		for b in unit_bodies(u):
+			var c := u.cell + (b["offset"] as Vector2i)
+			var rr := seg_r + float(b["r"])
+			var dx := p.x - (float(c.x) + 0.5)
+			var dz := p.z - (float(c.y) + 0.5)
+			if dx * dx + dz * dz > rr * rr:
+				continue
+			if p.y < y0 - seg_r or p.y > y0 + float(b["h"]) + seg_r:
+				continue
+			return true
+	return false
+
+
 ## 角色身体在【高度轴】上的区间 [下, 上]。
 ## 用户口径（第 83 轮）：悬空单位（直升机 hover = 2 格）整个身体抬高 ——
 ## 所以"瞄得对不对"必须考虑高度轴：瞄地面高度是打不到悬停的直升机的。
@@ -152,15 +242,19 @@ static func arrow_body_hit_seg(from: Vector3, to: Vector3, attacker: Unit,
 			# 第 98 轮：**按单位自己的碰撞圆柱**判（Reaper 半径 3 / 高 12）。
 			# unit_body_r 参数保留为兜底：单位没自带尺寸时（= 既有角色）取它 ——
 			# 既有调用方一律传 0.30，与 o.body_r 的缺省同值，所以行为逐字不变。
-			var rr := body_r + unit_body_r(o, unit_body_r)
-			var dx := p.x - (float(o.cell.x) + 0.5)
-			var dz := p.z - (float(o.cell.y) + 0.5)
-			if dx * dx + dz * dz > rr * rr:
-				continue
+			# 第 104 轮：**遍历碰撞体组**（一个角色可以有两个圆柱）——
+			# 缺省单圆柱时 rr / 高度区间与逐字写法完全一样。
 			var span := body_span(o)
-			if p.y < span.x - body_r or p.y > span.y + body_r:
-				continue
-			return o
+			for b in unit_bodies(o):
+				var rr := body_r + (float(b["r"]) if not o.bodies.is_empty() else unit_body_r(o, unit_body_r))
+				var c := o.cell + (b["offset"] as Vector2i)
+				var dx := p.x - (float(c.x) + 0.5)
+				var dz := p.z - (float(c.y) + 0.5)
+				if dx * dx + dz * dz > rr * rr:
+					continue
+				if p.y < span.x - body_r or p.y > span.y + body_r:
+					continue
+				return o
 	return null
 
 

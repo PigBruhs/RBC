@@ -911,9 +911,10 @@ func _initialize() -> void:
 		"敌方出生点都不在 Reaper 身体里（最近 %.2f 格 > 半径 3 + 0.5）" % min_d, fails)
 	var rp_pads: Array = Level.pad_cells(UnitData.Side.PLAYER, "reaper")
 	_expect(rp_pads.size() == 2, "玩家两个公主（pad）位置", fails)
-	# 出场名单：玩家 = 老国王 + 两个公主 + 五个英雄；敌方 = 只有 Reaper（召唤物由它自己产生）
+	# 出场名单：玩家 = 老国王 + 两个公主 + 五个英雄 + 轮式齐射午餐盒；敌方 = 只有 Reaper
 	var rroster: Array = Level.roster("reaper")
-	_expect(rroster.size() == 9, "出场名单 9 条（老国王 + 两个公主 + 五个英雄 + Reaper，实际 %d）" % rroster.size(), fails)
+	_expect(rroster.size() == 10,
+		"出场名单 10 条（老国王 + 两个公主 + 五个英雄 + 午餐盒 + Reaper，实际 %d）" % rroster.size(), fails)
 	# 玩家侧必须有**可行动单位**（no_turn 的国王/公主不算）—— 否则 Reaper 会先手连动
 	var p_actors := 0
 	for e in rroster:
@@ -923,7 +924,8 @@ func _initialize() -> void:
 		if nm98 == "老国王" or nm98.begins_with("公主"):
 			continue
 		p_actors += 1
-	_expect(p_actors == 5, "玩家侧 5 个可行动英雄（不是只有 no_turn 的国王/公主，实际 %d）" % p_actors, fails)
+	_expect(p_actors == 6,
+		"玩家侧 6 个可行动单位（五个英雄 + 午餐盒，不是只有 no_turn 的国王/公主，实际 %d）" % p_actors, fails)
 	# 胜负条件：非对称（老国王死 = 败；Reaper 死 = 胜）
 	var rv: Dictionary = Level.victory("reaper")
 	_expect(String(rv.get("type", "")) == "boss" and String(rv.get("boss_name", "")) == "Reaper",
@@ -1228,9 +1230,10 @@ func _initialize() -> void:
 	# ── 巡飞弹 + 发射器（第 90 轮）──
 	print("\n── 巡飞弹（第 90 轮）──")
 	_expect(absf(Loiter.SPEED - 4.0) < 0.001 and absf(Loiter.HEIGHT - 1.5) < 0.001
-		and absf(Loiter.MAX_DIST - 32.0) < 0.001 and absf(Loiter.BODY_R - 0.5) < 0.001
+		and absf(Loiter.MAX_DIST - 64.0) < 0.001 and absf(Loiter.BODY_R - 0.5) < 0.001
 		and absf(Loiter.BLAST_R - 1.0) < 0.001 and absf(Loiter.FUSE_R - 0.75) < 0.001,
-		"巡飞弹：速度 4 格/秒（第 92 轮）、定高 1.5、飞 32 格、直径 1 格球、造伤直径 2 格、近炸直径 1.5 格", fails)
+		"巡飞弹：速度 4 格/秒（第 92 轮）、定高 1.5、飞 64 格（第 104 轮：32 -> 64）、"
+		+ "直径 1 格球、造伤直径 2 格、近炸直径 1.5 格", fails)
 	_expect(absf(Loiter.POWER - 80.0) < 0.001 and absf(Loiter.BREAK - 80.0) < 0.001
 		and absf(Loiter.IGNORE_RES - 0.5) < 0.001,
 		"巡飞弹伤害 = 80 破甲 + 80 力量（第 98 轮翻倍；炮击：无视 50% 物抗）", fails)
