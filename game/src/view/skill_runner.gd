@@ -146,6 +146,22 @@ func perform_skill(u: Unit, sid: String, aim: Vector2, cell: Vector2i) -> bool:
 			commit_skill(u, sid)
 			_st._finish_turn()
 			return true
+		Skills.CAST_LINK:
+			# 第 111 轮：雷达午餐盒的"连接友军"。`cell` 是玩家点的那一格 -> 找那一格上的友军。
+			# ⚠ 与锁定**解耦**：这里只动 `links`，不碰锁定；反向亦然。
+			var friend: Unit = _st._unit_at(cell)
+			if friend == null or friend.side != u.side or friend == u:
+				return false                     # 不是友军（或点了自己）-> 拒绝，不消耗行动
+			if GridMath.unit_pos(u).distance_to(GridMath.unit_pos(friend)) > float(d.get("range_max", 16.0)):
+				return false                     # 超出 16 格 -> 拒绝
+			var st: Radar.State = _st._radar_state(u)
+			var added := Radar.add_link(st, friend.name)
+			commit_skill(u, sid)
+			_st._log("  📡 %s 连接了 %s（当前连接 %d/%d 名%s）" % [
+				u.name, friend.name, st.links.size(), Radar.MAX_LINKS,
+				"" if added else "（本来就连着，未重复加）"])
+			_st._finish_turn()
+			return true
 	push_error("未知技能施放方式：%s（%s）" % [Skills.cast_of(sid), sid])
 	return false
 

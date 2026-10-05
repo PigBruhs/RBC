@@ -47,6 +47,10 @@ func _setup() -> void:
 	# 锁定（这个距离 -> 1 回合，选定即锁定，右上应显示"已锁定"）
 	_s.t_radar_begin_lock("雷达午餐盒", foe.name)
 	_s._radar_tick_huds()
+	# 再连两名友军，拍出蓝色光柱
+	_s.t_radar_add_link("雷达午餐盒", "Gerald")
+	_s.t_radar_add_link("雷达午餐盒", "Alette")
+	_s._radar_tick_beams(0.0)
 	_ok_lock = _s._radar_huds.get(foe.name, null) != null
 	print("[shot] 锁定 %s ｜ HUD 建立=%s ｜ 状态=%s" % [
 		foe.name, str(_ok_lock), _s.t_radar_state("雷达午餐盒").desc()])

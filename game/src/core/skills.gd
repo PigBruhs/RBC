@@ -27,13 +27,18 @@ const CAST_CARPET := "carpet"
 const CAST_GRENADE := "grenade"
 const CAST_MARKER := "marker"
 const CAST_LOITER := "loiter"                        # 第 104 轮：巡飞弹（午餐盒的技能）
-const CAST_ALL := [CAST_SENTRY, CAST_DIVE, CAST_CARPET, CAST_GRENADE, CAST_MARKER, CAST_LOITER]
+## 第 111 轮：雷达午餐盒的"连接友军"（点一个**友方角色**；与锁定解耦、最多两名 FIFO）
+const CAST_LINK := "link"
+const CAST_ALL := [CAST_SENTRY, CAST_DIVE, CAST_CARPET, CAST_GRENADE, CAST_MARKER, CAST_LOITER,
+	CAST_LINK]
 
 const AIM_SELF := "self"
 const AIM_CELL := "cell"
 const AIM_DRAG := "drag"
 const AIM_UNIT := "unit"                             # 第 104 轮：点一个**角色**（巡飞弹选目标）
-const AIM_ALL := [AIM_SELF, AIM_CELL, AIM_DRAG, AIM_UNIT]
+## 第 111 轮：点一个**友方角色**（雷达的连接）。与 `AIM_UNIT` 同交互，只是候选换成友军。
+const AIM_ALLY := "ally"
+const AIM_ALL := [AIM_SELF, AIM_CELL, AIM_DRAG, AIM_UNIT, AIM_ALLY]
 
 ## 技能定义。key = 技能 id
 const DEFS := {
@@ -139,6 +144,23 @@ const DEFS := {
 		"range_min": 1.0,
 		"range_max": 32.0,                       # 用户口径：目标必须在 32 格内
 		"arm_dist": 3.0,                         # 安全引信：飞出去 3 格才武装
+	},
+	# 第 111 轮新技能：雷达午餐盒的"连接友军"（用户口径）
+	"radar_link": {
+		"id": "radar_link",
+		"name": "雷达连接",
+		"owner": "雷达午餐盒",
+		"cost": 0,                               # 雷达车精力上限 0 -> 技能免费
+		"kind": "link",
+		"cast": CAST_LINK,
+		"aim": AIM_ALLY,                          # 点一个**友方角色**（与巡飞弹同交互，只是候选换友军）
+		"desc": "选择 16 格内的一名友军建立连接（最多两名，超过就把最先连接的挤出）。"
+			+ "连接与锁定解耦：可以只锁定不连接，也可以只连接不锁定。"
+			+ "连接期间该友军**散布减半**；雷达锁定完成后，该友军可**无视距离**点选被锁定的目标，"
+			+ "且散布缩小到直径 0.1 格的球。"
+			+ "一回合只能用「普攻锁定」或「技能连接」其中一样。",
+		"range_min": 0.0,
+		"range_max": 16.0,                       # 用户口径：连接距离上限 16 格
 	},
 	"sentry": {
 		"id": "sentry",

@@ -525,7 +525,7 @@ func _begin_aim() -> void:
 	# 用户口径（第 105 轮）：巡飞弹这类技能是**点选一个敌方角色**，不是拖拽落点。
 	# skill_runner 的分派把"非 AIM_CELL"一律丢进拖拽（那个文件不在本任务写区），
 	# 所以在这里拦截：按技能自己的 aim 决定进"点选目标"还是"拖拽"。
-	if _aim_skill_id != "" and Skills.aim_of(_aim_skill_id) == Skills.AIM_UNIT:
+	if _aim_skill_id != "" and Skills.aim_of(_aim_skill_id) in [Skills.AIM_UNIT, Skills.AIM_ALLY]:
 		_begin_unit_targeting(_aim_skill_id)
 		return
 	aim.begin_aim()
@@ -536,6 +536,8 @@ func _begin_aim() -> void:
 func _begin_unit_targeting(sid: String) -> void:
 	var d := Skills.get_def(sid)
 	var rmax: float = float(d.get("range_max", 32.0))
+	# 第 111 轮：`AIM_ALLY`（雷达连接）= 点**友方**角色；其余（巡飞弹）= 点**敌方**角色。
+	var want_ally: bool = Skills.aim_of(sid) == Skills.AIM_ALLY
 	phase = Phase.CHOOSE_TARGET
 	reachable = {}
 	attackable = {}
@@ -543,15 +545,20 @@ func _begin_unit_targeting(sid: String) -> void:
 	_clear_pending()
 	var cc := _cc(active.cell)
 	for u in units:
-		if u == null or not u.is_alive() or u == active or u.side == active.side:
+		if u == null or not u.is_alive() or u == active:
+			continue
+		if want_ally:
+			if u.side != active.side:
+				continue
+		elif u.side == active.side:
 			continue
 		if cc.distance_to(GridMath.unit_pos(u)) <= rmax:
 			attackable[u.cell] = true
 	fx.clear_hints()
 	fx.draw_hints()
 	_refresh_all()
-	_log("  🎯 选择【%s】的目标：%.0f 格内共 %d 个可选敌人（紫色高亮，点敌人即施放）" % [
-		String(d.get("name", sid)), rmax, attackable.size()])
+	_log("  🎯 选择【%s】的目标：%.0f 格内共 %d 个可选%s（紫色高亮，点目标即施放）" % [
+		String(d.get("name", sid)), rmax, attackable.size(), "友军" if want_ally else "敌人"])
 
 
 func _hover_cell() -> Variant:
@@ -1123,6 +1130,41 @@ func _lb_forget_state(u: Unit) -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 var _radar_states: Dictionary = {}      # 单位名 -> Radar.State
 var _radar_huds: Dictionary = {}        # **被锁定目标名** -> RadarHud（第 111 轮难点 1）
+var _radar_beams: Array = []            # 连接光柱（第 111 轮）：每根对应一条 "雷达->友军"
+var _radar_beam_t := 0.0                # 闪动用的累计时间
+
+
+## 每帧刷新**连接光柱**（第 111 轮）：每条连接一根闪动的蓝色细光柱。
+## 光柱数量 = 当前所有雷达车的连接数之和（最多 2 × 雷达车数）。
+func _radar_tick_beams(delta: float) -> void:
+	_radar_beam_t += delta
+	var pairs: Array = []                # [[radar_unit, friend_unit], ...]
+	for u in units:
+		if not _is_radar(u) or not u.is_alive():
+			continue
+		var st := _radar_state(u)
+		for nm in st.links:
+			var f := _lb_unit_by_name(nm)
+			if f != null and f.is_alive():
+				pairs.append([u, f])
+	# 按需增删光柱对象（避免每帧 new/free）
+	while _radar_beams.size() < pairs.size():
+		_radar_beams.append(RadarBeam.make(self))
+	while _radar_beams.size() > pairs.size():
+		var extra: RadarBeam = _radar_beams.pop_back()
+		if extra != null and is_instance_valid(extra):
+			extra.queue_free()
+	for i in pairs.size():
+		var beam: RadarBeam = _radar_beams[i]
+		if beam == null or not is_instance_valid(beam):
+			continue
+		var ru: Unit = pairs[i][0]
+		var fu: Unit = pairs[i][1]
+		var a := GridMath.unit_pos(ru)
+		var b := GridMath.unit_pos(fu)
+		# 抬到两者的身体中部，免得光柱贴地
+		beam.update(Vector3(a.x, RadarHud.size_for(ru).y * 0.5 + 0.6, a.y),
+			Vector3(b.x, RadarHud.size_for(fu).y * 0.5 + 0.4, b.y), _radar_beam_t)
 
 
 ## 每帧刷新锁定 HUD（难点 1）：给每个"正被锁定"的敌人挂一个荧光绿矩形。
@@ -2249,6 +2291,7 @@ func _process(delta: float) -> void:
 	# 雷达午餐盒（第 111 轮）：连接距离**持续检查**（走远就断）+ 锁定 HUD
 	_radar_tick_links()
 	_radar_tick_huds()
+	_radar_tick_beams(delta)
 	# HUD 面向相机（"法线方向与摄像机方向相同"）—— 放在最后，用本帧最终的相机朝向
 	for h in _radar_huds.values():
 		if h != null and is_instance_valid(h):
@@ -2353,8 +2396,11 @@ func _click_cell(cell: Vector2i) -> void:
 			return
 		# 用户口径（第 105 轮）：**点选单位**的技能（巡飞弹）—— 点敌人 = 施放。
 		# 与远程普攻同一套交互（两次点击确认），但直接走技能施放而不是弹攻击菜单。
-		if _aim_skill_id != "" and Skills.aim_of(_aim_skill_id) == Skills.AIM_UNIT:
-			if t != null and t.side != active.side and attackable.has(cell):
+		if _aim_skill_id != "" and Skills.aim_of(_aim_skill_id) in [Skills.AIM_UNIT, Skills.AIM_ALLY]:
+			# 第 111 轮：`AIM_ALLY`（雷达连接）点的是**友军**，其余点敌人。
+			var want_ally: bool = Skills.aim_of(_aim_skill_id) == Skills.AIM_ALLY
+			var ok_side: bool = t != null and (t.side == active.side if want_ally else t.side != active.side)
+			if t != null and t != active and ok_side and attackable.has(cell):
 				if _same_pending("skill_unit", cell):
 					var sid_cast := _aim_skill_id
 					_aim_skill_id = ""

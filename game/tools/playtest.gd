@@ -156,6 +156,11 @@ func _skill_effect(sid: String, caster: Unit) -> int:
 			# 第 104 轮新技能（轮式齐射午餐盒）：朝"落点附近 32 格内最近的敌人"放一枚巡飞弹。
 			# 效果 = 在飞的巡飞弹数量（放不出来就是 0，断言会红）。
 			return _count_kind(Projectile.KIND_LOITER)
+		"radar_link":
+			# 第 111 轮新技能（雷达午餐盒）：连接一名友军。
+			# 效果 = 这台雷达车当前的**连接数**（放不出来就是 0，断言会红）。
+			var rst: Radar.State = _s.t_radar_state(caster.name)
+			return 0 if rst == null else rst.links.size()
 	return -1
 
 
@@ -2188,6 +2193,24 @@ func _initialize() -> void:
 			_s.add_child(lv)
 			lv.setup(lb)
 			print("    就地造了一辆轮式齐射午餐盒 @ %s（它不在测试场名单里）" % str(lb.cell))
+	# 第 111 轮：雷达午餐盒也**不在测试场名单里**（用户口径：它不能影响巡飞弹的选目标，
+	#   而 playtest 会把 field 的单位堆在一起 -> 叠格会让 `_unit_at` 返回友方）。
+	#   同样"就地造一台"，让它带的新技能 `radar_link` 也有施法者可测。
+	var rb: Unit = _unit_by(Radar.NAME, 0)
+	if rb == null:
+		var rb_def := {}
+		for d in UnitData.UNITS:
+			if String(d["name"]) == Radar.NAME:
+				rb_def = d
+		if not rb_def.is_empty():
+			rb = Unit.from_data(rb_def)
+			rb.cell = Vector2i(6, 6)
+			rb.home_cell = rb.cell
+			_s.units.append(rb)
+			var rv := UnitVisual.new()
+			_s.add_child(rv)
+			rv.setup(rb)
+			print("    就地造了一台雷达午餐盒 @ %s（它不在测试场名单里）" % str(rb.cell))
 	var casters := {
 		"sentry": _unit_by("Alette", 0),
 		"dive_bomb": _unit_by(AttackProfile.HELI_PREFIX + "（不要问那么多）", 0),
@@ -2195,6 +2218,7 @@ func _initialize() -> void:
 		"carpet_bomb": _unit_by("Airburst mortar", 0),
 		"orbital_strike": _unit_by("Gerald", 0),
 		"loiter_launch": lb,
+		"radar_link": rb,
 	}
 	for sid in Skills.DEFS:
 		var sid_s := String(sid)
@@ -2207,6 +2231,21 @@ func _initialize() -> void:
 			caster.visual.position = Vector3(10.5, caster.hover, 10.5)
 		var aim := Vector2(14.5, 10.5)
 		var tcell := Vector2i(14, 10)
+		# 第 111 轮：`aim=ally`（雷达连接）的目标必须是**真实友军**，写死的 (14,10) 那格没人
+		# -> 共享/AI 两个入口都会返回 false。这里按 aim 类型挑一个真实目标格。
+		if Skills.aim_of(sid_s) == Skills.AIM_ALLY:
+			var friend_pick: Unit = null
+			for cand in _s.units:
+				if cand == null or not cand.is_alive() or cand == caster:
+					continue
+				if cand.side != caster.side:
+					continue
+				if GridMath.unit_pos(caster).distance_to(GridMath.unit_pos(cand)) <= 16.0:
+					friend_pick = cand
+					break
+			if friend_pick != null:
+				aim = GridMath.unit_pos(friend_pick)
+				tcell = friend_pick.cell
 		var cast_kind := Skills.cast_of(sid_s)
 		var aim_kind := Skills.aim_of(sid_s)
 		# ① 共享入口（玩家所有入口最终都调它）
@@ -2254,17 +2293,20 @@ func _initialize() -> void:
 			#   （那是"选中看属性"的入口，不走选目标/施放的分派）。
 			_s.t_choose_skill(sid_s)
 			var unit_targeting: bool = _s.phase == _s.Phase.CHOOSE_TARGET
-			# 挑一个在射程内、且不是施法者自己的敌方单位当目标
+			# 挑一个在射程内的目标：`aim=ally`（雷达连接）要**友军**，其余要**敌人**。
+			var want_ally: bool = Skills.aim_of(sid_s) == Skills.AIM_ALLY
 			var picked: Unit = null
 			var reach := float(Skills.get_def(sid_s).get("range_max", 32.0))
 			for cand in _s.units:
-				if cand == null or not cand.is_alive() or cand.side == caster.side:
+				if cand == null or not cand.is_alive() or cand == caster:
+					continue
+				if want_ally != (cand.side == caster.side):
 					continue
 				if GridMath.unit_pos(caster).distance_to(GridMath.unit_pos(cand)) <= reach:
 					picked = cand
 					break
 			if picked == null:
-				_chk(false, "%s：射程内找不到可点选的敌方目标" % sid_s)
+				_chk(false, "%s：射程内找不到可点选的%s目标" % [sid_s, "友军" if want_ally else "敌方"])
 			else:
 				# 第一次点 = 黄勾确认，第二次点 = 真的施放（与弓箭手同一套两次确认）
 				_s.t_click_cell(picked.cell)

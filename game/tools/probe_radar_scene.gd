@@ -161,4 +161,60 @@ func _run(s: Node) -> void:
 		s._radar_tick_huds()
 		_ok(s._radar_huds.get(foe3.name, null) == null, "**锁定清掉后 HUD 被移除**")
 
+	print("\n[7] 连接技能（cast=link）+ 闪动蓝色光柱")
+	# 技能定义
+	var d := Skills.get_def("radar_link")
+	_ok(not d.is_empty() and String(d.get("cast", "")) == Skills.CAST_LINK,
+		"技能 radar_link 存在且 cast=link")
+	_ok(String(d.get("aim", "")) == Skills.AIM_ALLY and absf(float(d.get("range_max", 0)) - 16.0) < 0.001,
+		"瞄准方式 = 点友军（AIM_ALLY）、距离上限 16 格")
+	_ok(String(d.get("owner", "")) == RADAR, "owner = %s" % RADAR)
+	# 走**玩家真实入口**：选技能 -> 进选友军阶段 -> 点友军两次
+	var st3: Radar.State = s.t_radar_state(RADAR)
+	var g2: Unit = null
+	for u in s.units:
+		if u != null and u.name == "Gerald":
+			g2 = u
+	_ok(g2 != null, "找到友军 Gerald")
+	if g2 != null:
+		# 摆到 10 格内（16 格限制内）
+		g2.cell = radar.cell + Vector2i(10, 0)
+		g2.visual.position = Vector3(float(g2.cell.x) + 0.5, g2.visual.position.y,
+			float(g2.cell.y) + 0.5)
+		radar.energy = radar.energy_max          # 雷达精力 0，技能免费，但先确保不卡在"没行动"
+		radar.has_acted = false
+		s.active = radar
+		s.t_choose_skill("radar_link")
+		_ok(s.phase == s.Phase.CHOOSE_TARGET, "进入【选友军】阶段")
+		_ok(s.t_attackable_cells().has(g2.cell), "**友军所在格被高亮**（可选）")
+		s.t_click_cell(g2.cell)
+		s.t_click_cell(g2.cell)
+		_ok(st3.links.has("Gerald"), "**两次点击后连接建立**（links=%s）" % str(st3.links))
+		# 光柱
+		s._radar_tick_beams(0.016)
+		_ok(s._radar_beams.size() == st3.links.size(),
+			"**连接光柱数量 = 连接数**（%d）" % s._radar_beams.size())
+		if s._radar_beams.size() > 0:
+			var beam: RadarBeam = s._radar_beams[0]
+			var a1: float = beam.t_alpha()
+			var h1: float = beam.t_height()
+			# 闪动：推进半个周期后透明度应不同
+			var half := 1.0 / (2.0 * RadarBeam.PULSE_HZ)
+			s._radar_tick_beams(half)
+			var a2: float = beam.t_alpha()
+			print("      光柱高度 %.2f 格（应 ≈ 雷达→友军 距离）｜ 透明度 %.3f -> %.3f" % [h1, a1, a2])
+			_ok(h1 > 5.0, "光柱长度跟着两点距离（%.2f 格）" % h1)
+			_ok(absf(a1 - a2) > 0.15, "**光柱在闪动**（透明度 %.3f -> %.3f）" % [a1, a2])
+		# FIFO：再连两个 -> 最早那个被挤出（Gerald 应被挤掉）
+		var others: Array[Unit] = []
+		for u in s.units:
+			if u != null and u.is_alive() and u.side == radar.side and u != radar:
+				others.append(u)
+		if others.size() >= 2:
+			var st4: Radar.State = s.t_radar_state(RADAR)
+			Radar.add_link(st4, others[0].name)
+			Radar.add_link(st4, others[1].name)
+			_ok(st4.links.size() == Radar.MAX_LINKS,
+				"**最多两名**（实际 %d）" % st4.links.size())
+
 	print("\n── 雷达场景接线探针：%d 项检查，失败 %d 项 ──" % [_n, _f])
