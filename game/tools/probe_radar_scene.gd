@@ -268,5 +268,21 @@ func _run(s: Node) -> void:
 			var got: bool = s.t_attackable_cells().has(foe4.cell)
 			print("      被锁定目标挪到 60 格外 ｜ 进可选集合 = %s" % str(got))
 			_ok(got, "**被连接的友军可无视距离选被锁定目标**（60 格外也在可选集合里）")
+			# ── 弓箭手（远程，选目标型）也要吃到这一条 ──
+			var alette: Unit = null
+			for u in s.units:
+				if u != null and u.name == "Alette" and u.is_alive():
+					alette = u
+					break
+			if alette != null:
+				Radar.add_link(st5, alette.name)
+				alette.cell = radar.cell
+				alette.visual.position = Vector3(float(alette.cell.x) + 0.5,
+					alette.visual.position.y, float(alette.cell.y) + 0.5)
+				s.active = alette
+				s._aim_skill_id = ""
+				s._begin_unit_targeting("")
+				var got_a: bool = s.t_attackable_cells().has(foe4.cell)
+				_ok(got_a, "**弓箭手（Alette）也能无视距离选被锁定目标**（60 格外）")
 
 	print("\n── 雷达场景接线探针：%d 项检查，失败 %d 项 ──" % [_n, _f])
