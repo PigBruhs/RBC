@@ -576,8 +576,12 @@ const ROCKET_GUIDE_ACCEL0 := 13.0
 ## 加速度上限（逐渐增大 -> 圈越收越小，最终能命中；不设上限会一直转圈）
 ## 半径参考：v≈15 格/秒时，a=70 -> 半径 3.2 格；现在 a=35 -> 半径 **6.4 格**。
 const ROCKET_GUIDE_ACCEL_MAX := 35.0
-## 加速度的增长率（格/秒³）
-const ROCKET_GUIDE_ACCEL_GROW := 27.5
+## 加速度的**每次增大步长**（格/秒²）。
+## ⚠ 第 111 轮用户口径：「让加速度越来越大，但是**增大幅度小**，而且**基本上转半圈左右才增大一次**」
+##   —— 所以增长不再按时间，而是"每累计转过 **π（半圈）** 才 +这一步长"（见 `Projectile.guide_turn`）。
+const ROCKET_GUIDE_ACCEL_STEP := 4.0
+## 制导火箭的最大航程（格）：飞满即自爆（用户口径「**火箭飞行 256 格后自爆**」）
+const ROCKET_GUIDE_MAX_DIST := 256.0
 ## 速度下限上限（格/秒）：制导接管时至少给这么快，免得"掰不动"
 const ROCKET_GUIDE_CAP := 14.0
 const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
@@ -609,16 +613,25 @@ func _radar_guide_rockets(delta: float) -> void:
 		#     拿它再比 12 会开出一段 **12 格的死区**（实测：加速度停在 39.0 不再增长）。
 		if not p.steering and p.flown_dist() < Ordnance.ROCKET_RAMP_DIST:
 			continue
-		# 找"已锁定、且把 caster 连着"的雷达车 -> 它的锁定目标就是引导目标
-		var tgt: Unit = null
-		for s in states:
-			var st: Radar.State = s
-			if not st.locked() or not st.links.has(caster.name):
-				continue
-			var t := _lb_unit_by_name(st.lock_name)
-			if t != null and t.is_alive():
-				tgt = t
-				break
+		# 找"已锁定、且把 caster 连着"的雷达车 -> 它的锁定目标就是引导目标。
+		# ⚠ 第 111 轮修**假脱锁**（用户：「为什么当瞄准偏差比较大时会出现先拐一会弯向目标
+		#   然后**突然停止拐弯直接直飞**？你不会加了什么脱锁机制吧？」）：
+		#   原来这里**每帧**都重新查"锁定 + 连接"，一旦那边断了就 `continue` ——
+		#   而 `guide_dir` 不会被清，火箭就**保持旧方向一直加速 = 直飞**。
+		#   现在：**接管时把目标粘在 `p.guide_target` 上**，之后只要它还活着就一直引导，
+		#   **不再看雷达的锁定/连接状态**（本来就不该有"脱锁"这回事）。
+		var tgt: Unit = p.guide_target
+		if tgt != null and not tgt.is_alive():
+			tgt = null
+		if tgt == null and not p.steering:           # 只有还没接管时才需要现找目标
+			for s in states:
+				var st: Radar.State = s
+				if not st.locked() or not st.links.has(caster.name):
+					continue
+				var t := _lb_unit_by_name(st.lock_name)
+				if t != null and t.is_alive():
+					tgt = t
+					break
 		if tgt == null:
 			continue
 		var cur: Vector2 = p.to - p.pos()
@@ -658,26 +671,41 @@ func _radar_guide_rockets(delta: float) -> void:
 			# 速度上限**不得超过火箭自己的极速**（留一点余量），杜绝"一帧跳很远"
 			p.guide_cap = minf(maxf(v_now * 1.25, ROCKET_GUIDE_CAP),
 				Ordnance.ROCKET_VMAX * 1.5)
-			p.max_dist = maxf(s_now + maxf(p.pos().distance_to(GridMath.unit_pos(tgt)) * 2.5, 24.0),
-				s_now + 24.0)
+			# ⚠ 第 111 轮用户口径：「**火箭飞行 256 格后自爆**」——制导火箭的最大航程固定 256 格
+			#   （不再按到目标的距离临时算）。
+			p.max_dist = ROCKET_GUIDE_MAX_DIST
 			p.guide_accel = ROCKET_GUIDE_ACCEL0
 			p.guide_t = ROCKET_GUIDE_STEP          # 立刻做第一次判定
+			p.guide_target = tgt                   # **粘住目标**（此后不再看锁定/连接）
+			p.guide_turn = 0.0
+			p.guide_last_heading = p.heading
 			# ⚠ 落点同步到制导位置：否则 sink / 场地的"落点/爆点"仍读**旧的瞄准点**，
 			#   火箭就会"在别的地方（老国王背后）冒出来爆炸"。
 			p.to = p.steer_pos
-		# 每 100ms 一次判定：重算"指向目标落点"的**三维**方向，并让加速度**逐渐增大**
+		# 每 100ms 一次判定：重算"指向目标落点"的**三维**方向
 		p.guide_t += delta
 		if p.guide_t >= ROCKET_GUIDE_STEP:
 			p.guide_t = 0.0
+			# ⚠ 粘住的目标可能中途死了 -> 那就直飞（不再找新目标；用户没要求改锁目标）
+			if tgt == null or not tgt.is_alive():
+				continue
 			var cur3 := Vector3(p.pos().x, p.steer_h, p.pos().y)
 			var tgt3 := Vector3(GridMath.unit_pos(tgt).x, Targeting.aim_height(tgt),
 				GridMath.unit_pos(tgt).y)
 			var d3 := tgt3 - cur3
 			if d3.length() > 0.01:
 				p.guide_dir = d3.normalized()
-			# ⚠ **加速度逐渐增大** -> 转弯半径越来越小（用户要的"圈变小"）。
-			p.guide_accel = minf(p.guide_accel + ROCKET_GUIDE_ACCEL_GROW * ROCKET_GUIDE_STEP,
-				ROCKET_GUIDE_ACCEL_MAX)
+			# ⚠ 第 111 轮用户口径：「要记得让加速度越来越大，但是**增大幅度小**
+			#   而且**基本上转半圈左右才增大一次**」——
+			#   所以增长**不看时间**，而是累计"制导以来一共转过多少弧度"，
+			#   **每累计到 π（半圈）才 `+ROCKET_GUIDE_ACCEL_STEP`**（小步长）。
+			var dh: float = absf(angle_difference(p.heading, p.guide_last_heading))
+			p.guide_turn += dh
+			p.guide_last_heading = p.heading
+			if p.guide_turn >= PI:
+				p.guide_turn -= PI
+				p.guide_accel = minf(p.guide_accel + ROCKET_GUIDE_ACCEL_STEP,
+					ROCKET_GUIDE_ACCEL_MAX)
 ## 用户口径：「锁定完成前连接的角色弹道散布**降低 50%**」「锁定完成后……将其弹道散布
 ## **缩小至直径 0.1 格的球**」。纯逻辑在 `Radar.spread_modifier/apply_spread`。
 ## ⚠ 用户说"你尽力吧，可能出现没覆盖到的情况我不怪你" —— 所以这里覆盖**几个明显的**：

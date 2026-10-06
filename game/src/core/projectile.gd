@@ -111,6 +111,14 @@ var guide_dir: Vector3 = Vector3.ZERO   # 本段的**加速度方向**（世界 
 var guide_accel: float = 0.0            # 本段的加速度大小（格/秒²）；> 0 才走制导分支
 var guide_cap: float = 40.0             # 速度上限（格/秒）
 var guide_t: float = 0.0                # 距上次引导判定的累计时间（宿主每 100ms 用一次）
+## ⚠ 第 111 轮：制导**粘住的目标**。一旦接管就把目标记在这里 ——
+##   之后**不再看雷达的锁定/连接状态**，只要目标还活着就一直朝它引导。
+##   （用户报的"先拐一会弯、然后突然停止拐弯直接直飞"就是原来每帧都重新查锁定/连接，
+##     一旦那边断了就 `continue`，`guide_dir` 不再更新 -> 火箭保持旧方向直飞 = 假脱锁。）
+var guide_target: Unit = null
+## 制导以来累计转过多少弧度（用来决定"什么时候增大加速度"）
+var guide_turn: float = 0.0
+var guide_last_heading: float = 0.0
 var hold_l: float = 0.0              # 左转键已按住多久（秒）
 var hold_r: float = 0.0              # 右转键已按住多久（秒）
 ## 近炸引信要忽略的沙盒元素（发射它的那台发射器，否则一出生就自爆）
