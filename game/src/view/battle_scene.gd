@@ -569,14 +569,15 @@ func _radar_add_locked_targets(_unused: bool, atk: Unit, out: Dictionary) -> voi
 ## 判定间隔：用户原话"每隔 **100ms** 就做一次引导判定"
 const ROCKET_GUIDE_STEP := 0.1
 ## 初始加速度（小 -> 转弯半径大，先画大圆弧）
-const ROCKET_GUIDE_ACCEL0 := 26.0
+## ⚠ 第 111 轮用户口径：「把**引导加速度降到现在一半**我再试试」——
+##   三个参数（初始 / 上限 / 增长率）**整体按 1/2 缩放**，保持整条加速度曲线形状不变：
+##   26 -> 13、70 -> 35、55 -> 27.5。转弯半径 = v²/a，所以半径整体**翻倍**（弧更大更缓）。
+const ROCKET_GUIDE_ACCEL0 := 13.0
 ## 加速度上限（逐渐增大 -> 圈越收越小，最终能命中；不设上限会一直转圈）
-## ⚠ 第 111 轮调稳：转弯半径 = v²/a。速度上限约 15 格/秒，若 a 放到 150 则半径只有 1.5 格
-##   —— 比到目标的距离还小 -> **会绕着目标转圈**（探针实测夹角 24°->44° 发散）。
-##   70 对应半径 ≈ 3.2 格，既收得紧又不绕圈。
-const ROCKET_GUIDE_ACCEL_MAX := 70.0
+## 半径参考：v≈15 格/秒时，a=70 -> 半径 3.2 格；现在 a=35 -> 半径 **6.4 格**。
+const ROCKET_GUIDE_ACCEL_MAX := 35.0
 ## 加速度的增长率（格/秒³）
-const ROCKET_GUIDE_ACCEL_GROW := 55.0
+const ROCKET_GUIDE_ACCEL_GROW := 27.5
 ## 速度下限上限（格/秒）：制导接管时至少给这么快，免得"掰不动"
 const ROCKET_GUIDE_CAP := 14.0
 const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
