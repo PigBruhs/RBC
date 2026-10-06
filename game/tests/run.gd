@@ -889,26 +889,30 @@ func _initialize() -> void:
 
 	# ── Reaper 战（第 99 轮：第一个 Boss 关；第 102 轮改成 41×81 + 斜对角布局）──
 	print("\n── Reaper 战场景 ──")
-	_expect(Level.gw("reaper") == 100 and Level.gh("reaper") == 100, "Reaper 战物理边界 100×100", fails)
+	# ⚠ 第 111 轮用户口径：「将 REAPER 战地图**扩充至 500x500**（不改变可到格）同时让**场景居中**」
+	_expect(Level.gw("reaper") == 500 and Level.gh("reaper") == 500,
+		"Reaper 战物理边界 **500×500**（第 111 轮：100 -> 500）", fails)
 	var pr98: Array = Level.play_rect("reaper")
-	# 第 102 轮用户口径：「把宽改为 41」-> 65×81 变成 41×81
-	_expect(pr98[0] == 0 and pr98[1] == 0 and pr98[2] == 41 and pr98[3] == 65,
-		"Reaper 战可到达格子 41×65（第 103 轮：高 81 -> 65，实际 %s）" % [str(pr98)], fails)
+	# ⚠ 第 111 轮：可到格**不变**（仍 41×65），但整块**居中** -> 原点从 (0,0) 平移到 (229,217)
+	_expect(pr98[0] == 229 and pr98[1] == 217 and pr98[2] == 41 and pr98[3] == 65,
+		"Reaper 战可到达格子仍 41×65、但**居中**在 (229,217)（实际 %s）" % [str(pr98)], fails)
 	_expect(Level.play_w("reaper") == 41 and Level.play_h("reaper") == 65, "41×65 的宽高读数一致", fails)
 	# 第 102 轮用户口径：「初始位置排在长的两端（即左下角和右上角）」
 	var rk98: Vector2i = Level.king_cell(UnitData.Side.PLAYER, "reaper")
-	_expect(rk98 == Vector2i(4, 4),
-		"玩家老国王在**左下角** (4,4)（第 102 轮斜对角布局，实际 %s）" % [str(rk98)], fails)
-	_expect(Level.king_cell(UnitData.Side.ENEMY, "reaper") == Vector2i(36, 60),
-		"Reaper 在**右上角** (36,60)（第 103 轮地图 41×65，实际 %s）" % [str(Level.king_cell(UnitData.Side.ENEMY, "reaper"))], fails)
+	_expect(rk98 == Vector2i(233, 221),
+		"玩家老国王在可到区**左下角** (233,221)（= 原 (4,4) + 平移，实际 %s）" % [str(rk98)], fails)
+	_expect(Level.king_cell(UnitData.Side.ENEMY, "reaper") == Vector2i(265, 277),
+		"Reaper 在可到区**右上角** (265,277)（= 原 (36,60) + 平移，实际 %s）" % [str(Level.king_cell(UnitData.Side.ENEMY, "reaper"))], fails)
 	# Reaper body_r=3 不能出界（x 0~40 / y 0~80）
 	var rkc: Vector2i = Level.king_cell(UnitData.Side.ENEMY, "reaper")
-	_expect(rkc.x + 3 <= 40 and rkc.y + 3 <= 65, "Reaper 圆柱（半径 3）没有伸出可到达区（41×65）", fails)
+	var prr: Array = Level.play_rect("reaper")
+	_expect(rkc.x + 3 <= prr[0] + prr[2] - 1 and rkc.y + 3 <= prr[1] + prr[3] - 1,
+		"Reaper 圆柱（半径 3）没有伸出可到达区（%s）" % [str(prr)], fails)
 	# 双方沿对角相向推进（不再是纯 +x / -x）
 	_expect(Level.in_play(rk98, "reaper"), "老国王站在可到达区内", fails)
 	var rpads98: Array[Vector2i] = Level.pad_cells(UnitData.Side.PLAYER, "reaper")
-	_expect(rpads98.size() == 2 and rpads98[0] == Vector2i(2, 12) and rpads98[1] == Vector2i(12, 2),
-		"两个公主 = 国王前 3 格 ± 左右各 5 格（第 102 轮，实际 %s）" % [str(rpads98)], fails)
+	_expect(rpads98.size() == 2 and rpads98[0] == Vector2i(231, 229) and rpads98[1] == Vector2i(241, 219),
+		"两个公主 = 国王前 3 格 ± 左右各 5 格（含 +229/+217 平移，实际 %s）" % [str(rpads98)], fails)
 	_expect(Level.respawn_cells(UnitData.Side.PLAYER, "reaper").size() == 5,
 		"玩家侧五个英雄重生点（用户口径「对应的五个重生的」）", fails)
 	# 第 102 轮：敌方出生点改到 Reaper 前方 7 格（不再生成在它身体底下），数量 3
@@ -1449,11 +1453,11 @@ func _initialize() -> void:
 		"模板 C = 三名萨尼铁塔（第 103 轮起模板 [1] 改成三个投掷手）", fails)
 	_expect(Reaper.SUMMON_KITS[1]["names"] == ["Airburst mortar", "Airburst mortar", "Airburst mortar"],
 		"模板 B = 三个投掷手（第 103 轮新增；投掷手自带 carpet_bomb 技能）", fails)
-	# 加权 70 / 20 / 10（第 103 轮用户口径）
-	_expect(int(Reaper.SUMMON_KITS[0].get("weight", 0)) == 70
-		and int(Reaper.SUMMON_KITS[1].get("weight", 0)) == 20
+	# ⚠ 第 111 轮用户口径：「将 REAPER 刷**三个投掷手**的概率**增加到 80%**，另外两个模板**各 10%**」
+	_expect(int(Reaper.SUMMON_KITS[0].get("weight", 0)) == 10
+		and int(Reaper.SUMMON_KITS[1].get("weight", 0)) == 80
 		and int(Reaper.SUMMON_KITS[2].get("weight", 0)) == 10,
-		"模板权重 = 70 / 20 / 10（实际 %d/%d/%d）" % [
+		"模板权重 = **10 / 80 / 10**（第 111 轮：投掷手 80%%，实际 %d/%d/%d）" % [
 			int(Reaper.SUMMON_KITS[0].get("weight", 0)),
 			int(Reaper.SUMMON_KITS[1].get("weight", 0)),
 			int(Reaper.SUMMON_KITS[2].get("weight", 0))], fails)

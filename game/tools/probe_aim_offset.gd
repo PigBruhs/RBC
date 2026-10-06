@@ -44,10 +44,12 @@ func _run(s: Node) -> void:
 	if cart == null or big == null:
 		return
 
-	cart.cell = Vector2i(20, 20)
-	cart.visual.position = Vector3(20.5, cart.visual.position.y, 20.5)
-	big.cell = Vector2i(20, 34)                     # 正 +y 方向 14 格
-	big.visual.position = Vector3(20.5, big.visual.position.y, 34.5)
+	# ⚠ 第 111 轮：reaper 地图改成 500×500、可到区居中在 [229,217,41,65]，
+	#   所以测试坐标必须落在那块里（原来的 (20,20) 已经在可到区**外面**了）
+	cart.cell = Vector2i(240, 230)
+	cart.visual.position = Vector3(240.5, cart.visual.position.y, 230.5)
+	big.cell = Vector2i(240, 244)                     # 正 +y 方向 14 格
+	big.visual.position = Vector3(240.5, big.visual.position.y, 244.5)
 	var m: LunchboxModel = s._lb_model(cart)
 
 	print("\n[1] 基准点几何：`_lb_origin` vs `_lb_center` vs 车体几何中心")

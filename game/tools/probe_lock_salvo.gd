@@ -58,7 +58,8 @@ func _run(s: Node) -> void:
 	# 把敌人放到 **56 格**（远超车的曼哈顿射程 24）
 	cart.cell = Vector2i(10, 10)
 	cart.visual.position = Vector3(10.5, cart.visual.position.y, 10.5)
-	foe.cell = Vector2i(10, 66)
+	# ⚠ 第 111 轮：车的射程 24 -> **64**，所以"射程外"要放到 64 之外
+	foe.cell = Vector2i(10, 110)
 	foe.visual.position = Vector3(10.5, foe.visual.position.y, 66.5)
 	var md: int = absi(cart.cell.x - foe.cell.x) + absi(cart.cell.y - foe.cell.y)
 	print("      车 @%s ｜ 敌人 @%s ｜ 曼哈顿距离 %d（车射程 1-%d）" % [
@@ -100,8 +101,8 @@ func _run(s: Node) -> void:
 		if logs[i].find("齐射第") >= 0:
 			waves += 1
 	# ⚠ 口径已变更（用户原话）：「从 3 波调到 **12 波**」
-	print("      出膛波数 = %d（新模板现应为 %d）" % [waves, 12])
-	_ok(waves == 12, "**连发 12 波**（实际 %d）" % waves)
+	print("      出膛波数 = %d（新模板现应为 %d）" % [waves, 26])
+	_ok(waves == 26, "**连发 26 波**（第 111 轮：12 -> 26）" % waves)
 
 	print("\n[3] **不甩头**：3 波的 theta 必须完全相同")
 	var thetas: Array[float] = []

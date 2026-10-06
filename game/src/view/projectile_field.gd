@@ -227,7 +227,12 @@ func step(delta: float) -> void:
 		#    可竞技场只是把边界扩到 100×100；敌方直升机在上边（y 大）朝下打，
 		#    "瞄准×2 + 散布"很容易把落点算到 y<0，于是整发凭空消失（没有空爆/直击/破片）。
 		var q := p.pos()
-		if q.x < 0.0 or q.y < 0.0 or q.x > float(grid_w) or q.y > float(grid_h):
+		# ⚠ 第 111 轮用户报障：「**导弹一旦飞出地图就脱锁了**」——
+		#   **制导弹**（`steering`，= 被雷达引导的火箭）**不受地图边界回收**：
+		#   它有自己的航程上限（`ROCKET_GUIDE_MAX_DIST` = 256 格）与引爆规则，
+		#   飞到地图外只意味着"还在飞"，不该被当成出界回收
+		#   （回收会让它看起来"脱锁 / 凭空消失"）。
+		if not p.steering and (q.x < 0.0 or q.y < 0.0 or q.x > float(grid_w) or q.y > float(grid_h)):
 			var cq := Vector2(clampf(q.x, 0.0, float(grid_w)), clampf(q.y, 0.0, float(grid_h)))
 			p.removed_at = cq
 			if node != null and is_instance_valid(node):

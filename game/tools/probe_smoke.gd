@@ -41,7 +41,8 @@ func _run(s: Node) -> void:
 	print("\n[1] 模块独立行为：冒烟 / 变淡 / 两秒散去")
 	var tr := SmokeTrail.make(s)
 	_ok(tr.t_pool() > 0, "对象池已建（%d 个）" % tr.t_pool())
-	_ok(absf(tr.t_life_const() - 2.0) < 1e-6, "**寿命 = 2.0 秒（用户口径）**")
+	# ⚠ 第 111 轮：尾迹消散 2 秒 -> **1 秒**
+	_ok(absf(tr.t_life_const() - 1.0) < 1e-6, "**寿命 = 1.0 秒（用户口径：缩短至 1 秒）**")
 	# 1 秒里按 60fps 喂一个固定发射点 -> 应当冒出一批
 	var p0 := Vector3(10.0, 2.0, 10.0)
 	for i in 60:
@@ -54,11 +55,11 @@ func _run(s: Node) -> void:
 	_ok(tr.t_min_alpha_live() < tr.t_max_alpha() - 0.1,
 		"**同一条轨迹上浓度不同 = 在逐渐变淡**（%.3f < %.3f）" % [
 			tr.t_min_alpha_live(), tr.t_max_alpha()])
-	# 停止发射，等 2.1 秒 -> 应当全部散尽
-	for i in 126:
+	# 停止发射，等 1.1 秒 -> 应当全部散尽（寿命 1 秒）
+	for i in 72:
 		tr.step(1.0 / 60.0, [])
-	print("      停止发射并等 2.1 秒：活着的烟雾 = %d" % tr.t_live_count())
-	_ok(tr.t_live_count() == 0, "**两秒后全部散去**（剩 %d 颗）" % tr.t_live_count())
+	print("      停止发射并等 1.1 秒：活着的烟雾 = %d" % tr.t_live_count())
+	_ok(tr.t_live_count() == 0, "**一秒后全部散去**（剩 %d 颗）" % tr.t_live_count())
 	tr.queue_free()
 
 	print("\n[2] 场景接线：**火箭飞过就冒烟**")

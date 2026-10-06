@@ -134,7 +134,7 @@ const UNITS := [
 		"energy_max": 12, "move": 32,
 		"rest_power": 0, "rest_armor": 0, "rest_energy": 6,
 		"pr": 0, "mr": 0,
-		"rng_min": 1, "rng_max": 24,
+		"rng_min": 1, "rng_max": 64,
 		"controllable": false,
 		"body_r": 0.5,
 		"body_h": 1.0,

@@ -590,7 +590,7 @@ const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
 ## 【锁定齐射】的波数。
 ## ⚠ 口径变更（第 111 轮用户原话）：「齐射车普攻雷达锁定目标的攻击模板**从 3 波调到 12 波**」
 ##   （先前是"不甩头但是只连发 3 波"；现在**不甩头**保留、波数回到与普通齐射相同的 12 波）
-const LUNCHBOX_LOCK_WAVES := 12
+const LUNCHBOX_LOCK_WAVES := 26
 
 
 func _radar_guide_rockets(delta: float) -> void:

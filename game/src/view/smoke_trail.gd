@@ -9,7 +9,8 @@ class_name SmokeTrail
 extends Node3D
 
 const POOL := 160                     # 池容量（够 1~2 发火箭的 2 秒拖尾）
-const LIFE := 2.0                     # 每颗烟的生命（用户口径：**两秒**散去）
+## ⚠ 第 111 轮用户口径改：「尾迹消散时间**缩短至 1 秒**」—— 2.0 -> **1.0**
+const LIFE := 1.0
 const EMIT_GAP := 0.035               # 冒烟间隔（秒）
 const R0 := 0.16                      # 初始半径（格）
 const R1 := 0.55                      # 消散时的半径（格）—— 看着像"散开"
