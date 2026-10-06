@@ -1388,9 +1388,12 @@ func _radar_begin_lock(radar: Unit, target_name: String) -> void:
 	var dist := GridMath.unit_pos(radar).distance_to(GridMath.unit_pos(tgt))
 	var st := _radar_state(radar)
 	Radar.begin_lock(st, target_name, dist)
-	_radar_log(radar, "开始锁定 %s（距离 %.1f 格 -> 需 %d 回合）" % [
+	_radar_log(radar, "开始锁定 %s（距离 %.1f 格 -> 还需 %d 个自己的回合）" % [
 		target_name, dist, st.lock_total])
-	_radar_tick_for(radar)
+	# ⚠ 第 111 轮用户口径更正：「我之前说的 81 = 5 回合，**是指开始锁定后再过五回合**」——
+	#   所以**选定当回合不减**：`begin_lock` 之后**不再**立刻 tick。
+	#   （原先"选定当回合立刻 -1"是我按"81 -> 5 含选定回合"倒推的；用户澄清后作废。
+	#    于是 81 格 = 选定后还要过 **5** 个自己的回合才锁定。）
 
 
 ## 只对"当前这一台"做一次回合 tick（不复用 `_radar_on_turn_begin`，因为那个会查目标存活）

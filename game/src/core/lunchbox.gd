@@ -40,8 +40,8 @@ const TURRET_SIDE_OFFSET := 0.6
 
 # ── 齐射（普攻）─────────────────────────────────────────────────────────────
 const SALVO_WAVES := 12              # 一次普攻 12 波（用户口径）
-const SALVO_PER_WAVE := 12           # 每波 12 发（第 110 轮用户口径：6 -> 12）
-const SALVO_TOTAL := 144             # 12 × 12 = 144 发
+const SALVO_PER_WAVE := 6            # 每波 6 发（第 111 轮用户口径：12 -> **改回 6**）
+const SALVO_TOTAL := 72              # 12 × 6 = 72 发
 const SALVO_GAP := 0.133             # 波间隔 133ms（用户口径）
 const SALVO_COOLDOWN := 3.0          # 每 12 轮冷却 3 秒
 ## 散布半径（格）。第 106 轮 1.0 -> **第 110 轮用户口径 0.5**（"散布缩小至 0.5 格试试"）。

@@ -67,7 +67,9 @@ func _run(s: Node) -> void:
 	print("      距离 %.1f 格 -> 需 %d 回合；选定后 lock_left = %d" % [dist, want, st.lock_left])
 	_ok(st.lock_name == foe.name, "锁定目标已登记（%s）" % st.lock_name)
 	_ok(st.lock_total == want, "回合总数 = ceil(距离/20)（%d）" % st.lock_total)
-	_ok(st.lock_left == want - 1, "**选定当回合立刻 -1**（%d -> %d）" % [want, st.lock_left])
+	# ⚠ 第 111 轮用户口径更正：「81 = 5 回合」**是指开始锁定后再过五回合** ->
+	#   选定当回合**不减**，`lock_left` 就等于总回合数。
+	_ok(st.lock_left == want, "**选定当回合不减**（lock_left = 总回合数 %d）" % want)
 
 	print("\n[2] 每轮到自己再 -1，到 0 已锁定")
 	var left_before := st.lock_left
