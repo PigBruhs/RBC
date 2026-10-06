@@ -161,12 +161,16 @@ func _run(s: Node) -> void:
 			print("      已锁定：左上='%s' ｜ 右上='%s'" % [hud.t_left_text(), hud.t_right_text()])
 			_ok(hud.t_right_text() == "已锁定" and hud.t_left_text().begins_with("0"),
 				"**已锁定**：右上'已锁定'、左侧'0' + 距离")
-			# 字号随框大小（Reaper 那种大框）等比放大
+			# 字号随框放大，但**框宽 ÷4 且不小于 1**（用户口径：Reaper 上字体缩到 1/4）
 			var small: int = hud.t_left_font_size()
 			hud.set_size(Vector2(6.0, 6.0))            # Reaper 体半径 3 -> 6×6
 			var big: int = hud.t_left_font_size()
 			print("      字号：1×1 框 = %d ｜ 6×6 框 = %d" % [small, big])
-			_ok(big == small * 6, "**字号随框大小等比放大**（%d -> %d = ×6）" % [small, big])
+			_ok(big == int(round(float(small) * 1.5)),
+				"**Reaper 的字号 = 普通字号的 1.5 倍**（%d -> %d；原先是 ×6 = %d，缩到 1/4）" % [
+					small, big, small * 6])
+			_ok(small == RadarHud.LABEL_PX_REF,
+				"**普通角色字号不变**（%d，用户没要求动它）" % small)
 			hud.set_size(RadarHud.size_for(foe3))      # 还原
 			# HUD 会**面向相机**（法线与相机同向）
 			hud.face_camera(s._camera)

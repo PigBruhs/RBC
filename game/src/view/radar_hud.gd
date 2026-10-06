@@ -17,6 +17,8 @@ extends Node3D
 const COLOR_HUD := Color(0.25, 1.0, 0.32)      # 荧光绿
 const THICK := 0.045                            # 边框粗细（格）
 const LABEL_PX := 46                            # Label3D 的字号
+## 字号基准的公开引用（探针用）：普通角色（1×1 框）拿到的就是它
+const LABEL_PX_REF := 46
 const MIN_SIZE := 1.0                           # 最小 1×1（普通角色）
 
 
@@ -66,9 +68,15 @@ func _build(size: Vector2) -> void:
 	_lab_right.position = Vector3(w * 0.5, ht * 0.5 + 0.16 * sc, 0)
 
 
-## 字号倍率 = 框宽（≥1）。普通角色 1×1 -> 1；Reaper（体半径 3）-> 6
+## 字号倍率。
+## ⚠ 用户口径迭代：
+##   ① 「锁定框变大时（比如锁定 Reaper 时）字也要对应变大」-> 我先做成 `= 框宽`（Reaper 6×6 -> ×6）
+##   ② 「在 Reaper 上**字体**太大了，**缩小到四分之一**」-> 框宽 ÷4，并保证普通角色不被缩小
+## 所以：`scale = max(1, 框宽 / 4)`
+##   · 普通角色（1×1）-> max(1, 0.25) = **1**（字号不变，仍是 46）
+##   · Reaper（6×6）  -> 6/4 = **1.5**（字号 = 46 × 1.5 = 69，正是原来 276 的 1/4）
 func _scale() -> float:
-	return maxf(1.0, _size.x)
+	return maxf(1.0, _size.x / 4.0)
 
 
 func _bar(pos: Vector3, box: Vector3) -> void:
