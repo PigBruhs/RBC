@@ -40,8 +40,8 @@ func _run(s: Node) -> void:
 		return
 	print("      属性：力量 %d 护甲 %d 移动 %d 精力 %d" % [
 		radar.power_cur / 1000, radar.armor_cur / 1000, radar.move, radar.energy_points()])
-	_ok(radar.power_max / 1000 == 40 and radar.armor_max / 1000 == 40 and radar.move == 6
-		and radar.energy_max == 0, "40 力 / 40 甲 / 移动 6 / 精力 0（数据表口径）")
+	_ok(radar.power_max / 1000 == 40 and radar.armor_max / 1000 == 40 and radar.move == 32
+		and radar.energy_max == 0, "40 力 / 40 甲 / 移动 32 / 精力 0（移动已与齐射车一致）")
 
 	print("\n[1] 选定锁定 -> 同回合立刻 -1（81 格应落在 5 回合）")
 	# 找一个离雷达 81 格左右的敌人；找不到就用实际距离校对

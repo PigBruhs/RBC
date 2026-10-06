@@ -78,7 +78,9 @@ func setup(u: Unit) -> void:
 	# 用户口径（第 86 轮）：直升机移动 2.5 格/秒（其余 2 格/秒）
 	# 用户口径（第 110 轮）：**车的移动速度变成现在的四倍**（2 -> 8 格/秒）
 	walk_speed = HELI_TILES_PER_SEC if h > 0.0 else WALK_TILES_PER_SEC
-	if u.name == LunchboxModel.LUNCHBOX_NAME:
+	# 第 111 轮用户口径：**雷达车的移动距离与移动速度都改成与齐射车一致**
+	#   （移动距离 = 数据行 `move` 已改成 32；移动速度 = 这里共用同一个 `CART_TILES_PER_SEC`）
+	if u.name == LunchboxModel.LUNCHBOX_NAME or u.name == RadarModel.RADAR_NAME:
 		walk_speed = CART_TILES_PER_SEC
 	_build_model()
 	_build_orb()

@@ -145,7 +145,7 @@ const UNITS := [
 		"side": Side.PLAYER,
 		"role": Role.RANGED,
 		"power": 40, "armor": 40, "armor_break": 0,
-		"energy_max": 0, "move": 6,
+		"energy_max": 0, "move": 32,
 		"rest_power": 0, "rest_armor": 0, "rest_energy": 0,
 		"pr": 0, "mr": 0,
 		"rng_min": 0, "rng_max": 0,
