@@ -83,6 +83,12 @@ func perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Placea
 		AttackProfile.BASIC_SHELL:
 			return basic_shell(u, aim)
 		AttackProfile.BASIC_SALVO:
+			# ⚠ 第 111 轮用户口径：**当目标"被雷达锁定、且自己是那台雷达的连接友军"时，
+			#   换用【锁定齐射】模板**（无视射程 / 不甩头 / 只连发 3 波 / 散布 0.5）。
+			#   用户原话：「你需要确保 1. **无视射程限制**（子弹飞不到无所谓，但一定要打出去）
+			#   2. **不再甩头单纯对准目标连发 3 波**」
+			if target != null and _st._radar_may_target(u, target):
+				return basic_salvo_locked(u, aim, target)
 			return basic_salvo(u, aim)
 		AttackProfile.BASIC_LOCK:
 			# 第 111 轮：雷达午餐盒的普攻 = **纯锁定**（无伤害、无距离限制）。
@@ -158,6 +164,15 @@ func basic_salvo(u: Unit, aim: Vector2) -> bool:
 	return true
 
 
+## 【锁定齐射】—— 第 111 轮新模板（用户口径）
+## 「当检测到选择目标**被雷达锁定且自己连接到雷达**时，**无视射程限制**
+##   （子弹飞不到无所谓，但一定要打出去）并用**新普攻模板**覆盖原本的甩头模板；
+##   新普攻模板：20 格处散布 0.5 格，**不甩头**但是**只连发 3 波**」
+func basic_salvo_locked(u: Unit, aim: Vector2, t: Unit) -> bool:
+	_st._lunchbox_salvo_locked(u, aim, t)
+	return true
+
+
 ## 连发实现。间隔依次出膛，**每发各自判定命中**，
 ## 落点吃"玩家侧线性散布"（r = 距离/12，12 格 ≈ 1 格）——所以选中目标也不一定打中。
 ## ⚠ 第 106 轮用户口径：「**我需要立体球状散布**」——
@@ -216,6 +231,10 @@ func can_aim_unit(t: Unit) -> bool:
 	#   而它的数据行射程是 `0-0`（没有武器）-> `in_range_of` 必然为假。
 	#   所以锁定模板**跳过射程判定**；其余模板照旧。
 	if AttackProfile.basic_of(_st.active) == AttackProfile.BASIC_LOCK:
+		return true
+	# ⚠ 第 111 轮用户口径：**目标被雷达锁定、且自己是那台雷达的连接友军时，无视射程限制**
+	#   （`probe_cart_attack` / 用户实测："点第一下没反应" 就是被下面这句 `in_range_of` 拦掉的）。
+	if _st._radar_may_target(_st.active, t):
 		return true
 	return _st.active.in_range_of(t.cell) and Targeting.melee_reaches(_st.active, t)
 

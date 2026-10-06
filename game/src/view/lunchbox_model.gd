@@ -271,18 +271,13 @@ func _build_turret() -> void:
 	p.position = Vector3(0.0, 0.0, BARREL_LEN * (0.5 - BARREL_BACK_FRAC))
 	_barrel.add_child(p)
 	_prism_mesh = p
-	# 炮口：棱柱最前端再探出一小截细管（纯装饰，让"枪口"看得出来）
-	var tube := CylinderMesh.new()
-	tube.radial_segments = 10
-	tube.top_radius = MUZZLE_R
-	tube.bottom_radius = MUZZLE_R
-	tube.height = MUZZLE_LEN
-	var t := MeshInstance3D.new()
-	t.mesh = tube
-	t.material_override = _metal_mat
-	t.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-	t.position = Vector3(0.0, 0.0, BARREL_LEN * (1.0 - BARREL_BACK_FRAC) + MUZZLE_LEN * 0.5)
-	_barrel.add_child(t)
+	# ⚠ 第 111 轮用户口径：「**移除齐射车炮管的黑色正六边形棱柱顶面中间凸出来的灰色圆柱体，
+	#   使炮管前后对称**，这样它用顶面或底面开枪都没有违和感」
+	#   —— 那根灰色细管是第 105 轮加的"炮口装饰"（`MUZZLE_R` 细圆柱），
+	#   它挂在棱柱的**前端**，从正前方看正好落在六边形**顶面中心**，像"顶面凸出来一根"；
+	#   而且让它前后不对称。用户要求删掉 -> 棱柱回归**纯六棱柱**，前后一致。
+	#   （常量 `MUZZLE_R` / `MUZZLE_LEN` 保留：`muzzle_local_at()` 仍用 `MUZZLE_LEN/2`
+	#    推算炮口位置，删掉的只是**网格**，逻辑口径不变。）
 
 
 # ── 车顶右半边：巡飞弹发射器（套沙盒那台的造型：底座箱 + 上仰发射管 + 青色光环）──

@@ -567,6 +567,9 @@ func _radar_add_locked_targets(_unused: bool, atk: Unit, out: Dictionary) -> voi
 ##     · 初始偏差大 -> 一直在拐、但追不上 -> **打不中**（正是用户要的手感）
 const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
 
+## 【锁定齐射】的波数（第 111 轮用户口径：「不甩头但是**只连发 3 波**」）
+const LUNCHBOX_LOCK_WAVES := 3
+
 
 func _radar_guide_rockets(delta: float) -> void:
 	var states := _radar_all_states()
@@ -1799,6 +1802,66 @@ func _lb_live_target(u: Unit, label: String) -> Dictionary:
 
 
 ## 普攻（`basic_attack.basic_salvo` 分派到这里）：**12 波 × 6 发**，间隔 133ms。
+## 目标是否"被某台雷达锁定、且 `atk` 是那台雷达的连接友军"（第 111 轮难点 2 的唯一判据）。
+func _radar_may_target(atk: Unit, t: Unit) -> bool:
+	if atk == null or t == null:
+		return false
+	return Radar.may_target(_radar_all_states(), atk.name, t.name)
+
+
+## 【锁定齐射】—— 第 111 轮新模板（用户口径）：
+## 「1. **无视射程限制**（子弹飞不到无所谓，但一定要打出去）
+##   2. **不再甩头**，单纯对准目标连发 **3 波**；20 格处散布 0.5 格」
+## 与普通齐射的三点差别：① 不夹 `SALVO_RANGE`（射程外也照打）② 不摇 ±10°（单一中轴）
+## ③ 只有 3 波。
+func _lunchbox_salvo_locked(u: Unit, fpos: Vector2, tgt: Unit) -> void:
+	var st := _lb_state(u)
+	var aim: Lunchbox.Aim = st["aim"]
+	var heat: Lunchbox.Heat = st["heat"]
+	_lb_salvo_u = u
+	var base := _lb_origin(u)
+	var dir := fpos - base
+	if dir.length() < 0.001:
+		dir = Vector2(0.0, 1.0)
+	# ⚠ **不夹射程**：用户口径"子弹飞不到无所谓，但一定要打出去"。
+	#   只夹一个"别飞出地图"的物理上限（免得弹道物在边界外一直飘）。
+	var dist := clampf(dir.length(), 1.0, float(maxi(PW, PH)) * 2.0)
+	var base_theta := rad_to_deg(dir.angle())
+	var tgt_y: float = Targeting.aim_height(tgt) if tgt != null else 0.5
+	_log("  🚙 %s **锁定齐射**：%d 波 × %d 发（对准 %.1f°，散布 %.1f 格，距离 %.1f 格 —— **无视射程**）" % [
+		u.name, LUNCHBOX_LOCK_WAVES, Lunchbox.SALVO_PER_WAVE, base_theta,
+		Lunchbox.BASIC_SPREAD_R, dist])
+	# 先把方向机转到目标（有延迟、看得见转塔），转到位才开始
+	var guard := 0
+	while guard < 240:
+		var at := Lunchbox.step_aim(aim, base_theta,
+			Lunchbox.wave_phi(base_theta, 0, dist, LunchboxModel.TURRET_Y, tgt_y),
+			0.02, -1.0, -1.0, 6.0)
+		var mv := _lb_model(u)
+		if mv != null:
+			mv.set_aim(aim.theta, aim.phi)
+		if at:
+			break
+		await get_tree().create_timer(0.02).timeout
+		guard += 1
+	for i in LUNCHBOX_LOCK_WAVES:
+		# ⚠ **不甩头**：中轴恒为 `base_theta`，不再叠加 `wave_theta` 的 ±10° 摇动。
+		Lunchbox.step_aim(aim, base_theta,
+			Lunchbox.wave_phi(base_theta, i, dist, LunchboxModel.TURRET_Y, tgt_y),
+			Lunchbox.SALVO_GAP, -1.0, -1.0, 6.0)
+		var m := _lb_model(u)
+		if m != null:
+			m.set_aim(aim.theta, aim.phi)
+		_lb_fire_wave(u, st, i, tgt_y, dist, Lunchbox.BASIC_SPREAD_R)
+		Lunchbox.heat_fire(heat)
+		if i < LUNCHBOX_LOCK_WAVES - 1:
+			await get_tree().create_timer(Lunchbox.SALVO_GAP).timeout
+	_lb_salvo_u = null
+	if active == u:
+		_finish_turn()
+	_log("  🚙 %s 锁定齐射结束：%d 波全部出膛" % [u.name, LUNCHBOX_LOCK_WAVES])
+
+
 ## 以"车 → 瞄准点"连线为中轴，theta 在 -10°~+10° 左右摇；phi 每波按距离重算（保证真能打到）。
 ## 打完 12 波 -> 冷却 3 秒。全部出膛即结束回合（照火箭齐射的套路）。
 func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
@@ -3191,6 +3254,10 @@ func t_menu_attack() -> void:
 
 func _lb_salvo_busy() -> bool:
 	return _lb_salvo_u != null
+
+
+func can_aim_now(t: Unit) -> bool:
+	return attack.can_aim_unit(t)
 
 
 func t_unit_at(cell: Vector2i) -> Unit:
