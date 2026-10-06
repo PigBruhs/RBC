@@ -567,8 +567,10 @@ func _radar_add_locked_targets(_unused: bool, atk: Unit, out: Dictionary) -> voi
 ##     · 初始偏差大 -> 一直在拐、但追不上 -> **打不中**（正是用户要的手感）
 const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
 
-## 【锁定齐射】的波数（第 111 轮用户口径：「不甩头但是**只连发 3 波**」）
-const LUNCHBOX_LOCK_WAVES := 3
+## 【锁定齐射】的波数。
+## ⚠ 口径变更（第 111 轮用户原话）：「齐射车普攻雷达锁定目标的攻击模板**从 3 波调到 12 波**」
+##   （先前是"不甩头但是只连发 3 波"；现在**不甩头**保留、波数回到与普通齐射相同的 12 波）
+const LUNCHBOX_LOCK_WAVES := 12
 
 
 func _radar_guide_rockets(delta: float) -> void:
@@ -583,6 +585,13 @@ func _radar_guide_rockets(delta: float) -> void:
 		if p.shot == null or p.shot.caster == null:
 			continue
 		var caster: Unit = p.shot.caster
+		# ⚠ 第 111 轮用户口径：「直升机火箭弹现在在有目标被雷达锁定时**只有到达了最大速度
+		#   才会开始引导**（不然现在初始速度很低所以基本上瞄哪里都能很快转向目标，
+		#   体现不出引导作用）」
+		#   火箭速度 v(s) = min(VMAX, V0 + k·s)，**在 `ROCKET_RAMP_DIST`(12) 格处达到 VMAX** ——
+		#   所以"飞满 12 格"就是"到达最大速度"的判据。飞满之前**完全不管**。
+		if p.flown_dist() < Ordnance.ROCKET_RAMP_DIST:
+			continue
 		# 找"已锁定、且把 caster 连着"的雷达车 -> 它的锁定目标就是引导目标
 		var tgt: Unit = null
 		for s in states:

@@ -99,8 +99,9 @@ func _run(s: Node) -> void:
 	for i in range(logs_before, logs.size()):
 		if logs[i].find("齐射第") >= 0:
 			waves += 1
-	print("      出膛波数 = %d（新模板应为 %d，一般普攻是 12）" % [waves, 3])
-	_ok(waves == 3, "**只连发 3 波**（实际 %d）" % waves)
+	# ⚠ 口径已变更（用户原话）：「从 3 波调到 **12 波**」
+	print("      出膛波数 = %d（新模板现应为 %d）" % [waves, 12])
+	_ok(waves == 12, "**连发 12 波**（实际 %d）" % waves)
 
 	print("\n[3] **不甩头**：3 波的 theta 必须完全相同")
 	var thetas: Array[float] = []

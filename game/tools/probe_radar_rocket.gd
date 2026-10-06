@@ -79,14 +79,27 @@ func _run(s: Node) -> void:
 	var near_to := Vector2(10.5, 10.5) + small_off * 16.0
 	var p := Ordnance.make_rocket(heli, from, near_to, false, s.rng)
 	s.field.register(p)
+	# ⚠ 第 111 轮用户口径：**只有到达最大速度才开始引导**。
+	#   本探针是"手动摆一发火箭再喂 dt"，所以必须**先把进度推到飞满 `ROCKET_RAMP_DIST`**，
+	#   否则引导根本不该生效（那正是新加的那道闸）。
+	#   （`_radar_guide_rockets` 只改落点方向、**不推进进度**；进度由 `field.step()` 走，
+	#    所以这里手动推 `p.t` 让 `flown_dist()` 越过阈值。）
+	_to_ramp(p)
+	print("      先飞到最大速度：flown=%.1f 格（阈值 %.1f）" % [
+		p.flown_dist(), Ordnance.ROCKET_RAMP_DIST])
 	var a0 := _angle_to_target(p, foe)
 	# 推 12 帧（每帧 1/60 秒）
 	for i in 12:
 		s._radar_guide_rockets(1.0 / 60.0)
 	var a1 := _angle_to_target(p, foe)
-	print("      小偏差：与目标的夹角 %.1f° -> %.1f°" % [a0, a1])
+	print("      小偏差：12 帧后夹角 %.1f° -> %.1f°" % [a0, a1])
 	_ok(a1 < a0 - 5.0, "**小偏差被吸附**（夹角收敛 %.1f° -> %.1f°）" % [a0, a1])
-	_ok(a1 < 3.0, "收敛到很接近目标方向（%.1f°）" % a1)
+	# 再给它足够时间（12 帧只是 0.2 秒，转角上限 80°/s -> 只有 16°）
+	for i in 60:
+		s._radar_guide_rockets(1.0 / 60.0)
+	var a2 := _angle_to_target(p, foe)
+	print("      再推 60 帧：夹角 -> %.1f°" % a2)
+	_ok(a2 < 3.0, "**最终收敛到目标方向**（%.1f°）" % a2)
 	var d_small := _rocket_landing_dist(p, foe)
 	print("      12 帧后落点仍偏 %.2f 格" % d_small)
 
@@ -96,12 +109,16 @@ func _run(s: Node) -> void:
 	var far_to := Vector2(10.5, 10.5) + big_off * 16.0
 	var q := Ordnance.make_rocket(heli, from, far_to, false, s.rng)
 	s.field.register(q)
+	_to_ramp(q)                       # ⚠ 同样要先到最大速度，引导才生效
 	var b0 := _angle_to_target(q, foe)
 	for i in 12:
 		s._radar_guide_rockets(1.0 / 60.0)
 	var b1 := _angle_to_target(q, foe)
 	print("      大偏差：与目标的夹角 %.1f° -> %.1f°" % [b0, b1])
-	_ok(b1 < b0 - 5.0, "**确实往目标拐了**（夹角减小 %.1f° -> %.1f°）" % [b0, b1])
+	# ⚠ 注意：新口径下引导要等"飞满 12 格"才开始，而打到这儿火箭已经离落点很近，
+	#   几何被压缩 -> 同样的每帧转角在**夹角**上只显出几度。所以阈值取 2°（> 0 即可证明确实在拐）；
+	#   **用户真正要的那条是下面的"追不上"**，那个才是手感判据。
+	_ok(b1 < b0 - 2.0, "**确实往目标拐了**（夹角减小 %.1f° -> %.1f°）" % [b0, b1])
 	_ok(b1 > 30.0, "**但追不上**（仍然偏 %.1f° > 30°）—— 正是用户要的手感" % b1)
 	# 转角上限：12 帧最多转 80°/s × 0.2s = 16°
 	var turned := b0 - b1
@@ -112,13 +129,24 @@ func _run(s: Node) -> void:
 	s.clear_projectiles()
 	var r := Ordnance.make_rocket(heli, from, near_to, false, s.rng)
 	s.field.register(r)
+	_to_ramp(r)                       # 先到最大速度（这样"没锁 -> 不转"才是有意义的对照）
+	var r0 := _angle_to_target(r, foe)
 	Radar.clear_lock(rst)
 	for i in 6:
 		s._radar_guide_rockets(1.0 / 60.0)
-	_ok(absf(_angle_to_target(r, foe) - a0) < 0.01,
-		"**雷达没锁定时火箭方向不变**（%.1f°）" % _angle_to_target(r, foe))
+	var r1 := _angle_to_target(r, foe)
+	_ok(absf(r1 - r0) < 0.01,
+		"**雷达没锁定时火箭方向不变**（%.1f° -> %.1f°）" % [r0, r1])
 
 	print("\n── 雷达引导火箭探针：%d 项检查，失败 %d 项 ──" % [_n, _f])
+
+
+## 把火箭的进度推到"到达最大速度"（`ROCKET_RAMP_DIST`），引导才该生效
+func _to_ramp(p: Projectile) -> void:
+	var n := 0
+	while p.flown_dist() < Ordnance.ROCKET_RAMP_DIST and n < 4000:
+		p.t = minf(1.0, p.t + 0.005)
+		n += 1
 
 
 ## 火箭当前落点方向 与 "火箭 -> 目标" 方向的夹角（度）

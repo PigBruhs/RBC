@@ -208,6 +208,20 @@ func step(delta: float) -> void:
 				items.remove_at(i)
 				continue
 
+		# ⚠ 第 111 轮用户口径：「**64 格模型消失（64 格伤害为 0）**」——
+		#   子弹飞满 `Damage.BULLET_MAX_DIST`(64) 格就**移除**（不再是只有出界才消失）。
+		#   配合 `Damage.bullet_mult()` 在 64 格处正好衰减到 0：**看得见的距离 = 打得到的距离**。
+		#   （第 111 轮新加的"锁定齐射"会朝射程外的目标开火，没有这道闸它们会一直飞到地图边界。）
+		if p.is_bullet_class() and p.flown_dist() >= Damage.BULLET_MAX_DIST:
+			p.removed_at = p.pos()
+			if node != null and is_instance_valid(node):
+				node.position = Vector3(p.removed_at.x, p.height(), p.removed_at.y)
+			p.kill("bullet_max_dist")
+			_report(EV_FLOOR, p)
+			retire(e)
+			items.remove_at(i)
+			continue
+
 		# ① 出界：飞到边界处直接移除（保留飞到边界的动画，不越界）
 		#    第 93 轮：**炮弹类改成"就地引爆"** —— 用户口径第 83 轮就是"炮弹不再因出界消失"，
 		#    可竞技场只是把边界扩到 100×100；敌方直升机在上边（y 大）朝下打，
