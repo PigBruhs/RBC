@@ -759,10 +759,11 @@ func _initialize() -> void:
 	# 第 99 轮（用户口径）：圣萨尼**不再复活队友**，改成"每个回合随机投医疗包"
 	_expect(not bool(hs.get("revive", false)) and int(hs.get("uses_per_life", 0)) == 0,
 		"圣萨尼不再复活队友（旧口径已删除）", fails)
-	_expect(bool(hs.get("medkit", false)) and int(hs.get("heal_points", 0)) == 10,
-		"圣萨尼改为投医疗包、命中回 10 点（第 103 轮：20 -> 10）", fails)
-	_expect(Medkit.heal_points() == 10 and Medkit.heal_milli() == Rules.points_to_milli(10),
-		"Medkit 治疗量 = 10 点（第 103 轮，实际 %d）" % (Medkit.heal_milli() / 1000), fails)
+	# ⚠ 第 111 轮用户口径：「萨尼铁塔**回血增强到 40 点力量**」—— 10 -> 40
+	_expect(bool(hs.get("medkit", false)) and int(hs.get("heal_points", 0)) == 40,
+		"圣萨尼改为投医疗包、命中回 40 点（第 111 轮：10 -> 40）", fails)
+	_expect(Medkit.heal_points() == 40 and Medkit.heal_milli() == Rules.points_to_milli(40),
+		"Medkit 治疗量 = 40 点（第 111 轮，实际 %d）" % (Medkit.heal_milli() / 1000), fails)
 	# 口径：受伤 = **力量池未满**（医疗包恢复的是血，满血但掉甲的人补 0 会像 bug）
 	var probe_u := Unit.from_data(by_name["Gerald"])
 	_expect(not Medkit.is_wounded(probe_u), "满血的人不算受伤", fails)
@@ -784,9 +785,14 @@ func _initialize() -> void:
 		"子弹 12 格/秒，32 格消失", fails)
 	_expect(absf(bp.y0 - 0.5) < 0.001 and bp.apex <= 0.001, "子弹无重力、离地 0.5 格", fails)
 	_expect(bp.hit_tags.is_empty() and not bp.sentry_trigger, "子弹是箭矢类：不会被击落、不惊动哨兵", fails)
-	# 线性散布：12 格 -> 1 格
+	# 线性散布：12 格 -> 1 格（⚠ 第 111 轮一度被误改成 1/4，已恢复：
+	# 用户说的"散布降为四分之一"指的是**回血箭** `Medkit.SCATTER_R`，不是普攻连发）
 	_expect(absf(Spread.linear_radius(12.0) - 1.0) < 0.001, "玩家侧散布 12 格 = 1 格半径", fails)
 	_expect(absf(Spread.linear_radius(6.0) - 0.5) < 0.001, "线性：6 格 = 0.5 格", fails)
+	# ⚠ 第 111 轮：**回血箭**的散布（`Medkit.SCATTER_R`）降为原来的四分之一
+	_expect(absf(Medkit.SCATTER_R - 0.25) < 0.001, "回血箭散布 = 0.25 格（原 1.0）", fails)
+	_expect(absf(Medkit.scatter_radius(24.0) - 0.25) < 0.001, "回血箭散布与距离无关", fails)
+	_expect(Medkit.heal_points() == 40, "回血箭命中回血 = 40 点力量（原 10）", fails)
 	# 手榴弹：空中按炮弹（能被击落、惊动哨兵）
 	var gr := Ordnance.make_grenade(sani, Vector2(9.5, 9.5), true)
 	_expect(gr.hit_tags.has("arrow") and gr.sentry_trigger, "枪榴弹空中=炮弹：会被击落、惊动哨兵", fails)

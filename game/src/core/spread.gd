@@ -59,8 +59,12 @@ static func offset(dist: float, speed: float, rng: RngService) -> Vector2:
 
 ## ── 玩家侧线性散布（萨尼铁塔专用，用户口径）────────────────────────────────
 ## 与距离呈线性正相关，12 格时半径约 1 格 -> r = dist / 12
+## ⚠ 第 111 轮**撤销一次误改**：用户说的"散布降为四分之一"指的是**回血箭**
+##   （`Medkit.SCATTER_R`），**不是这里的普攻连发**。这里已恢复原值 12。
+const LINEAR_DIV := 12.0
+
 static func linear_radius(dist: float) -> float:
-	return maxf(0.0, dist) / 12.0
+	return maxf(0.0, dist) / LINEAR_DIV
 
 
 ## `mult`：**散布半径倍率**（第 111 轮接入雷达）。默认 1.0 = 原样，既有调用方逐字不变。

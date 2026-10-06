@@ -4,7 +4,7 @@
 # 为什么单独一个探针：这条被动**从"复活队友"整条换成了"投医疗包"**，而既有测试网里
 # 关于它的断言全是旧口径（playtest §33 ③ / run.gd 的 revive 断言）。新口径的三条特有行为
 # 在别处完全没有覆盖：
-#   ① 随机向一名"受伤的队友"投掷，命中回 10 点力量（不超上限；第 103 轮：20 -> 10）
+#   ① 随机向一名"受伤的队友"投掷，命中回 40 点力量（不超上限；第 111 轮：10 -> 40）
 #   ② 飞行中碰到**任何人**都给对方回血（含敌人）—— 友伤变成"友疗"
 #   ③ 没有受伤的队友 -> 不投（且有日志）
 #   ④ 同一颗种子 -> 选中同一个目标（确定性，走 RngService 而不是 randf）
@@ -120,7 +120,8 @@ func _initialize() -> void:
 	_chk(Passives.exists("holy_sani"), "被动 id 仍是 holy_sani（测试引用它，不能改名）")
 	_chk(not hs.has("revive") and not hs.has("uses_per_life"),
 		"passives.gd 里 revive / uses_per_life 已删除")
-	_chk(int(hs.get("heal_points", 0)) == 10, "回血 10 点写在被动表里（第 103 轮：20 -> 10，heal_points = 10）")
+	# ⚠ 第 111 轮用户口径：「萨尼铁塔**回血增强到 40 点力量**」—— 10 -> 40
+	_chk(int(hs.get("heal_points", 0)) == 40, "回血 40 点写在被动表里（第 111 轮：10 -> 40，heal_points = 40）")
 	_chk(String(hs.get("desc", "")).contains("医疗包") and not String(hs.get("desc", "")).contains("复活"),
 		"说明文案已改成医疗包口径、且不含复活字样")
 

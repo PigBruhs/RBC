@@ -49,7 +49,7 @@ func _initialize() -> void:
 	if foe == null:
 		_finish()
 		return
-	# 目标放到 12 格外（散布半径 = 12/12 = 1 格）
+	# 目标放到 12 格外（⚠ 第 111 轮后散布半径 = 12/48 = **0.25 格**，原来 1 格）
 	foe.cell = sani.cell + Vector2i(0, 12)
 	if foe.visual != null:
 		foe.visual.position = Vector3(float(foe.cell.x) + 0.5, foe.visual.position.y,

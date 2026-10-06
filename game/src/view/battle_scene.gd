@@ -1917,6 +1917,24 @@ func _radar_may_target(atk: Unit, t: Unit) -> bool:
 	return Radar.may_target(_radar_all_states(), atk.name, t.name, _radar_uid(t))
 
 
+## 火箭的**白色烟雾拖尾**（第 111 轮用户口径：「火箭经过的轨迹上要出现白色烟雾，
+## 逐渐变淡**两秒**散去」）。
+## · 对**所有在飞的火箭**冒烟（不只被引导的那些 —— 用户说的是"火箭经过的轨迹"）
+## · 池化在 `SmokeTrail` 里，这里只负责"每帧告诉它哪些位置要冒烟"
+var _smoke: SmokeTrail = null
+
+
+func _tick_smoke(delta: float) -> void:
+	if _smoke == null or not is_instance_valid(_smoke):
+		_smoke = SmokeTrail.make(self)
+	var pts: Array = []
+	for it in field.items:
+		var p: Projectile = it["p"]
+		if p.alive and p.kind == Projectile.KIND_ROCKET:
+			pts.append(p.pos3())
+	_smoke.step(delta, pts)
+
+
 ## 单位的**唯一编号**（第 111 轮）。用 Godot 的**实例 id** —— 进程内唯一，
 ## 不必给 `Unit` 新增字段，也不会因为"同名"撞车
 ## （用户口径：「我以为每个角色都有独立的编号然后你是锁 id 的呢」）。
@@ -2682,6 +2700,8 @@ func _process(delta: float) -> void:
 	_radar_tick_beams(delta)
 	# 雷达引导火箭（第 111 轮新需求）：锁定完成后把被连接友军的火箭"吸"向锁定目标
 	_radar_guide_rockets(delta)
+	# 火箭的**白色烟雾拖尾**（第 111 轮用户口径：白色烟雾、逐渐变淡、两秒散去）
+	_tick_smoke(delta)
 	# HUD 面向相机（"法线方向与摄像机方向相同"）—— 放在最后，用本帧最终的相机朝向
 	for h in _radar_huds.values():
 		if h != null and is_instance_valid(h):
