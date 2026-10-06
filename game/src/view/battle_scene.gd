@@ -605,6 +605,16 @@ func _radar_guide_rockets(delta: float) -> void:
 ## **缩小至直径 0.1 格的球**」。纯逻辑在 `Radar.spread_modifier/apply_spread`。
 ## ⚠ 用户说"你尽力吧，可能出现没覆盖到的情况我不怪你" —— 所以这里覆盖**几个明显的**：
 ##   车的齐射（普攻 + 哨兵）、萨尼的连发、直升机的火箭落点散布、弓箭手的箭。
+func _radar_is_linked(u: Unit) -> bool:
+	if u == null:
+		return false
+	for s in _radar_all_states():
+		var st: Radar.State = s
+		if st.links.has(u.name):
+			return true
+	return false
+
+
 func _radar_spread(base_r: float, atk: Unit) -> float:
 	if atk == null:
 		return base_r
@@ -1536,18 +1546,12 @@ func _lunchbox_tick(delta: float) -> void:
 		#      炮弹没有"单位名"，所以用 `P:` 前缀区分（`_lb_target_label` 负责生成）。
 		var eligible: Array = []
 		var order: Array = st["order"]
-		for e in units:
-			if e == null or not e.is_alive() or e.side == u.side:
-				continue                          # 友方永远不进队列（只能被误伤）
-			if _lb_center(u).distance_to(GridMath.unit_pos(e)) > Lunchbox.SENTRY_RANGE:
-				continue
-			if not _lb_is_moving(e):
-				continue                          # 静止 -> 不是合法目标
-			var lb := _lb_target_label(e)
-			eligible.append(lb)
-			if not order.has(lb):
-				order.append(lb)                  # 记录"谁先进入范围"
-		# 炮弹类飞行物：只收**敌方发射**的（友方炮弹不主动打，但仍然可能被误伤）
+		# ⚠ 第 111 轮用户口径（**改口径**）：「修改使齐射车哨兵**不再会锁定任何角色，无论敌我**」
+		#   以前这里收"敌方 + 在动"的单位；用户看到的是"对着队友来了一梭子"，
+		#   而且怀疑是**过热 + 陈旧目标**导致打完一轮后对着旧位置开火。
+		#   所以整个"单位候选"这一段**删掉**：哨兵**只**打飞行中的炮弹类。
+		#   （这也回到了"哨兵模式 = 反炮兵"的本意。）
+		# 炮弹类飞行物：只收**敌方发射**的
 		for it in field.items:
 			var pr: Projectile = it["p"]
 			if not pr.alive or not Ballistics.is_shell_class(pr.kind):
@@ -1565,6 +1569,20 @@ func _lunchbox_tick(delta: float) -> void:
 			eligible.append(lp)
 			if not order.has(lp):
 				order.append(lp)
+		# ⚠ 第 111 轮用户口径：「**过热结束后主动更新一次目标队列**」——
+		#   过热（连发满 12 波 -> 冷却）期间目标可能早就没了 / 换了，
+		#   冷却一结束就用**陈旧队列**续打，在玩家眼里就是"对着旧位置（甚至队友那边）
+		#   莫名其妙来一梭子"。所以这里在**冷却刚结束的那一帧**把队列与锁**全清**，
+		#   让哨兵从零重新索敌。
+		if Lunchbox.can_fire(heat):
+			if bool(st.get("was_hot", false)):
+				order.clear()
+				st["lock"] = ""
+				st["wave_t"] = 0.0
+				_log("  🚙 %s 哨兵冷却结束 -> **目标队列已重置**（重新索敌）" % u.name)
+			st["was_hot"] = false
+		else:
+			st["was_hot"] = true
 		# 清理：离开范围 / 死掉 / 停下 / 落地 的，都要出队（与上面的收集口径严格对齐）
 		for nm in order.duplicate():
 			if not eligible.has(nm):
@@ -1594,7 +1612,12 @@ func _lunchbox_tick(delta: float) -> void:
 		#   `hit_tags` 不让子弹拦炮弹，见 `Ballistics.shell_like_defaults`）。
 		#   解算：炮弹是**直线匀速**（`arc_scale` 只改高度曲线，水平方向恒定），
 		#   所以用"交汇时间"迭代两次即可：t = 距离 / 子弹速度。
-		if live_want["alive"] and want.begins_with(LB_PROJ_PREFIX):
+		# ⚠ 第 111 轮用户口径（**改口径**）：「我说的是**没有提前量**！
+		#   不过按你的意思是现在有提前量了？那这样吧，**和雷达车连接就按现在有提前量的，
+		#   没连接就没有提前量**」
+		#   —— 所以这段提前量解算**只在"本车被雷达车连接"时生效**。
+		#   （哨兵只打炮弹了，所以这里必然是炮弹分支；连接判定仍照用户口径加。）
+		if live_want["alive"] and want.begins_with(LB_PROJ_PREFIX) and _radar_is_linked(u):
 			var sp := _lb_projectile_by_id(int(want.substr(LB_PROJ_PREFIX.length())))
 			if sp != null and sp.alive:
 				var v := _lb_projectile_vel(sp, delta)
@@ -3142,6 +3165,10 @@ func t_attack_target_unit(t: Unit, break_armor: bool) -> void:
 
 func t_menu_attack() -> void:
 	action_menu.menu_attack()
+
+func t_unit_at(cell: Vector2i) -> Unit:
+	return _unit_at(cell)
+
 
 func t_pending_kind() -> String:
 	return _pending_kind
