@@ -565,6 +565,17 @@ func _radar_add_locked_targets(_unused: bool, atk: Unit, out: Dictionary) -> voi
 ##   这就是"转向能力上限"：
 ##     · 初始偏差小 -> 几帧内就对准 -> **命中**
 ##     · 初始偏差大 -> 一直在拐、但追不上 -> **打不中**（正是用户要的手感）
+## ── 火箭引导的**加速度制导**参数（第 111 轮用户口径）──────────────────────────
+## 判定间隔：用户原话"每隔 **100ms** 就做一次引导判定"
+const ROCKET_GUIDE_STEP := 0.1
+## 初始加速度（小 -> 转弯半径大，先画大圆弧）
+const ROCKET_GUIDE_ACCEL0 := 26.0
+## 加速度上限（逐渐增大 -> 圈越收越小，最终能命中；不设上限会一直转圈）
+const ROCKET_GUIDE_ACCEL_MAX := 150.0
+## 加速度的增长率（格/秒³）
+const ROCKET_GUIDE_ACCEL_GROW := 130.0
+## 速度下限上限（格/秒）：制导接管时至少给这么快，免得"掰不动"
+const ROCKET_GUIDE_CAP := 14.0
 const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
 
 ## 【锁定齐射】的波数。
@@ -590,7 +601,9 @@ func _radar_guide_rockets(delta: float) -> void:
 		#   体现不出引导作用）」
 		#   火箭速度 v(s) = min(VMAX, V0 + k·s)，**在 `ROCKET_RAMP_DIST`(12) 格处达到 VMAX** ——
 		#   所以"飞满 12 格"就是"到达最大速度"的判据。飞满之前**完全不管**。
-		if p.flown_dist() < Ordnance.ROCKET_RAMP_DIST:
+		#   ⚠ 只在**接管之前**判：接管后 `flown_dist()` 返回制导积分出的 `flown`（从接管那刻重新算），
+		#     拿它再比 12 会开出一段 **12 格的死区**（实测：加速度停在 39.0 不再增长）。
+		if not p.steering and p.flown_dist() < Ordnance.ROCKET_RAMP_DIST:
 			continue
 		# 找"已锁定、且把 caster 连着"的雷达车 -> 它的锁定目标就是引导目标
 		var tgt: Unit = null
@@ -608,11 +621,38 @@ func _radar_guide_rockets(delta: float) -> void:
 		var want: Vector2 = GridMath.unit_pos(tgt) - p.pos()
 		if cur.length() < 0.01 or want.length() < 0.01:
 			continue
-		var step := clampf(cur.angle_to(want), -max_rad, max_rad)
-		if absf(step) < 0.0001:
-			continue
-		p.to = p.pos() + cur.rotated(step)
-		p.recalc_apex()
+		# ── 第 111 轮新口径：**改成"改变速度方向"的加速度制导**（用户逐字口径）──
+		#   「不是直接平移而是改变速度方向……头部始终指向速度方向（**高度也要引导**）；
+		#     每隔 **100ms** 做一次引导判定：当前位置与目标落点差多少、什么方向；
+		#     然后把这个间隔内的**加速度方向**变成从现在的位置指向目标落点
+		#     （初始加速度有限，转弯半径设得稍微大一点；**加速度逐渐增大**，
+		#      不然会出现一直转圈的情况）」
+		# 首次接管：把弹道的**当前速度**（水平 + 垂直）交给制导积分，保住"直线 -> 圆弧"的连续性。
+		if not p.steering:
+			var dv: Vector2 = p.dir_flat() * p.speed_flat()
+			p.steering = true
+			p.steer_pos = p.pos()
+			p.steer_h = p.height()
+			p.steer_vel = dv
+			p.steer_vy = p.speed_y()
+			p.steer_speed = maxf(dv.length(), 1.0)
+			p.guide_cap = maxf(p.steer_vel.length() * 1.25, ROCKET_GUIDE_CAP)
+			p.max_dist = p.flown + maxf(p.pos().distance_to(GridMath.unit_pos(tgt)) * 2.5, 24.0)
+			p.guide_accel = ROCKET_GUIDE_ACCEL0
+			p.guide_t = ROCKET_GUIDE_STEP          # 立刻做第一次判定
+		# 每 100ms 一次判定：重算"指向目标落点"的**三维**方向，并让加速度**逐渐增大**
+		p.guide_t += delta
+		if p.guide_t >= ROCKET_GUIDE_STEP:
+			p.guide_t = 0.0
+			var cur3 := Vector3(p.pos().x, p.steer_h, p.pos().y)
+			var tgt3 := Vector3(GridMath.unit_pos(tgt).x, Targeting.aim_height(tgt),
+				GridMath.unit_pos(tgt).y)
+			var d3 := tgt3 - cur3
+			if d3.length() > 0.01:
+				p.guide_dir = d3.normalized()
+			# ⚠ **加速度逐渐增大** -> 转弯半径越来越小（用户要的"圈变小"）。
+			p.guide_accel = minf(p.guide_accel + ROCKET_GUIDE_ACCEL_GROW * ROCKET_GUIDE_STEP,
+				ROCKET_GUIDE_ACCEL_MAX)
 ## 用户口径：「锁定完成前连接的角色弹道散布**降低 50%**」「锁定完成后……将其弹道散布
 ## **缩小至直径 0.1 格的球**」。纯逻辑在 `Radar.spread_modifier/apply_spread`。
 ## ⚠ 用户说"你尽力吧，可能出现没覆盖到的情况我不怪你" —— 所以这里覆盖**几个明显的**：

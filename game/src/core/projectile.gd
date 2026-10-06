@@ -96,6 +96,21 @@ var steer_h: float = 1.5             # 定高（不受重力）
 var max_dist: float = 32.0
 var flown: float = 0.0
 var turn_w: float = 0.0              # 当前角速度（度/秒，带惯性）
+
+## ── **加速度制导**（第 111 轮雷达引导火箭；与上面"恒速 + heading"是两套）──────────
+## 用户口径：「不是直接平移而是**改变速度方向**……头部始终指向速度方向（高度也要引导）；
+##   每隔 100ms 做一次引导判定：当前位置与目标落点差多少、什么方向；
+##   然后把这个间隔内的**加速度方向**变成从现在的位置指向目标落点
+##   （注意初始加速度有限，转弯半径设得稍微大一点；同时加速度也可以逐渐增大
+##    不然会出现一直转圈的情况）」
+## 所以：引导方每 100ms 只更新 `guide_dir`（单位向量）与 `guide_accel`（标量，逐段增大），
+## 本类负责逐帧把速度往那个方向"掰" —— 速度方向自然就成了火箭头的朝向。
+var steer_vel: Vector2 = Vector2.ZERO   # 水平速度向量（格/秒）
+var steer_vy: float = 0.0               # 垂直速度（格/秒）
+var guide_dir: Vector3 = Vector3.ZERO   # 本段的**加速度方向**（世界 xyz，y = 高度方向）
+var guide_accel: float = 0.0            # 本段的加速度大小（格/秒²）；> 0 才走制导分支
+var guide_cap: float = 40.0             # 速度上限（格/秒）
+var guide_t: float = 0.0                # 距上次引导判定的累计时间（宿主每 100ms 用一次）
 var hold_l: float = 0.0              # 左转键已按住多久（秒）
 var hold_r: float = 0.0              # 右转键已按住多久（秒）
 ## 近炸引信要忽略的沙盒元素（发射它的那台发射器，否则一出生就自爆）
@@ -173,6 +188,12 @@ func finished() -> bool:
 ## 水平位置
 ## 变速弹种：把归一化进度 t 映射成【已飞距离】（火箭用解析反解；匀速弹种等价于 t*total）
 func flown_dist() -> float:
+	# ⚠ 第 111 轮：**制导接管后必须返回积分出来的 `flown`**。
+	#   否则（火箭）仍按 `rocket_s_of_t(t)` 反解 —— 而制导段的 `t` 是 `flown/max_dist`，
+	#   两者口径不同 -> `flown_dist()` 会**回退**到 12 格以下，
+	#   把"飞满 ROCKET_RAMP_DIST 才引导"那道闸门重新关上（实测加速停在 39.0 不再增长）。
+	if steering:
+		return flown
 	var total := from.distance_to(to)
 	if speed_profile == SPEED_ROCKET:
 		var elapsed: float = clampf(t, 0.0, 1.0) * dur
@@ -210,11 +231,42 @@ func dir_flat() -> Vector2:
 	return d.normalized() if d.length() > 0.0001 else Vector2.RIGHT
 
 
+## 水平速度标量（格/秒）。水平位置是 `from->to` 的**线性插值** -> 恒为 `距离 / dur`。
+## 只用于"制导接管那一刻的初速估计"，够用。
+func speed_flat() -> float:
+	return from.distance_to(to) / maxf(0.001, dur)
+
+
+## 垂直速度（格/秒）= `height()` 对时间的导数：
+##   h(t) = lerp(y0, y1, k) + apex·4·k·(1-k)，k = progress()
+##   dh/dt = [(y1-y0) + apex·4·(1-2k)] / dur
+func speed_y() -> float:
+	var k := progress()
+	return ((y1 - y0) + apex * 4.0 * (1.0 - 2.0 * k)) / maxf(0.001, dur)
+
+
 func step(dt: float) -> void:
 	if not alive:
 		return
 	if steering:
-		# 可制导：恒速沿 heading 走，飞满 max_dist 就 finished（=> 自动引爆）
+		# ── 加速度制导（第 111 轮雷达引导火箭）──────────────────────────────
+		#   `guide_accel > 0` 时：每帧把**速度向量**朝 `guide_dir` 掰，
+		#   限速后按速度积分 -> **头朝向 = 速度方向**（用户口径）。
+		if guide_accel > 0.0 and guide_dir.length_squared() > 0.0001:
+			steer_vel += Vector2(guide_dir.x, guide_dir.z) * guide_accel * dt
+			steer_vy += guide_dir.y * guide_accel * dt
+			var sp := steer_vel.length()
+			if sp > guide_cap:
+				steer_vel = steer_vel * (guide_cap / sp)
+			var d2 := steer_vel.length() * dt
+			flown += d2
+			steer_pos += steer_vel * dt
+			steer_h = clampf(steer_h + steer_vy * dt, 0.05, 40.0)
+			if steer_vel.length() > 0.0001:
+				heading = steer_vel.angle()          # 头始终指向速度方向
+			t = clampf(flown / maxf(0.001, max_dist), 0.0, 1.0)
+			return
+		# 可制导（巡飞弹）：恒速沿 heading 走，飞满 max_dist 就 finished（=> 自动引爆）
 		var d := steer_speed * dt
 		flown += d
 		steer_pos += Vector2(cos(heading), sin(heading)) * d
