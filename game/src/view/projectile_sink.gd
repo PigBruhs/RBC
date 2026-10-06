@@ -414,7 +414,9 @@ func rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var max_d := float(u.rng_max)
 	if doubled.distance_to(base) > max_d:
 		doubled = base + dir.normalized() * max_d          # 不超过射程 40
-	var scatter := float(cfg["scatter_r"])
+	# ⚠ 第 111 轮新需求（用户先说不必、后改口要）：**雷达降低直升机火箭的散布**
+	#   （连接即生效：锁前 ×0.5、锁后固定小半径 —— 与其它弹种同一套 `Radar` 口径）
+	var scatter: float = _st._radar_spread(float(cfg["scatter_r"]), u)
 	var rockets := int(cfg["rockets"])
 	var pairs := int(cfg["salvo_pairs"])
 	var gap := float(cfg["salvo_gap"])
@@ -432,7 +434,7 @@ func rocket_salvo(u: Unit, fpos: Vector2) -> void:
 	var rolled: Array[Vector2] = []
 	for i0 in rockets:
 		var ang0: float = _st.rng.next_float() * TAU
-		var rr0 := scatter * sqrt(_st.rng.next_float())        # 圆内均匀
+		var rr0: float = scatter * sqrt(_st.rng.next_float())  # 圆内均匀
 		var pt := doubled + Vector2(cos(ang0) * rr0, sin(ang0) * rr0)
 		pt.x = clampf(pt.x, float(_st.PX) + 0.5, float(_st.PX + _st.PW) - 0.5)
 		pt.y = clampf(pt.y, float(_st.PY) + 0.5, float(_st.PY + _st.PH) - 0.5)

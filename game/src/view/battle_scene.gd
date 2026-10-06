@@ -557,7 +557,50 @@ func _radar_add_locked_targets(_unused: bool, atk: Unit, out: Dictionary) -> voi
 			out[u.cell] = true
 
 
-## 难点 2 接入（第 111 轮）：把雷达对"被连接友军"的**散布修正**作用到一个基准散布半径上。
+## ── 雷达**引导**火箭（第 111 轮新需求，用户先说不必、后改口要）────────────────────
+## 用户口径：「锁定后更是会直接引导火箭弹飞向被锁定目标，无论它们的初始瞄准方向是哪
+##   （你要加个**加速度限制**，这样**合理范围内能被吸附过去，偏差太大则会往那边拐但是无法命中**）」
+## 实现：对**被连接友军发射的、且在飞的火箭**，每帧把它的**落点方向**朝"被锁定目标"转，
+##   但**每帧最多转 `RADAR_ROCKET_TURN_DEG_PER_SEC × delta`** ——
+##   这就是"转向能力上限"：
+##     · 初始偏差小 -> 几帧内就对准 -> **命中**
+##     · 初始偏差大 -> 一直在拐、但追不上 -> **打不中**（正是用户要的手感）
+const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
+
+
+func _radar_guide_rockets(delta: float) -> void:
+	var states := _radar_all_states()
+	if states.is_empty():
+		return
+	var max_rad := deg_to_rad(RADAR_ROCKET_TURN_DEG_PER_SEC) * delta
+	for it in field.items:
+		var p: Projectile = it["p"]
+		if not p.alive or p.kind != Projectile.KIND_ROCKET:
+			continue
+		if p.shot == null or p.shot.caster == null:
+			continue
+		var caster: Unit = p.shot.caster
+		# 找"已锁定、且把 caster 连着"的雷达车 -> 它的锁定目标就是引导目标
+		var tgt: Unit = null
+		for s in states:
+			var st: Radar.State = s
+			if not st.locked() or not st.links.has(caster.name):
+				continue
+			var t := _lb_unit_by_name(st.lock_name)
+			if t != null and t.is_alive():
+				tgt = t
+				break
+		if tgt == null:
+			continue
+		var cur: Vector2 = p.to - p.pos()
+		var want: Vector2 = GridMath.unit_pos(tgt) - p.pos()
+		if cur.length() < 0.01 or want.length() < 0.01:
+			continue
+		var step := clampf(cur.angle_to(want), -max_rad, max_rad)
+		if absf(step) < 0.0001:
+			continue
+		p.to = p.pos() + cur.rotated(step)
+		p.recalc_apex()
 ## 用户口径：「锁定完成前连接的角色弹道散布**降低 50%**」「锁定完成后……将其弹道散布
 ## **缩小至直径 0.1 格的球**」。纯逻辑在 `Radar.spread_modifier/apply_spread`。
 ## ⚠ 用户说"你尽力吧，可能出现没覆盖到的情况我不怪你" —— 所以这里覆盖**几个明显的**：
@@ -2392,6 +2435,8 @@ func _process(delta: float) -> void:
 	_radar_tick_links()
 	_radar_tick_huds()
 	_radar_tick_beams(delta)
+	# 雷达引导火箭（第 111 轮新需求）：锁定完成后把被连接友军的火箭"吸"向锁定目标
+	_radar_guide_rockets(delta)
 	# HUD 面向相机（"法线方向与摄像机方向相同"）—— 放在最后，用本帧最终的相机朝向
 	for h in _radar_huds.values():
 		if h != null and is_instance_valid(h):
