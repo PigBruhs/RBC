@@ -55,7 +55,9 @@ func _run(s: Node) -> void:
 			# 子弹方向：`_lb_fire_wave` 用的那一套
 			# ⚠ 瞄准点高度与炮管**同高**（TURRET_Y），否则 phi=0 的炮管 vs 向下瞄的弹道
 			#   天然有个小夹角（第一次跑探针时 dot=0.987 就是这么来的，不是 bug）
-			var base: Vector2 = s._lb_center(cart)
+			# ⚠ 第 111 轮：生产代码的基准已统一到 `_lb_origin`（模型根），探针必须跟着改，
+			#   否则量的是"旧口径 vs 新口径"，必然不平行。
+			var base: Vector2 = s._lb_origin(cart)
 			var dir := Vector2(cos(deg_to_rad(th)), sin(deg_to_rad(th)))
 			var aim3 := Vector3(base.x + dir.x * 12.0, LunchboxModel.TURRET_Y,
 				base.y + dir.y * 12.0)

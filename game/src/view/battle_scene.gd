@@ -1490,7 +1490,14 @@ func _lb_body_yaw_or_front(u: Unit) -> float:
 ##   炮管 1.2 格时，竖直方向最多差 `1.2 × sin(phi)`（phi=60° 时约 1.04 格）。
 ##   现在**统一到模型那一处**，不再各算一份。
 func _lb_muzzle(u: Unit, st: Dictionary) -> Vector3:
-	var c := _lb_center(u)
+	# ⚠⚠ 第 111 轮**根因修正**：基准从 `_lb_center` 改成 `_lb_origin`（= 模型根的世界位置）。
+	#   模型根挂在 `visual + (0,0,0.5)`（**固定 +0.5z、不随车体转向**），
+	#   而 `_lb_center` = `visual + (cos yaw, sin yaw)`（**整 1 格、跟着 yaw 转**）——
+	#   两者之差 = `(cos yaw, 0, sin yaw - 0.5)`：
+	#     · yaw=90°（默认）-> 差 (0,0,0.5)      —— 只差半格，不容易看出来
+	#     · yaw= 0°（走过路之后）-> 差 (1,0,-0.5) —— **1.1 格**，子弹从炮管**旁边**冒出来
+	#   炮管（`_prism_mesh`）本来就挂在模型根上，所以炮口必须用**模型根**当基准。
+	var c := _lb_origin(u)
 	var m := _lb_model(u)
 	var aim: Lunchbox.Aim = st["aim"]
 	if m != null:
@@ -1498,6 +1505,17 @@ func _lb_muzzle(u: Unit, st: Dictionary) -> Vector3:
 		return Vector3(c.x + ml.x, ml.y, c.y + ml.z)
 	# 模型还没挂上（理论上不会走到）：退回支点，至少不崩
 	return Vector3(c.x + LunchboxModel.TURRET_X, LunchboxModel.TURRET_Y, c.y)
+
+
+## 车的**真实几何原点**（世界 xz）= `LunchboxModel` 节点的世界位置。
+## 见 `_lb_muzzle` 上面的长注释：**一切"从车发出的东西"都必须以它为基准**，
+## 否则子弹的发射点会跟着车体 yaw 漂 0.5~1.1 格（这正是用户看到的"垂直飞出"）。
+func _lb_origin(u: Unit) -> Vector2:
+	var m := _lb_model(u)
+	if m != null:
+		var p := m.global_position
+		return Vector2(p.x, p.z)
+	return _lb_center(u)
 
 
 func _lb_model(u: Unit) -> LunchboxModel:
@@ -1563,7 +1581,7 @@ func _lunchbox_tick(delta: float) -> void:
 				continue
 			if pr.side == u.side:
 				continue
-			if _lb_center(u).distance_to(pr.pos()) > Lunchbox.SENTRY_RANGE:
+			if _lb_origin(u).distance_to(pr.pos()) > Lunchbox.SENTRY_RANGE:
 				continue
 			var lp := _lb_target_label(pr)
 			eligible.append(lp)
@@ -1622,13 +1640,13 @@ func _lunchbox_tick(delta: float) -> void:
 			if sp != null and sp.alive:
 				var v := _lb_projectile_vel(sp, delta)
 				var vy := (sp.y1 - sp.y0) / maxf(0.001, sp.dur)
-				var t_est := _lb_center(u).distance_to(tgt_pos) / Ordnance.BULLET_TILES_PER_SEC
+				var t_est := _lb_origin(u).distance_to(tgt_pos) / Ordnance.BULLET_TILES_PER_SEC
 				for i in 2:
 					tgt_pos = sp.pos() + v * t_est
 					tgt_y = sp.height() + vy * t_est
-					t_est = _lb_center(u).distance_to(tgt_pos) / Ordnance.BULLET_TILES_PER_SEC
+					t_est = _lb_origin(u).distance_to(tgt_pos) / Ordnance.BULLET_TILES_PER_SEC
 		if want != "" and live_want["alive"] and live_want["moving"] and not firing_salvo:
-			var want_aim := Lunchbox.aim_to(_lb_center(u), LunchboxModel.TURRET_Y, tgt_pos, tgt_y)
+			var want_aim := Lunchbox.aim_to(_lb_origin(u), LunchboxModel.TURRET_Y, tgt_pos, tgt_y)
 			# 第 110 轮：给"已对准"一个**角度容差**（`SENTRY_TOL_DEG`）——
 			# 原来 0.01° 让炮塔在追移动目标时永远判"没对准"，一枪不发；
 			# 目标一停才收敛开火（用户报的原话）。散布本身就是 1.5 格球，几度误差无所谓。
@@ -1751,7 +1769,7 @@ func _lb_live_target(u: Unit, label: String) -> Dictionary:
 		"pos": Vector2.ZERO, "y": 0.0}
 	if label == "" or u == null:
 		return out
-	var ctr := _lb_center(u)
+	var ctr := _lb_origin(u)
 	if label.begins_with(LB_PROJ_PREFIX):
 		var pid := int(label.substr(LB_PROJ_PREFIX.length()))
 		for it in field.items:
@@ -1788,7 +1806,9 @@ func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
 	var aim: Lunchbox.Aim = st["aim"]
 	var heat: Lunchbox.Heat = st["heat"]
 	_lb_salvo_u = u
-	var base := _lb_center(u)
+	# 第 111 轮：**瞄向目标的基准也统一到 `_lb_origin`**（与炮口 `_lb_muzzle`、
+	# 瞄准点 `aim3` 同一套）。三者必须同源，否则 `aim3 - from ≠ dir`。
+	var base := _lb_origin(u)
 	var dir := fpos - base
 	if dir.length() < 0.001:
 		dir = Vector2(0.0, 1.0)
@@ -1856,7 +1876,10 @@ func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
 func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 		dist: float = 12.0, spread_r: float = Lunchbox.SALVO_SPREAD_R) -> void:
 	var aim: Lunchbox.Aim = st["aim"]
-	var base := _lb_center(u)
+	# ⚠ 第 111 轮：瞄准点必须与 `_lb_muzzle` 用**同一个基准**（`_lb_origin`），
+	#   否则 `aim3 - from` 不等于 `dir` —— 子弹会朝一个歪掉的方向飞。
+	#   （以前这里用 `_lb_center`、炮口却隐含模型根，两者差 0.5~1.1 格，正是"垂直飞出"。）
+	var base := _lb_origin(u)
 	var th := deg_to_rad(aim.theta)
 	var dir := Vector2(cos(th), sin(th))
 	var fly_y: float = tgt_y
@@ -3165,6 +3188,10 @@ func t_attack_target_unit(t: Unit, break_armor: bool) -> void:
 
 func t_menu_attack() -> void:
 	action_menu.menu_attack()
+
+func _lb_salvo_busy() -> bool:
+	return _lb_salvo_u != null
+
 
 func t_unit_at(cell: Vector2i) -> Unit:
 	return _unit_at(cell)
