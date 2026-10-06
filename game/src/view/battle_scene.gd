@@ -1734,14 +1734,34 @@ func _lunchbox_salvo(u: Unit, fpos: Vector2) -> void:
 	_log("  🚙 %s 齐射：%d 波 × %d 发（中轴 %.1f°，±%.0f° 摇动，散布 %.1f 格，射程 %.0f）" % [
 		u.name, Lunchbox.SALVO_WAVES, Lunchbox.SALVO_PER_WAVE, base_theta,
 		Lunchbox.SALVO_SWING_DEG, Lunchbox.BASIC_SPREAD_R, dist])
+	# ⚠ 第 111 轮用户报的 bug：「车普攻**会在方向机瞄准好前开火**导致子弹飞行方向完全是错的」
+	#   根因：上一版把"延迟"做成了"每波只转 5.3°"，于是**炮管还朝着旧方向时就开火**，
+	#   子弹当然朝那个旧方向飞（用户看到的就是"方向完全错"）。
+	#   正确做法：**先把方向机转到目标（这一段有延迟、看得见转塔）**，**转到位才开始齐射**；
+	#   齐射期间每波只摇 ±10°，40°/s 完全跟得上。
+	var turn_guard := 0
+	while turn_guard < 240:
+		var at := Lunchbox.step_aim(aim, base_theta, Lunchbox.wave_phi(base_theta, 0, dist,
+			LunchboxModel.TURRET_Y, tgt_y), 0.02, -1.0, -1.0, 6.0)
+		var mv := _lb_model(u)
+		if mv != null:
+			mv.set_aim(aim.theta, aim.phi)
+		if at:
+			break
+		await get_tree().create_timer(0.02).timeout
+		turn_guard += 1
+	var m0 := _lb_model(u)
+	if m0 != null:
+		m0.set_aim(aim.theta, aim.phi)
+	var dd := Vector2(cos(deg_to_rad(aim.theta)), sin(deg_to_rad(aim.theta)))
+	base_theta = rad_to_deg(dd.angle())        # 用**转到位之后的实际朝向**当摇动中轴
 	for i in Lunchbox.SALVO_WAVES:
 		# ⚠ 第 110 轮用户口径：「车使用普攻时**仍然存在方向机延迟**（现在是直接顺移旋转）」
-		#   所以不能直接 `aim.theta = 目标角` 再 `set_aim`（那是瞬移）。
-		#   改成：**朝这一波的目标角以 `TRAVERSE_DEG_PER_SEC` 步进**，
-		#   并且**按步进后的实际角度开火** —— 炮塔追不上时就打得偏，这正是延迟该有的表现。
+		#   —— 延迟体现在上面那段"转塔"；这里每波只摇 ±10°，40°/s 跟得上，
+		#   所以**按步进后的角度开火**不会再打偏。
 		var want_th := Lunchbox.wave_theta(base_theta, i)
 		var want_ph := Lunchbox.wave_phi(base_theta, i, dist, LunchboxModel.TURRET_Y, tgt_y)
-		Lunchbox.step_aim(aim, want_th, want_ph, Lunchbox.SALVO_GAP)
+		Lunchbox.step_aim(aim, want_th, want_ph, Lunchbox.SALVO_GAP, -1.0, -1.0, 6.0)
 		var m := _lb_model(u)
 		if m != null:
 			m.set_aim(aim.theta, aim.phi)
