@@ -199,6 +199,25 @@ func _run(s: Node) -> void:
 		s._radar_tick_huds()
 		_ok(s._radar_huds.get(foe3.name, null) == null, "**锁定清掉后 HUD 被移除**")
 
+	print("\n[6b] 锁定**记唯一编号**（第 111 轮；杜绝同名友军被误判）")
+	var foeA: Unit = null
+	for u in s.units:
+		if u != null and u.is_alive() and u.side != radar.side:
+			foeA = u
+			break
+	if foeA != null:
+		s.t_radar_begin_lock(RADAR, foeA.name)
+		var stU: Radar.State = s.t_radar_state(RADAR)
+		print("      锁定 %s ｜ lock_uid=%d ｜ 该单位 id=%d" % [
+			foeA.name, stU.lock_uid, int(foeA.get_instance_id())])
+		_ok(stU.lock_uid == int(foeA.get_instance_id()), "**锁定记下了目标的唯一编号**")
+		# 按 uid 能解析回同一个单位
+		_ok(s._radar_locked_unit(stU) == foeA, "**按 uid 解析回同一个目标**")
+		# 对照：**同名但不同实例**不该被判成同一目标
+		_ok(s._lb_unit_by_uid(int(foeA.get_instance_id())) == foeA,
+			"`_lb_unit_by_uid` 按编号取到的是**它本身**")
+		s._radar_clear_lock(radar, "探针")
+
 	print("\n[7] 连接技能（cast=link）+ 闪动蓝色光柱")
 	# 技能定义
 	var d := Skills.get_def("radar_link")
@@ -236,13 +255,22 @@ func _run(s: Node) -> void:
 			var beam: RadarBeam = s._radar_beams[0]
 			var a1: float = beam.t_alpha()
 			var h1: float = beam.t_height()
-			# 闪动：推进半个周期后透明度应不同
-			var half := 1.0 / (2.0 * RadarBeam.PULSE_HZ)
-			s._radar_tick_beams(half)
-			var a2: float = beam.t_alpha()
-			print("      光柱高度 %.2f 格（应 ≈ 雷达→友军 距离）｜ 透明度 %.3f -> %.3f" % [h1, a1, a2])
+			# ⚠ 闪动：在**一个完整周期内采样**取极值 —— 原来只推进"半个周期"再看一眼，
+			#   相位稍有偏差差量就在 0.13~0.20 之间跳（阈值 0.15 会随机红）。
+			#   改成扫一个周期取 max-min：既稳定，又真正证明"在脉动"。
+			var period := 1.0 / RadarBeam.PULSE_HZ
+			var lo := 1.0
+			var hi := 0.0
+			for _k in 40:
+				s._radar_tick_beams(period / 40.0)
+				var av: float = beam.t_alpha()
+				lo = minf(lo, av)
+				hi = maxf(hi, av)
+			var a2: float = hi - lo
+			print("      光柱高度 %.2f 格（应 ≈ 雷达→友军 距离）｜ 一周期内透明度 %.3f~%.3f（幅度 %.3f）" % [
+				h1, lo, hi, a2])
 			_ok(h1 > 5.0, "光柱长度跟着两点距离（%.2f 格）" % h1)
-			_ok(absf(a1 - a2) > 0.15, "**光柱在闪动**（透明度 %.3f -> %.3f）" % [a1, a2])
+			_ok(a2 > 0.5, "**光柱在闪动**（一周期内幅度 %.3f，理论满幅 0.75）" % a2)
 		# FIFO：再连两个 -> 最早那个被挤出（Gerald 应被挤掉）
 		var others: Array[Unit] = []
 		for u in s.units:

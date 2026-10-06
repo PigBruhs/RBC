@@ -23,7 +23,8 @@ const MAX_LINKS := 2                       # 最多连接两名友军
 ## 一个雷达车的状态。字段名稳定（表现层与探针都直接读）。
 class State:
 	extends RefCounted
-	var lock_name: String = ""             # 正在锁定的敌人名（"" = 没锁）
+	var lock_name: String = ""             # 正在锁定的敌人名（"" = 没锁）—— **只用于显示**
+	var lock_uid: int = 0                  # 该目标的**唯一编号**（判"是不是同一个"只比它）
 	var lock_total: int = 0                # 开始锁定时算出的"需要几回合"
 	var lock_left: int = 0                 # 仍需回合数（0 且 lock_name != "" = 已锁定）
 	var links: Array[String] = []          # **此刻在范围内**的已连接友军（所有消费方读它）
@@ -53,8 +54,14 @@ static func turns_for(dist: float) -> int:
 
 
 ## 选定新目标：**先重置**（用户口径：选择新锁定目标时锁定进度重置），再按当前距离算回合数。
-static func begin_lock(st: State, target_name: String, dist: float) -> void:
+## ⚠ 第 111 轮用户口径：「锁定其他目标时（比如 gerald）会**锁到友军同名角色**上；
+##   我以为每个角色都有**独立的编号**然后你是锁 id 的呢」
+##   —— 所以锁定现在**同时记唯一编号**（`uid`，宿主传 `Unit.get_instance_id()`），
+##   `lock_name` 只留给日志/HUD 显示。**判"是不是同一个目标"一律比 uid**。
+##   （`uid = 0` = 调用方没给 -> 退回按名字比，保证既有探针逐字不变。）
+static func begin_lock(st: State, target_name: String, dist: float, uid: int = 0) -> void:
 	st.lock_name = target_name
+	st.lock_uid = uid
 	st.lock_total = turns_for(dist)
 	st.lock_left = st.lock_total
 
@@ -63,6 +70,7 @@ static func begin_lock(st: State, target_name: String, dist: float) -> void:
 ## ⚠ **不动 `links`** —— 用户口径「连接与锁定解耦」。
 static func clear_lock(st: State) -> void:
 	st.lock_name = ""
+	st.lock_uid = 0
 	st.lock_total = 0
 	st.lock_left = 0
 
@@ -152,9 +160,17 @@ static func apply_spread(base_r: float, mod: Dictionary) -> float:
 ## 某单位是否可以把 `target_name` 当攻击对象 —— 用户口径：
 ## 「锁定完成后将该角色加入**所有连接友军**的普攻和技能的攻击对象中」。
 ## 也就是：**只有被连接的友军**才享受"无视距离选被锁定目标"。
-static func may_target(states: Array, attacker_name: String, target_name: String) -> bool:
+## `target_uid != 0` 时**按唯一编号比**（第 111 轮；杜绝同名友军被误判成同一目标）；
+## 为 0 时退回按名字比（既有探针 / 旧调用不受影响）。
+static func may_target(states: Array, attacker_name: String, target_name: String,
+		target_uid: int = 0) -> bool:
 	for s in states:
 		var st: State = s
-		if st.locked() and st.lock_name == target_name and st.links.has(attacker_name):
+		if not st.locked() or not st.links.has(attacker_name):
+			continue
+		if target_uid != 0:
+			if st.lock_uid == target_uid:
+				return true
+		elif st.lock_name == target_name:
 			return true
 	return false

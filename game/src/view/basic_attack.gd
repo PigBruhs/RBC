@@ -96,7 +96,8 @@ func perform_basic(u: Unit, aim: Vector2, target: Unit = null, placeable: Placea
 			# 这里只登记锁定并推进一次进度（"选定当回合算第 1 回合"——见 `probe_radar.gd`）。
 			if target == null:
 				return false
-			_st._radar_begin_lock(u, target.name)
+			# 第 111 轮：`_radar_begin_lock` 改成收 **Unit**（内部取唯一编号当锁定标识）
+			_st._radar_begin_lock(u, target)
 			return true
 	push_error("未知普攻模板：%s（%s）" % [prof["basic"], u.name])
 	return false

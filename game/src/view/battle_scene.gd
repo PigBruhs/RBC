@@ -553,7 +553,8 @@ func _radar_add_locked_targets(_unused: bool, atk: Unit, out: Dictionary) -> voi
 	for u in units:
 		if u == null or not u.is_alive() or u.side == atk.side:
 			continue
-		if Radar.may_target(states, atk.name, u.name):
+		# 第 111 轮：**按唯一编号**判"是不是同一个目标"（杜绝同名友军被误判）
+		if Radar.may_target(states, atk.name, u.name, _radar_uid(u)):
 			out[u.cell] = true
 
 
@@ -628,7 +629,8 @@ func _radar_guide_rockets(delta: float) -> void:
 				var st: Radar.State = s
 				if not st.locked() or not st.links.has(caster.name):
 					continue
-				var t := _lb_unit_by_name(st.lock_name)
+				# 第 111 轮：锁定目标的解析**优先按唯一编号**（同名友军不再误判）
+				var t := _radar_locked_unit(st)
 				if t != null and t.is_alive():
 					tgt = t
 					break
@@ -1471,8 +1473,8 @@ func _radar_on_turn_begin(u: Unit) -> void:
 	var st := _radar_state(u)
 	if st.lock_name == "":
 		return
-	# 目标已死 -> 重置（用户口径之一）
-	if _lb_unit_by_name(st.lock_name) == null:
+	# 目标已死 -> 重置（用户口径之一）。第 111 轮：解析走 uid 优先
+	if _radar_locked_unit(st) == null:
 		_radar_log(u, "锁定目标已不在 -> 重置")
 		Radar.clear_lock(st)
 		return
@@ -1523,7 +1525,8 @@ func t_radar_state(name: String) -> Radar.State:
 	return null
 
 func t_radar_begin_lock(radar_name: String, target_name: String) -> void:
-	_radar_begin_lock(_lb_unit_by_name(radar_name), target_name)
+	# 门面仍收名字（既有探针逐字不变），内部解析成 Unit 后由 `_radar_begin_lock` 取 uid
+	_radar_begin_lock(_lb_unit_by_name(radar_name), _lb_unit_by_name(target_name))
 
 func t_radar_add_link(radar_name: String, friend_name: String) -> bool:
 	var r := _lb_unit_by_name(radar_name)
@@ -1540,17 +1543,17 @@ func t_radar_lock_left(radar_name: String) -> int:
 
 ## 开始锁定：按**当前**距离算回合数，然后**同回合立刻 tick 一次**
 ## （用户例子 81 格 -> 5 回合；见 `probe_radar.gd` 的口径说明）。
-func _radar_begin_lock(radar: Unit, target_name: String) -> void:
-	if not _is_radar(radar) or target_name == "":
-		return
-	var tgt := _lb_unit_by_name(target_name)
-	if tgt == null or not tgt.is_alive():
+## 第 111 轮：**改成收 `Unit`**（而不是名字串）—— 内部把目标的**唯一编号**一起记进锁定状态。
+## 用户口径：「锁定其他目标时（比如 gerald）会**锁到友军同名角色**上；我以为每个角色都有
+##   独立的编号然后你是锁 id 的呢」
+func _radar_begin_lock(radar: Unit, tgt: Unit) -> void:
+	if not _is_radar(radar) or tgt == null or not tgt.is_alive():
 		return
 	var dist := GridMath.unit_pos(radar).distance_to(GridMath.unit_pos(tgt))
 	var st := _radar_state(radar)
-	Radar.begin_lock(st, target_name, dist)
+	Radar.begin_lock(st, tgt.name, dist, _radar_uid(tgt))
 	_radar_log(radar, "开始锁定 %s（距离 %.1f 格 -> 还需 %d 个自己的回合）" % [
-		target_name, dist, st.lock_total])
+		tgt.name, dist, st.lock_total])
 	# ⚠ 第 111 轮用户口径更正：「我之前说的 81 = 5 回合，**是指开始锁定后再过五回合**」——
 	#   所以**选定当回合不减**：`begin_lock` 之后**不再**立刻 tick。
 	#   （原先"选定当回合立刻 -1"是我按"81 -> 5 含选定回合"倒推的；用户澄清后作废。
@@ -1911,7 +1914,32 @@ func _lb_live_target(u: Unit, label: String) -> Dictionary:
 func _radar_may_target(atk: Unit, t: Unit) -> bool:
 	if atk == null or t == null:
 		return false
-	return Radar.may_target(_radar_all_states(), atk.name, t.name)
+	return Radar.may_target(_radar_all_states(), atk.name, t.name, _radar_uid(t))
+
+
+## 单位的**唯一编号**（第 111 轮）。用 Godot 的**实例 id** —— 进程内唯一，
+## 不必给 `Unit` 新增字段，也不会因为"同名"撞车
+## （用户口径：「我以为每个角色都有独立的编号然后你是锁 id 的呢」）。
+func _radar_uid(u: Unit) -> int:
+	return 0 if u == null else int(u.get_instance_id())
+
+
+## 按**唯一编号**找单位（锁定目标的解析一律优先走它）
+func _lb_unit_by_uid(uid: int) -> Unit:
+	if uid == 0:
+		return null
+	for u in units:
+		if u != null and u.is_alive() and int(u.get_instance_id()) == uid:
+			return u
+	return null
+
+
+## 解析某台雷达**当前锁定**的目标单位（优先按 uid，找不到才退回名字）
+func _radar_locked_unit(st: Radar.State) -> Unit:
+	if st == null or st.lock_name == "":
+		return null
+	var by_id := _lb_unit_by_uid(st.lock_uid)
+	return by_id if by_id != null else _lb_unit_by_name(st.lock_name)
 
 
 ## 【锁定齐射】—— 第 111 轮新模板（用户口径）：
@@ -2491,7 +2519,10 @@ func _clear_unit_states(u: Unit) -> void:
 		var st: Radar.State = _radar_states.get(r.name, null)
 		if st == null:
 			continue
-		if st.lock_name == u.name:
+		# 第 111 轮：**按唯一编号**判"死的是不是被锁的那个"（同名友军不再误触）。
+		# `lock_uid == 0` 是旧存档/探针路径 -> 退回按名字比。
+		if st.lock_name != "" and (st.lock_uid == _radar_uid(u) \
+				or (st.lock_uid == 0 and st.lock_name == u.name)):
 			Radar.clear_lock(st)
 			_radar_log(r, "锁定目标 %s 已阵亡 -> 重置" % u.name)
 		# 被摧毁/阵亡的友军从连接列表里剔除
