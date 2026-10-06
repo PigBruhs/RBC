@@ -35,7 +35,9 @@ const BULLET_TILES_PER_SEC := 12.0
 ## ⚠ 第 111 轮用户口径：「**子弹速度翻倍**」—— 只对**齐射车**的子弹翻倍（12 -> 24），
 ##   萨尼的连发（`KIND_BULLET`）保持 12 不动。
 const CART_BULLET_TILES_PER_SEC := 24.0
-const BULLET_MAX_DIST := 32.0
+## ⚠ 第 111 轮用户口径：「子弹**模型消失距离似乎小于 64 格**」—— 32 -> **64**
+##   （与 `Damage.BULLET_MAX_DIST` 一致：飞满 64 格模型消失、伤害归零）
+const BULLET_MAX_DIST := 64.0
 ## 子弹兜底高度（只在调用方既没给 `aim_y`、也没有射手时用）：
 ## **地面角色的身体中心**（= 0.5 格）。正常路径见 `_bullet_fly_y`（取射手身体中心）。
 const BULLET_FLOOR_Y := 0.5

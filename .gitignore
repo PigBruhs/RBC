@@ -43,3 +43,10 @@ DHS's/
 # 临时脚本 / 测试输出统一放这里，不要散落到仓库根或 tools/
 .tmp_for_deepseek/
 .tmp_*
+
+# ── release 包 ───────────────────────────────────────────────────────────────
+# ⚠ Godot 运行时本体有 172 MB，**超过 GitHub 单文件 100 MB 上限**，不能进版本库。
+#   打包脚本（tools/make_release.ps1）会把它从 tools/godot/ 复制过去；
+#   仓库里只保留 release 的**说明与启动器**，二进制由使用者本地生成。
+release/BattleChess/godot.exe
+release/BattleChess/game/.godot/

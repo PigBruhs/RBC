@@ -142,34 +142,26 @@ static func air_burst(attacker: Unit, ctr: Vector3, opts: Dictionary, units: Arr
 # 单体结算
 # ══════════════════════════════════════════════════════════════════════════════
 ## ── 子弹伤害阶梯（**只作用于力量伤害**）────────────────────────────────────
-##   0-12 格 100% ｜ 12-16 格 60% ｜ 16-24 格 20% ｜ 24-64 格 20% -> 0% 线性衰减
-##   ｜ **>= 64 格伤害 = 0 且弹道物**模型消失**（用户口径）
+## ⚠ 第 111 轮用户口径**简化**：「子弹伤害衰减简化为 **24 格内 100%**，**25~64 50%**」
+##   —— 原来的 0-12 / 12-16 / 16-24 三档阶梯**取消**，24 格内一律满伤。
 ## ⚠ 第 104 轮用户口径修正：这个倍率**只乘力量**，**不再乘破甲**
 ##   （旧口径"同时作用于破甲与力量伤害"已废弃，见 `docs/规格.md` §12.2）。
 ##   调用点只有一个：`projectile_sink.resolve_arrow_hit` 的子弹分支。
-## ⚠ 第 111 轮用户口径：「**子弹伤害衰减修改至 24 格外保留 20% 伤害，
-##   64 格模型消失（64 格伤害为 0）**」—— 以前 `> 24` 直接返回 0，
-##   所以"锁定齐射"打射程外的目标永远 0 伤害；现在 24~64 之间按线性保留一部分。
-const BULLET_FULL_DIST := 12.0
-const BULLET_MID_DIST := 16.0
+##   （⚠ 第 111 轮起**车用子弹根本不再走这里** —— 它直接固定 -2 甲 / -2 力。）
+const BULLET_FULL_DIST := 24.0     # 24 格内 = 100%
+const BULLET_MID_DIST := 24.0      # （保留常量名只为兼容既有引用）
 const BULLET_LOW_DIST := 24.0
 ## 子弹的**最大飞行距离**：到这里模型消失、伤害归零（用户口径的"64 格模型消失"）
 const BULLET_MAX_DIST := 64.0
-## 24 格处保留的伤害倍率（用户口径的"24 格外保留 20% 伤害"）
-const BULLET_FAR_MULT := 0.2
+## 25~63 格保留的伤害倍率（用户口径的"25~64 50%"）
+const BULLET_FAR_MULT := 0.5
 
 static func bullet_mult(dist: float) -> float:
 	var d: float = maxf(0.0, dist)
-	if d <= BULLET_FULL_DIST:
+	if d <= BULLET_FULL_DIST:          # 24 格内 = 100%
 		return 1.0
-	if d <= BULLET_MID_DIST:
-		return 0.6
-	if d <= BULLET_LOW_DIST:
+	if d < BULLET_MAX_DIST:            # 25~63 格 = 50%（64 格起 = 0，模型同时消失）
 		return BULLET_FAR_MULT
-	# 24 -> 64 格：从 20% **线性**衰减到 0（64 格起伤害为 0）
-	if d < BULLET_MAX_DIST:
-		var k: float = (d - BULLET_LOW_DIST) / (BULLET_MAX_DIST - BULLET_LOW_DIST)
-		return BULLET_FAR_MULT * (1.0 - k)
 	return 0.0
 
 

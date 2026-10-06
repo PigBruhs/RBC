@@ -32,17 +32,18 @@ func _run(s: Node) -> void:
 	var pts := [0.0, 12.0, 16.0, 24.0, 32.0, 44.0, 56.0, 63.9, 64.0, 80.0]
 	for d in pts:
 		print("      %5.1f 格 -> %.4f" % [d, Damage.bullet_mult(d)])
+	# ⚠ 第 111 轮**简化**：24 格内 100%、25~63 = 50%、64 起 = 0
 	_ok(absf(Damage.bullet_mult(12.0) - 1.0) < 1e-6, "12 格 = 100%")
-	_ok(absf(Damage.bullet_mult(16.0) - 0.6) < 1e-6, "16 格 = 60%")
-	_ok(absf(Damage.bullet_mult(24.0) - 0.2) < 1e-6, "**24 格 = 20%（用户口径：24 格外保留 20%）**")
+	_ok(absf(Damage.bullet_mult(24.0) - 1.0) < 1e-6, "**24 格 = 100%（新口径：24 格内满伤）**")
+	_ok(absf(Damage.bullet_mult(25.0) - 0.5) < 1e-6, "**25 格 = 50%（新口径）**")
 	# 24 -> 64 线性
-	_ok(absf(Damage.bullet_mult(44.0) - 0.1) < 1e-6, "44 格 = 10%（24~64 线性中点）")
-	_ok(Damage.bullet_mult(30.0) > 0.0 and Damage.bullet_mult(30.0) < 0.2,
-		"**24 格外不再是 0**（30 格 = %.3f > 0）" % Damage.bullet_mult(30.0))
+	_ok(absf(Damage.bullet_mult(44.0) - 0.5) < 1e-6, "44 格 = 50%（25~64 一档）")
+	_ok(absf(Damage.bullet_mult(30.0) - 0.5) < 1e-6,
+		"**24 格外 = 50%**（30 格 = %.3f）" % Damage.bullet_mult(30.0))
 	_ok(absf(Damage.bullet_mult(64.0)) < 1e-6, "**64 格伤害 = 0（用户口径）**")
 	_ok(absf(Damage.bullet_mult(80.0)) < 1e-6, "80 格仍为 0")
-	_ok(Damage.bullet_mult(63.0) > 0.0 and Damage.bullet_mult(63.0) < 0.01,
-		"63 格已很接近 0（%.4f）" % Damage.bullet_mult(63.0))
+	_ok(absf(Damage.bullet_mult(63.0) - 0.5) < 1e-6,
+		"63 格仍 = 50%%（%.4f）；64 格才归零" % Damage.bullet_mult(63.0))
 
 	print("\n[2] **64 格模型消失**：子弹飞满 64 格被移除")
 	var cart: Unit = null
