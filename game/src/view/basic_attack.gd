@@ -266,12 +266,18 @@ func prune_air_cells() -> void:
 
 ## 点目标路径（玩家）：唯一差别是"已经出手过就不再响应"。
 ## 打不出（精力不足）时把行动菜单还给他，别把回合卡住。
-func attack_target_unit(t: Unit, break_armor: bool) -> void:
+func attack_target_unit(t: Unit, break_armor: bool, aim_cell: Vector2i = Vector2i(-1, -1)) -> void:
 	if _st.active == null or t == null or not t.is_alive():
 		return
 	if _st.active.has_acted:
 		return
-	if not perform_basic(_st.active, GridMath.cell_center(t.cell), t, null, break_armor):
+	# ⚠ 第 111 轮用户口径：「为什么雷达锁定 Reaper 后齐射车瞄准的总是 Reaper 标定的格子
+	#   （瞄准时紫色的那个）**左斜边一格**？……你看能不能改到**选目标时瞄准的那一格**上」
+	#   原因：这里原来一律用 `t.cell`（**单位自己的锚点格**）。对 **Reaper 这种多格大单位**，
+	#   锚点格 ≠ 玩家点的那一格 -> 瞄准点整体偏一格（观感"没打在我点的地方"）。
+	#   现在：调用方把**点击的格**传进来，就以它为准；没传则退回单位锚点（行为不变）。
+	var ac: Vector2i = aim_cell if aim_cell.x >= 0 and aim_cell.y >= 0 else t.cell
+	if not perform_basic(_st.active, GridMath.cell_center(ac), t, null, break_armor):
 		_st._show_action_menu()
 
 

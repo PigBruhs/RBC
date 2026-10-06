@@ -132,4 +132,50 @@ func _run(s: Node) -> void:
 	_ok(not s.t_attackable_cells().has(foe.cell),
 		"**没锁定 -> 射程外的目标不在可选集合里**（恢复原状）")
 
+	print("\n[5] 瞄准点是**点的那一格**（不是大单位的锚点格）")
+	# 用户口径：「雷达锁定 Reaper 后齐射车瞄准的总是 Reaper 标定的格子（瞄准时紫色的那个）
+	#   左斜边一格……你看能不能改到**选目标时瞄准的那一格**上」
+	# 这里用一个**很大的单位**（Reaper 体半径 3）来复现"锚点格 ≠ 点击格"。
+	var big: Unit = null
+	for u in s.units:
+		if u != null and u.name == "Reaper" and u.is_alive():
+			big = u
+			break
+	if big != null:
+		# 让 Reaper 的锚点格与"我们要点的格"故意差一格
+		big.cell = Vector2i(30, 30)
+		big.visual.position = Vector3(30.5, big.visual.position.y, 30.5)
+		var click_cell := Vector2i(30, 31)          # 锚点的**邻格**
+		print("      Reaper 锚点格 = %s ｜ 我们要点的格 = %s" % [str(big.cell), str(click_cell)])
+		s.active = cart
+		cart.has_acted = false
+		var logs0: int = s.t_debug_log().size()
+		s.attack.attack_target_unit(big, false, click_cell)
+		await process_frame
+		var lg: Array[String] = s.t_debug_log()
+		var line := ""
+		for i in range(logs0, lg.size()):
+			if lg[i].find("齐射") >= 0:
+				line = lg[i]
+				break
+		print("      日志：%s" % line)
+		# 从日志里抠出"对准 X.X°"，反推瞄准点与该格中心的偏差
+		var want_ang := rad_to_deg((GridMath.cell_center(click_cell) - s._lb_origin(cart)).angle())
+		var anchor_ang := rad_to_deg((GridMath.cell_center(big.cell) - s._lb_origin(cart)).angle())
+		print("      期望角（点的那格）= %.2f° ｜ 锚点格角 = %.2f°" % [want_ang, anchor_ang])
+		var k := line.find("对准 ")
+		if k >= 0:
+			var seg := line.substr(k + 7)
+			var got_ang := float(seg.substr(0, seg.find("°")))
+			print("      实际对准 = %.2f°" % got_ang)
+			_ok(absf(got_ang - want_ang) < 0.6,
+				"**瞄准的是点的那一格**（%.2f° ≈ 期望 %.2f°，锚点格是 %.2f°）" % [
+					got_ang, want_ang, anchor_ang])
+			_ok(absf(got_ang - anchor_ang) > 0.6 or absf(want_ang - anchor_ang) < 0.6,
+				"（对照：两格角度本来不同 -> %.2f° vs %.2f°）" % [want_ang, anchor_ang])
+		else:
+			_ok(false, "日志里没有对准字样：%s" % line)
+	else:
+		print("      ⚠ 这个关卡里没有 Reaper，跳过（本条只对 reaper 关有意义）")
+
 	print("\n── 锁定齐射模板探针：%d 项检查，失败 %d 项 ──" % [_n, _f])

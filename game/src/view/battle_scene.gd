@@ -2764,7 +2764,8 @@ func _click_cell(cell: Vector2i) -> void:
 				#   却让玩家多走一步毫无意义的三级菜单。
 				#   所以：**普攻不吃力量/破甲二选一的模板，第二次点就是开打**（与技能的点选一致）。
 				if attack.attack_skips_power_menu(active):
-					attack.attack_target_unit(t, false)
+					# 第 111 轮：把**点击的那一格**传下去当瞄准点（大单位锚点 ≠ 点击格）
+					attack.attack_target_unit(t, false, cell)
 				else:
 					action_menu.show_attack_menu(t)
 			else:
