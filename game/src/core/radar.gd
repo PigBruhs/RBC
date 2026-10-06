@@ -15,7 +15,8 @@ class_name Radar
 extends RefCounted
 
 const NAME := "雷达午餐盒"                 # 单位名（= 数据表里的名字）
-const LOCK_PER_TURNS := 20.0               # 每 20 格 = 1 回合
+## ⚠ 第 111 轮用户口径：「雷达车锁定所需回合数由 **20 格 -> 1 回合** 改为 **30 格 -> 1 回合**」
+const LOCK_PER_TURNS := 30.0               # 每 30 格 = 1 回合
 const LINK_RANGE := 16.0                   # 连接距离上限（格，持续检查）
 const MAX_LINKS := 2                       # 最多连接两名友军
 

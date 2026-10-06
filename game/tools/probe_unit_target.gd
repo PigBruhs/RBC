@@ -84,7 +84,7 @@ func _initialize() -> void:
 	var foe := _foe()
 	_chk(foe != null, "场上找得到敌方目标")
 	if foe != null:
-		# 让目标在 32 格内（技能射程），并且**落在可到达区内**（否则钳位会把它推走）
+		# 让目标在 64 格内（技能射程，第 111 轮由 32 提到 64），并且**落在可到达区内**
 		var cand := cart.cell + Vector2i(0, 6)
 		if not Level.in_play(cand, "arena"):
 			cand = cart.cell + Vector2i(0, -6)
@@ -94,7 +94,7 @@ func _initialize() -> void:
 			foe.visual.position = Vector3(float(foe.cell.x) + 0.5, foe.visual.position.y, float(foe.cell.y) + 0.5)
 		await process_frame
 		var d := GridMath.unit_pos(cart).distance_to(GridMath.unit_pos(foe))
-		print("      目标 %s @ %s 距车 %.1f 格（技能射程 32）" % [foe.name, str(foe.cell), d])
+		print("      目标 %s @ %s 距车 %.1f 格（技能射程 64）" % [foe.name, str(foe.cell), d])
 		var e0 := cart.energy_points()
 		var n0 := _count_loiter()
 		# ① 选技能（走真实入口）
@@ -141,7 +141,7 @@ func _initialize() -> void:
 		_chk(e1 == e0 - 12, "★ 精力**真的扣了 12**（%d -> %d）" % [e0, e1])
 		_chk(cart.has_acted, "★ 施放后**真的结束回合**（has_acted = true）")
 
-	print("\n[4] 反向对照：目标超出 32 格 -> 不给选、也不许悄悄扣精力")
+	print("\n[4] 反向对照：目标超出 64 格 -> 不给选、也不许悄悄扣精力")
 	_s.clear_projectiles()
 	cart.energy = cart.energy_max
 	cart.has_acted = false
@@ -149,21 +149,22 @@ func _initialize() -> void:
 	_s.active = cart
 	var far := _foe()
 	if far != null:
-		far.cell = cart.cell + Vector2i(0, 40)          # 40 格 > 32
+		# ⚠ 第 111 轮：巡飞弹射程 32 -> **64**，所以"超程"要放到 64 之外
+		far.cell = cart.cell + Vector2i(0, 70)          # 70 格 > 64
 		far.home_cell = far.cell
 		if far.visual != null:
 			far.visual.position = Vector3(float(far.cell.x) + 0.5, far.visual.position.y, float(far.cell.y) + 0.5)
 		await process_frame
 		var dfar := GridMath.unit_pos(cart).distance_to(GridMath.unit_pos(far))
-		print("      目标 @ %s 距车 %.1f 格（要求 > 32）" % [str(far.cell), dfar])
-		_chk(dfar > 32.0, "构造出来的目标确实超出 32 格（%.1f）" % dfar)
+		print("      目标 @ %s 距车 %.1f 格（要求 > 64）" % [str(far.cell), dfar])
+		_chk(dfar > 64.0, "构造出来的目标确实超出 64 格（%.1f）" % dfar)
 		var e0b := cart.energy_points()
 		var n0b := _count_loiter()
 		_s.t_choose_skill("loiter_launch")
 		await process_frame
 		var highlighted: bool = _s.t_attackable_cells().has(far.cell)
 		print("      远超目标是否被高亮 = %s" % highlighted)
-		_chk(not highlighted, "超出 32 格的目标**不被高亮**（选不了）")
+		_chk(not highlighted, "超出 64 格的目标**不被高亮**（选不了）")
 		_s.t_click_cell(far.cell)
 		_s.t_click_cell(far.cell)
 		await process_frame

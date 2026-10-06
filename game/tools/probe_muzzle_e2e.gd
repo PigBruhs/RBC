@@ -159,8 +159,10 @@ func _run(s: Node) -> void:
 	print("      三轮之后：heat.rounds=%d ｜ cool_left=%.2f ｜ can_fire=%s" % [
 		heat.rounds, heat.cool_left, str(Lunchbox.can_fire(heat))])
 	# 冷却走完（最多等 5 秒）
+	# ⚠ 第 111 轮：冷却 3 -> **13 秒**，所以等待上限要够（无头下每帧 delta 不稳定，
+	#   实测 1400 帧只走了 ~10 秒冷却，所以这里留到 3000 帧）
 	var g3 := 0
-	while not Lunchbox.can_fire(heat) and g3 < 600:
+	while not Lunchbox.can_fire(heat) and g3 < 3000:
 		await process_frame
 		g3 += 1
 	print("      冷却后：heat.rounds=%d ｜ cool_left=%.2f ｜ can_fire=%s（等了 %d 帧）" % [

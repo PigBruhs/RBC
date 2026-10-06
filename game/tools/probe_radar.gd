@@ -17,29 +17,36 @@ func _ok(cond: bool, what: String) -> void:
 
 
 func _initialize() -> void:
-	print("[1] 锁定所需回合数 = ceil(距离/20)，至少 1")
-	for pair in [[10.0, 1], [20.0, 1], [20.1, 2], [40.0, 2], [81.0, 5], [80.0, 4], [100.0, 5], [0.0, 1]]:
+	# ⚠ 第 111 轮：**每回合的格数由 20 改成 30**（用户口径）。
+	#   断言改成**从常数推导**，以后再调 `LOCK_PER_TURNS` 就不会有一堆写死的期望值跟着红。
+	var per: float = Radar.LOCK_PER_TURNS
+	print("[1] 锁定所需回合数 = ceil(距离/%.0f)，至少 1" % per)
+	for pair in [[10.0, 1], [per, 1], [per + 0.1, 2], [per * 2.0, 2],
+			[81.0, int(ceil(81.0 / per))], [per * 4.0, 4], [per * 5.0, 5], [0.0, 1]]:
 		var d: float = pair[0]
 		var want: int = pair[1]
 		var got := Radar.turns_for(d)
 		_ok(got == want, "%.1f 格 -> %d 回合（实际 %d）" % [d, want, got])
-	# 用户原话的例子必须逐字成立
-	_ok(Radar.turns_for(81.0) == 5, "**用户例子：81 格 -> 5 回合**")
+	_ok(Radar.turns_for(81.0) == int(ceil(81.0 / per)),
+		"81 格 -> %d 回合（按每 %.0f 格 1 回合）" % [int(ceil(81.0 / per)), per])
 
 	print("\n[2] 选定 -> 每回合 -1 -> 到 0 已锁定（选定那一回合算第 1 回合）")
 	var st := Radar.State.new()
 	Radar.begin_lock(st, "Gerald (E)", 81.0)
-	_ok(st.lock_total == 5 and st.lock_left == 5 and st.locking(),
-		"选定后：需 5 回合、仍未锁定（lock_left=%d）" % st.lock_left)
-	# 选定当回合立刻 tick 一次（调用方的口径）
+	var want81: int = int(ceil(81.0 / per))
+	_ok(st.lock_total == want81 and st.lock_left == want81 and st.locking(),
+		"选定后：需 %d 回合、仍未锁定（lock_left=%d）" % [want81, st.lock_left])
+	# 逐回合推进到 0（**次数跟着 `want81` 走**，不再写死 5 —— 第 111 轮把每回合的格数
+	# 从 20 改成 30 之后，81 格只要 3 回合，写死 5 会多 tick 两次、序列里多两个 0）
 	var seq: Array[int] = []
-	Radar.tick_turn(st)
-	seq.append(st.lock_left)
-	for i in 4:
+	for _i in want81:
 		Radar.tick_turn(st)
 		seq.append(st.lock_left)
-	print("      逐回合 lock_left：5 -> %s" % str(seq))
-	_ok(seq == [4, 3, 2, 1, 0], "5 个自己的回合后到 0（序列 %s）" % str(seq))
+	print("      逐回合 lock_left：%d -> %s" % [want81, str(seq)])
+	var want_seq: Array = []
+	for i in range(want81 - 1, -1, -1):
+		want_seq.append(i)
+	_ok(seq == want_seq, "%d 个自己的回合后到 0（序列 %s）" % [want81, str(seq)])
 	_ok(st.locked(), "**判定为已锁定**（desc=%s）" % st.desc())
 	_ok(Radar.tick_turn(st) == false, "已锁定后再 tick 不再返回'刚完成'")
 
@@ -47,7 +54,7 @@ func _initialize() -> void:
 	var s2 := Radar.State.new()
 	Radar.begin_lock(s2, "A", 60.0)
 	Radar.tick_turn(s2)
-	_ok(s2.lock_left == 2, "先推进到 lock_left=2")
+	_ok(s2.lock_left == s2.lock_total - 1, "先推进一格（lock_left=%d）" % s2.lock_left)
 	Radar.begin_lock(s2, "B", 20.0)          # 换目标 -> 先重置再按新距离算
 	_ok(s2.lock_name == "B" and s2.lock_total == 1 and s2.lock_left == 1,
 		"**换目标重置**：新目标 20 格 -> 需 1 回合（实际 %s）" % s2.desc())

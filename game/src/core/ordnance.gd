@@ -32,6 +32,9 @@ const FRAGMENT_R := 0.09             # 碰撞体积和箭矢差不多（箭矢 0
 ## 0-12 格 100% / 12-16 格 60% / 16-24 格 20% / >24 格无伤害（仍可命中）。
 ## ⚠ 旧的"全程离地 0.5 格"**已删除**（第 104 轮用户口径）：高度只由发射时的瞄准高度决定。
 const BULLET_TILES_PER_SEC := 12.0
+## ⚠ 第 111 轮用户口径：「**子弹速度翻倍**」—— 只对**齐射车**的子弹翻倍（12 -> 24），
+##   萨尼的连发（`KIND_BULLET`）保持 12 不动。
+const CART_BULLET_TILES_PER_SEC := 24.0
 const BULLET_MAX_DIST := 32.0
 ## 子弹兜底高度（只在调用方既没给 `aim_y`、也没有射手时用）：
 ## **地面角色的身体中心**（= 0.5 格）。正常路径见 `_bullet_fly_y`（取射手身体中心）。
@@ -42,6 +45,9 @@ const BULLET_R := 0.025              # 直径 0.05 -> 半径 0.025
 ## 不吃攻方 `armor_break`、不吃距离衰减 —— 结算在 `projectile_sink.resolve_arrow_hit`。
 ## 第 104 轮：用户口径从 4 调到 **2**（同时车的力量 24 -> 12、护甲 90 -> 110）。
 const CART_BULLET_BREAK := 2
+## ⚠ 第 111 轮用户口径：车用子弹**不走造伤公式**，每发**直接 -2 护甲 / -2 力量**
+##   （各自夹在 0 以上，不看物抗/魔抗）。见 `projectile_sink` 的 `KIND_CART_BULLET` 分支。
+const CART_BULLET_POWER := 2
 
 ## ── 37mm 火箭（炮弹类）──────────────────────────────────────────────────────
 ## 用户口径（第 83 轮）：直径 0.185（原来是 0.37 的一半）、长 0.7（不变）；
@@ -333,7 +339,10 @@ static func _bullet_at(kind: String, caster: Unit, from: Vector3, to3: Vector3,
 	var dist := maxf(flat.length(), 0.001)
 	var dir := flat / dist
 	var p := Projectile.make(kind, start, start + dir * BULLET_MAX_DIST, 1.0)
-	p.set_speed(BULLET_TILES_PER_SEC)
+	# ⚠ 第 111 轮用户口径「子弹速度翻倍」：**只对齐射车的子弹翻倍**（12 -> 24），
+	#   萨尼的连发（`KIND_BULLET`）保持 12 不动。
+	p.set_speed(CART_BULLET_TILES_PER_SEC if kind == Projectile.KIND_CART_BULLET \
+		else BULLET_TILES_PER_SEC)
 	_config_owner(p, caster)
 	var k := clampf(dist / BULLET_MAX_DIST, 0.0001, 1.0)
 	p.y0 = from.y

@@ -2105,10 +2105,16 @@ func _lb_fire_wave(u: Unit, st: Dictionary, wave_i: int, tgt_y: float = 0.5,
 	volley.born_at = float(Time.get_ticks_msec()) / 1000.0
 	volley.last_hit_at = volley.born_at
 	_volleys.append(volley)
+	# ⚠ 第 111 轮用户口径（性能）：「做比如 **32 种每轮随机散布的预设**，开火时随机套一个预设，
+	#   这样就**只需要一个随机数**而不是 6 个随机三维参数」
+	#   -> 每**波**抽 1 次预设号（不是每发 3 次随机数）。
+	var preset := int(rng.next_float() * float(Lunchbox.SPREAD_PRESETS)) \
+		if rng != null else 0
 	for k in Lunchbox.SALVO_PER_WAVE:
 		# 第 106 轮：**立体球内均匀**散布（旧实现是水平圆盘 -> 垂直散布恒为 0、子弹平行飞）
 		# 第 110 轮：半径由调用方给（哨兵 1.5 / 普攻 0.5）
-		var off3 := Lunchbox.spread_offset_3d(rng, _radar_spread(spread_r, u))
+		# 第 111 轮：改走**预设表**（`.x` 是圆的横向、`.z` 是纵向、`.y` 是俯仰）
+		var off3 := Lunchbox.preset_offset(preset, k, _radar_spread(spread_r, u))
 		var aim3 := Vector3(base.x + dir.x * dist, tgt_y, base.y + dir.y * dist) + off3
 		aim3.x = clampf(aim3.x, float(PX) + 0.5, float(PX + PW) - 0.5)
 		aim3.z = clampf(aim3.z, float(PY) + 0.5, float(PY + PH) - 0.5)

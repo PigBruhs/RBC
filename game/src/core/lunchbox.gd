@@ -39,11 +39,12 @@ const MUZZLE_Y := 1.3
 const TURRET_SIDE_OFFSET := 0.6
 
 # ── 齐射（普攻）─────────────────────────────────────────────────────────────
-const SALVO_WAVES := 12              # 一次普攻 12 波（用户口径）
+## ⚠ 第 111 轮用户口径：「**过热轮数增加到 26 轮**；**冷却时间延长至 13 秒**」—— 12 -> 26
+const SALVO_WAVES := 26
 const SALVO_PER_WAVE := 6            # 每波 6 发（第 111 轮用户口径：12 -> **改回 6**）
 const SALVO_TOTAL := 72              # 12 × 6 = 72 发
 const SALVO_GAP := 0.133             # 波间隔 133ms（用户口径）
-const SALVO_COOLDOWN := 3.0          # 每 12 轮冷却 3 秒
+const SALVO_COOLDOWN := 13.0         # 第 111 轮用户口径：打满 26 轮后冷却 **13 秒**（原 3）
 ## 散布半径（格）。第 106 轮 1.0 -> **第 110 轮用户口径 0.5**（"散布缩小至 0.5 格试试"）。
 ## **哨兵**齐射散布半径（格）。第 110 轮用户口径：0.5 -> **1.5**（"反正横竖都要卡一下，
 ## 不如增大拦截几率"）。⚠ 普攻另有更小的 `BASIC_SPREAD_R`，见下。
@@ -281,3 +282,39 @@ static func spread_offset(rng: RngService) -> Vector2:
 ## 用户第 110 轮明确把两者分开（哨兵要拦截几率、普攻要精度）。
 static func spread_offset_3d(rng: RngService, radius: float = SALVO_SPREAD_R) -> Vector3:
 	return Spread.ball_offset(radius, rng)
+
+
+## ── **预设散布表**（第 111 轮用户口径，性能）──────────────────────────────────
+## 用户原话：「**如果卡顿来自于随机数生成部分**，那么你可以做比如说 **32 种每轮随机散布的预设**，
+##   开火时随机套一个预设，这样就**只需要一个随机数**而不是 6 个随机三维参数」
+##
+## 做法：**单位球面上的方向表**（32 组 × 每波 12 个），**惰性建一次**、之后只读。
+## 一波开火只需 **1 次**随机数选预设号，然后每发取一个方向 × 半径 ——
+## 省掉每发一次 `Spread.ball_offset`（内含 3 次 rng + 三角函数 + 开立方）。
+## `radius` 仍由调用方给（哨兵 1.5 / 普攻 0.5），所以**两类散布的半径语义不变**。
+const SPREAD_PRESETS := 32
+static var _preset_dirs: Array = []          # [预设号][发序号] -> Vector3（单位向量）
+
+
+static func _ensure_presets() -> void:
+	if not _preset_dirs.is_empty():
+		return
+	## 用**确定性**伪随机建表（**不消耗游戏内 `RngService`**，免得改变既有随机流、
+	## 也就不会让任何既有探针/试玩的确定性结果漂移）
+	var sr := RandomNumberGenerator.new()
+	sr.seed = 20260101
+	for _pi in SPREAD_PRESETS:
+		var row: Array[Vector3] = []
+		for _k in SALVO_PER_WAVE:
+			var z: float = sr.randf_range(-1.0, 1.0)
+			var ang: float = sr.randf_range(0.0, TAU)
+			var rr: float = sqrt(maxf(0.0, 1.0 - z * z))
+			row.append(Vector3(cos(ang) * rr, z, sin(ang) * rr))
+		_preset_dirs.append(row)
+
+
+## 取"第 `pi` 套预设的第 `k` 发"的偏移（已乘半径）。`pi` 由调用方用**一次随机数**选出。
+static func preset_offset(pi: int, k: int, radius: float) -> Vector3:
+	_ensure_presets()
+	var row: Array = _preset_dirs[pi % SPREAD_PRESETS]
+	return (row[k % row.size()] as Vector3) * radius

@@ -137,18 +137,30 @@ func resolve_arrow_hit(sh: Ordnance.Shot, what: Dictionary) -> void:
 		# 破甲**不再衰减**，按弹种取：
 		#   · KIND_BULLET（萨尼铁塔）= 攻方 armor_break 原值
 		#   · KIND_CART_BULLET（午餐盒，第 104 轮新弹种）= **每发固定 +4 点**
-		if sh.kind == Projectile.KIND_BULLET or sh.kind == Projectile.KIND_CART_BULLET:
+		if sh.kind == Projectile.KIND_CART_BULLET:
+			# ⚠⚠ 第 111 轮用户口径（**改口径**）：「每颗子弹**不再走造伤公式**而是
+			#   **直接 2 护甲 2 力量**（直接减对应力量，不走造伤的、也不看抗性）」
+			#   -> 所以这里**绕开** `Damage.bullet_mult` / `_apply_attack` / 抗性，
+			#      直接把两个池子各减固定值（各自夹在 0 以上）。
+			var dw: int = Rules.points_to_milli(Ordnance.CART_BULLET_POWER)
+			var da: int = Rules.points_to_milli(Ordnance.CART_BULLET_BREAK)
+			victim.armor_cur = maxi(0, victim.armor_cur - da)
+			victim.power_cur = maxi(0, victim.power_cur - dw)
+			_st._log("  ✦ 车用子弹命中 %s：**直接 -%d 甲 / -%d 力**（不走造伤公式、不看抗性）" % [
+				victim.name, Ordnance.CART_BULLET_BREAK, Ordnance.CART_BULLET_POWER])
+			# 死亡判定与收尾仍要走原来的管线（不然打死了不结算）
+			if victim.power_cur <= 0:
+				_st._on_unit_died(victim)
+			_st._after_damage_to_unit(victim)
+			return
+		if sh.kind == Projectile.KIND_BULLET:
 			var bd: float = sh.last_hit_dist
 			var bmult: float = Damage.bullet_mult(bd)
 			var bpw: int = int(floor(float(attacker.power_cur) * bmult))
-			var bbr: int = Rules.points_to_milli(Ordnance.CART_BULLET_BREAK) \
-					if sh.kind == Projectile.KIND_CART_BULLET else int(attacker.armor_break)
+			var bbr: int = int(attacker.armor_break)
 			_st._apply_attack(attacker, victim, true, silent, 0, 1.0, bpw, bbr)
-			_st._log("  ✦ %s命中 %s：飞行 %.1f 格 ×%.0f%%（只乘力量）→ 力 %d / 甲 %d%s" % [
-				"车用子弹" if sh.kind == Projectile.KIND_CART_BULLET else "子弹",
-				victim.name, bd, bmult * 100.0, bpw / 1000, bbr / 1000,
-				"（固定 +%d）" % Ordnance.CART_BULLET_BREAK
-					if sh.kind == Projectile.KIND_CART_BULLET else "（原值，不衰减）"])
+			_st._log("  ✦ 子弹命中 %s：飞行 %.1f 格 ×%.0f%%（只乘力量）→ 力 %d / 甲 %d（原值，不衰减）" % [
+				victim.name, bd, bmult * 100.0, bpw / 1000, bbr / 1000])
 			return
 		# 破片：伤害按"离生成点走了多远"衰减（0 格 16/8 ｜ 3 格 8/4 ｜ 16 格 0）
 		# ⚠ 口径（第 98 轮）：**破片的力量伤害和轨道空爆一样是固定值 —— 只受物理抗性影响、无视护甲**。
