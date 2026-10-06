@@ -26,7 +26,10 @@ class State:
 	var lock_name: String = ""             # 正在锁定的敌人名（"" = 没锁）
 	var lock_total: int = 0                # 开始锁定时算出的"需要几回合"
 	var lock_left: int = 0                 # 仍需回合数（0 且 lock_name != "" = 已锁定）
-	var links: Array[String] = []          # 已连接的友军名（FIFO，最多 MAX_LINKS）
+	var links: Array[String] = []          # **此刻在范围内**的已连接友军（所有消费方读它）
+	## 第 111 轮：**连接队列**（FIFO，最多 MAX_LINKS）—— 即使某人走出 16 格暂时断开，
+	## 只要还在 roster 里且没死，**回到范围内就自动重连**（用户口径）。
+	var roster: Array[String] = []
 
 	func locked() -> bool:
 		return lock_name != "" and lock_left <= 0
@@ -77,22 +80,35 @@ static func tick_turn(st: State) -> bool:
 ## 连接一个友军（FIFO：超过 `MAX_LINKS` 就把最先连接的挤掉）。
 ## 返回是否真的新增（重复连接同一个不重复加）。
 static func add_link(st: State, friend_name: String) -> bool:
-	if friend_name == "" or st.links.has(friend_name):
+	if friend_name == "" or st.roster.has(friend_name):
 		return false
-	st.links.append(friend_name)
-	while st.links.size() > MAX_LINKS:
-		st.links.pop_front()
+	# ⚠ 第 111 轮用户口径：「**连接队列不会随离开连接范围而变化** ——
+	#   当之前连接的角色离开范围断开后，**再次进入范围即可自动重连**」
+	#   所以"谁被连过"记在 `roster`（FIFO，挤人只挤 roster），
+	#   而 `links` 只是"此刻**真的在范围内**的那几个"（所有消费方读它，语义不变）。
+	st.roster.append(friend_name)
+	while st.roster.size() > MAX_LINKS:
+		st.roster.pop_front()
+	if not st.links.has(friend_name):
+		st.links.append(friend_name)
 	return true
 
 
-## 每帧/每回合检查连接距离：**走远就断**（用户口径：持续检查）。
+## 每帧/每回合检查连接距离：**走远就断**，但**走回来会自动重连**（用户口径，第 111 轮）。
 ## `pos_of` 是 Callable(name) -> Vector2（返回 Vector2.INF 表示找不到 -> 也断）。
 static func prune_links(st: State, radar_pos: Vector2, pos_of: Callable) -> void:
+	# ① 先把**死了/退场**的从 roster 里彻底删掉（那种不该再重连）
+	var live_roster: Array[String] = []
+	for nm in st.roster:
+		if pos_of.call(nm) != Vector2.INF:
+			live_roster.append(nm)
+	st.roster = live_roster
+	# ② `links` = roster ∩ "此刻在 16 格内"（顺序仍按 roster 的 FIFO）
 	var keep: Array[String] = []
-	for nm in st.links:
+	for nm in st.roster:
 		var p: Vector2 = pos_of.call(nm)
 		if p == Vector2.INF:
-			continue                            # 目标没了（死了/退场）-> 断
+			continue
 		if radar_pos.distance_to(p) <= LINK_RANGE:
 			keep.append(nm)
 	st.links = keep

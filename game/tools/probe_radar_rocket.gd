@@ -110,16 +110,19 @@ func _run(s: Node) -> void:
 	_ok(growing, "**加速度单调增大**（%.1f -> %.1f）" % [accs[0], accs[accs.size() - 1]])
 
 	print("\n[5] 速度方向被掰向目标 + 头朝向 = 速度方向 + 高度也引导")
-	var angs: Array[float] = []
+	# ⚠ 判据用**到目标的距离**，不用"速度方向 vs 目标方向"的夹角 ——
+	#   后者在火箭逼近目标时**本身不适定**（离得越近，指向目标的方位摆动越剧烈，
+	#   实测会在最后 0.5 秒从 20° 甩到 45°，那不是发散、是几何）。距离单调缩短才是"能命中"。
+	var dists: Array[float] = []
 	for i in 120:
 		p.step(1.0 / 60.0)
 		s._radar_guide_rockets(1.0 / 60.0)
 		if i % 30 == 29:
-			angs.append(absf(rad_to_deg(p.steer_vel.angle_to(GridMath.unit_pos(foe) - p.pos()))))
+			dists.append(p.pos().distance_to(GridMath.unit_pos(foe)))
 	var vel := p.steer_vel
-	print("      每 0.5 秒的「速度方向 vs 目标方向」夹角 = %s" % str(angs))
-	_ok(angs.size() >= 3 and angs[angs.size() - 1] < angs[0],
-		"**速度方向持续朝目标收敛**（%.1f° -> %.1f°）" % [angs[0], angs[angs.size() - 1]])
+	print("      每 0.5 秒到目标的距离 = %s" % str(dists))
+	_ok(dists.size() >= 3 and dists[dists.size() - 1] < dists[0] - 1.0,
+		"**持续接近目标**（%.1f -> %.1f 格）" % [dists[0], dists[dists.size() - 1]])
 	var head_dir := Vector2(cos(p.heading), sin(p.heading))
 	_ok(head_dir.dot(vel.normalized()) > 0.999,
 		"**头部始终指向速度方向**（dot=%.4f）" % head_dir.dot(vel.normalized()))
@@ -140,5 +143,45 @@ func _run(s: Node) -> void:
 	s._radar_guide_rockets(1.0 / 60.0)
 	_ok(not q.steering and q.guide_accel <= 0.0,
 		"**雷达没锁定时不接管**（steering=%s）" % str(q.steering))
+
+	print("\n[7] **接管不跳变**（用户报的虫洞：一帧跨出去一大截）")
+	# ⚠ [6] 把锁定清了 -> 这里必须**重新锁定**，否则接管根本不会发生（第一版就踩了这个坑）
+	s.t_radar_begin_lock("雷达午餐盒", foe.name)
+	s._radar_on_turn_begin(radar)
+	while not rst.locked():
+		s._radar_on_turn_begin(radar)
+	s.clear_projectiles()
+	var w := Ordnance.make_rocket(heli, from, left_to, false, s.rng)
+	s.field.register(w)
+	var k := 0
+	while w.flown_dist() < Ordnance.ROCKET_RAMP_DIST and k < 4000:
+		w.t = minf(1.0, w.t + 0.005)
+		k += 1
+	var before_pos: Vector2 = w.pos()
+	s._radar_guide_rockets(1.0 / 60.0)
+	var after_pos: Vector2 = w.pos()
+	var jump: float = before_pos.distance_to(after_pos)
+	print("      接管那一帧：位置 %s -> %s ｜ 位移 %.4f 格" % [
+		str(before_pos.snapped(Vector2(0.01, 0.01))),
+		str(after_pos.snapped(Vector2(0.01, 0.01))), jump])
+	_ok(jump < 0.5, "**接管瞬间位置连续**（位移 %.4f 格，不得跳变）" % jump)
+	# 接管速度必须 ≈ 火箭自己的当前极速（不是全程平均速度）
+	print("      接管速度 = %.2f 格/秒（火箭极速 %.1f）" % [w.steer_vel.length(), Ordnance.ROCKET_VMAX])
+	_ok(w.steer_vel.length() <= Ordnance.ROCKET_VMAX * 1.6,
+		"**接管速度不超过极速的量级**（%.2f <= %.1f）" % [
+			w.steer_vel.length(), Ordnance.ROCKET_VMAX * 1.6])
+	# 连续推进 2 秒，逐帧确认**任何一帧的位移都不异常**
+	var worst := 0.0
+	var prev: Vector2 = w.pos()
+	for i in 120:
+		w.step(1.0 / 60.0)
+		s._radar_guide_rockets(1.0 / 60.0)
+		var cur2: Vector2 = w.pos()
+		worst = maxf(worst, prev.distance_to(cur2))
+		prev = cur2
+	print("      2 秒内单帧最大位移 = %.4f 格（速度上限 %.1f → 单帧上限 %.4f）" % [
+		worst, w.guide_cap, w.guide_cap / 60.0])
+	_ok(worst <= w.guide_cap / 60.0 + 0.01,
+		"**制导期间没有一帧超速**（最大 %.4f ≤ %.4f）" % [worst, w.guide_cap / 60.0])
 
 	print("\n── 火箭加速度制导探针：%d 项检查，失败 %d 项 ──" % [_n, _f])

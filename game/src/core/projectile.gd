@@ -262,6 +262,9 @@ func step(dt: float) -> void:
 			flown += d2
 			steer_pos += steer_vel * dt
 			steer_h = clampf(steer_h + steer_vy * dt, 0.05, 40.0)
+			# ⚠ 让 `to` 跟着制导位置走：sink / 场地 / 边界都读 `to`，
+			#   不同步就会出现"在旧瞄准点冒出来爆炸"（用户看到的"从别处冒出来"）。
+			to = steer_pos
 			if steer_vel.length() > 0.0001:
 				heading = steer_vel.angle()          # 头始终指向速度方向
 			t = clampf(flown / maxf(0.001, max_dist), 0.0, 1.0)

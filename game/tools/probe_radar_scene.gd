@@ -128,6 +128,20 @@ func _run(s: Node) -> void:
 		g.visual.position = Vector3(float(g.cell.x) + 0.5, g.visual.position.y, float(g.cell.y) + 0.5)
 		s._radar_tick_links()
 		_ok(not st2.links.has("Gerald"), "**走远到 40 格 -> 连接断开**")
+		# ⚠ 第 111 轮用户口径：「连接队列不会随离开连接范围而变化 —— 当之前连接的角色
+		#   离开范围断开后，**再次进入范围即可自动重连**」
+		var g3: Unit = null
+		for u in s.units:
+			if u != null and u.name == "Gerald":
+				g3 = u
+		if g3 != null:
+			g3.cell = radar.cell + Vector2i(3, 0)
+			g3.visual.position = Vector3(float(g3.cell.x) + 0.5, g3.visual.position.y,
+				float(g3.cell.y) + 0.5)
+			s._radar_tick_links()
+			print("      走回 3 格：roster=%s ｜ links=%s" % [str(st2.roster), str(st2.links)])
+			_ok(st2.links.has("Gerald"), "**走回范围内 -> 自动重连**（无需重新点技能）")
+			_ok(st2.roster.has("Gerald"), "**连接队列里一直留着他**（roster 不受距离影响）")
 
 	print("\n[6] 难点 1：锁定 HUD（荧光绿矩形 + 左上剩余回合 / 右上状态）")
 	var foe3: Unit = null
@@ -299,6 +313,11 @@ func _run(s: Node) -> void:
 					alette = u
 					break
 			if alette != null:
+				# ⚠ 连接队列只有 MAX_LINKS(2) 个名额；上面已经连过别人（车 / Gerald），
+				#   这里先腾空再连 Alette —— 否则她会把队首挤掉（那是**正确**行为，
+				#   但会让本条断言测不到想测的东西）。
+				st5.links.clear()
+				st5.roster.clear()
 				Radar.add_link(st5, alette.name)
 				alette.cell = radar.cell
 				alette.visual.position = Vector3(float(alette.cell.x) + 0.5,

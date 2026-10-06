@@ -61,9 +61,18 @@ func _initialize() -> void:
 	Radar.add_link(s3, "Alette")
 	_ok(s3.links == ["Gerald", "Alette"], "连两个：%s" % str(s3.links))
 	Radar.add_link(s3, "萨尼铁塔")
+	# ⚠ 第 111 轮：**FIFO 挤人现在发生在 `roster`（连接队列）上** ——
+	#   `links` 只是"此刻在范围内的那几个"；挤人只挤 roster（走出范围也不会丢队列，
+	#   回到范围内会自动重连，见 `probe_radar_scene`）。
+	_ok(s3.roster == ["Alette", "萨尼铁塔"],
+		"**第三个把最先的 Gerald 挤出队列**（%s）" % str(s3.roster))
+	# `links` 的语义是"**此刻在范围内**的"，要靠 `prune_links` 同步（运行时每帧都调）。
+	# 这里手动同步一次：让所有人都在范围内 -> `links` 应当等于 `roster`。
+	Radar.prune_links(s3, Vector2.ZERO,
+		func(_nm: String) -> Vector2: return Vector2.ZERO)
 	_ok(s3.links == ["Alette", "萨尼铁塔"],
-		"**第三个把最先的 Gerald 挤出去**（%s）" % str(s3.links))
-	_ok(Radar.add_link(s3, "Alette") == false and s3.links == ["Alette", "萨尼铁塔"],
+		"此刻在范围内的也是这两个（%s）" % str(s3.links))
+	_ok(Radar.add_link(s3, "Alette") == false and s3.roster == ["Alette", "萨尼铁塔"],
 		"重复连接同一个不重复加")
 
 	print("\n[5] 连接与锁定**解耦**")

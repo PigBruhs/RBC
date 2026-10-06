@@ -571,9 +571,12 @@ const ROCKET_GUIDE_STEP := 0.1
 ## 初始加速度（小 -> 转弯半径大，先画大圆弧）
 const ROCKET_GUIDE_ACCEL0 := 26.0
 ## 加速度上限（逐渐增大 -> 圈越收越小，最终能命中；不设上限会一直转圈）
-const ROCKET_GUIDE_ACCEL_MAX := 150.0
+## ⚠ 第 111 轮调稳：转弯半径 = v²/a。速度上限约 15 格/秒，若 a 放到 150 则半径只有 1.5 格
+##   —— 比到目标的距离还小 -> **会绕着目标转圈**（探针实测夹角 24°->44° 发散）。
+##   70 对应半径 ≈ 3.2 格，既收得紧又不绕圈。
+const ROCKET_GUIDE_ACCEL_MAX := 70.0
 ## 加速度的增长率（格/秒³）
-const ROCKET_GUIDE_ACCEL_GROW := 130.0
+const ROCKET_GUIDE_ACCEL_GROW := 55.0
 ## 速度下限上限（格/秒）：制导接管时至少给这么快，免得"掰不动"
 const ROCKET_GUIDE_CAP := 14.0
 const RADAR_ROCKET_TURN_DEG_PER_SEC := 80.0
@@ -629,17 +632,38 @@ func _radar_guide_rockets(delta: float) -> void:
 		#      不然会出现一直转圈的情况）」
 		# 首次接管：把弹道的**当前速度**（水平 + 垂直）交给制导积分，保住"直线 -> 圆弧"的连续性。
 		if not p.steering:
-			var dv: Vector2 = p.dir_flat() * p.speed_flat()
+			# ⚠⚠ 第 111 轮修的**虫洞 bug**（用户：「火箭加速到最大速度就像进虫洞了一样直接消失了，
+			#   然后从鬼知道什么地方冒出来」）：
+			#   原来接管速度取 `p.speed_flat()` = `from->to 距离 / dur` —— 而 `dur` 是
+			#   **整段飞行的总时间**（`rocket_t_of_s(dist)`），所以那是**全程平均速度**，
+			#   不是"此刻的速度"。两者一处对不上，接管瞬间速度就跳变，位置一帧跨出去一大截。
+			#   正确做法：用火箭的**速度剖面**在当前**已飞距离**处的值 —— `rocket_speed_at(s)`。
+			var s_now: float = p.flown_dist()
+			var v_now: float = Ordnance.rocket_speed_at(s_now)
+			# ⚠⚠⚠ **顺序!** 必须**先读位置/高度，再打开 `steering`** ——
+			#   `pos()` / `height()` 在 `steering == true` 时返回 `steer_pos` / `steer_h`，
+			#   而那两个字段此刻还是初值 **(0,0)** / 1.5。先置 `steering` 再赋值 =
+			#   把火箭**瞬移到世界原点**，再从那里开始制导 ——
+			#   这就是用户看到的"进虫洞消失、从鬼知道什么地方冒出来"
+			#   （探针实测：接管那一帧位移 **10.62 格**，位置变成 (0.0, 0.0)）。
+			var pos_before: Vector2 = p.pos()
+			var h_before: float = p.height()
 			p.steering = true
-			p.steer_pos = p.pos()
-			p.steer_h = p.height()
-			p.steer_vel = dv
+			p.steer_pos = pos_before
+			p.steer_h = h_before
+			p.steer_vel = p.dir_flat() * v_now
 			p.steer_vy = p.speed_y()
-			p.steer_speed = maxf(dv.length(), 1.0)
-			p.guide_cap = maxf(p.steer_vel.length() * 1.25, ROCKET_GUIDE_CAP)
-			p.max_dist = p.flown + maxf(p.pos().distance_to(GridMath.unit_pos(tgt)) * 2.5, 24.0)
+			p.steer_speed = maxf(v_now, 1.0)
+			# 速度上限**不得超过火箭自己的极速**（留一点余量），杜绝"一帧跳很远"
+			p.guide_cap = minf(maxf(v_now * 1.25, ROCKET_GUIDE_CAP),
+				Ordnance.ROCKET_VMAX * 1.5)
+			p.max_dist = maxf(s_now + maxf(p.pos().distance_to(GridMath.unit_pos(tgt)) * 2.5, 24.0),
+				s_now + 24.0)
 			p.guide_accel = ROCKET_GUIDE_ACCEL0
 			p.guide_t = ROCKET_GUIDE_STEP          # 立刻做第一次判定
+			# ⚠ 落点同步到制导位置：否则 sink / 场地的"落点/爆点"仍读**旧的瞄准点**，
+			#   火箭就会"在别的地方（老国王背后）冒出来爆炸"。
+			p.to = p.steer_pos
 		# 每 100ms 一次判定：重算"指向目标落点"的**三维**方向，并让加速度**逐渐增大**
 		p.guide_t += delta
 		if p.guide_t >= ROCKET_GUIDE_STEP:
@@ -1445,7 +1469,10 @@ func _radar_tick_links() -> void:
 		if not _is_radar(u) or not u.is_alive():
 			continue
 		var st := _radar_state(u)
-		if st.links.is_empty():
+		# ⚠ 第 111 轮：**不能只看 `links`**。走出范围后 `links` 变空，若在这里 `continue`，
+		#   `prune_links` 就再也不会被调用 -> **永远无法自动重连**（这正是实测到的现象）。
+		#   只要 `roster`（连接队列）里还有人，就要继续每帧检查距离。
+		if st.links.is_empty() and st.roster.is_empty():
 			continue
 		var before := st.links.size()
 		Radar.prune_links(st, GridMath.unit_pos(u), func(nm: String) -> Vector2:
