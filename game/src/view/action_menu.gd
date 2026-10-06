@@ -215,8 +215,8 @@ func confirm_attack(break_armor: bool) -> void:
 	_st._attack_menu.visible = false
 	_st._attack_target = null
 	if t != null and t.is_alive():
-		# 第 111 轮：把**待确认的点击格**传下去当瞄准点（大单位锚点 ≠ 点击格）
-		_st.attack.attack_target_unit(t, break_armor, _st._pending_cell)
+		# ⚠ 第 111 轮**撤回**（同上）：恢复瞄准**紫色标定格**（`t.cell`）
+		_st.attack.attack_target_unit(t, break_armor)
 
 
 
